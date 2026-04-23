@@ -34,8 +34,9 @@ import (
 const (
 	// kubeadm upgrade apply reads cluster configuration from the kubeadm-config ConfigMap.
 	// Mixing --config with flags like --yes or --certificate-renewal now fails on newer kubeadm releases.
-	upgradeApplyCmd = "kubeadm upgrade apply --certificate-renewal=false --yes %s"
-	upradeNodeCmd   = "kubeadm upgrade node --certificate-renewal=false --skip-phases preflight"
+	upgradeApplyCmd            = "kubeadm upgrade apply --certificate-renewal=false --yes %s"
+	upgradeApplyIgnoreJobCheck = "kubeadm upgrade apply --certificate-renewal=false --ignore-preflight-errors=CreateJob --yes %s"
+	upradeNodeCmd              = "kubeadm upgrade node --certificate-renewal=false --skip-phases preflight"
 	//drainNodeCmd    = "kubectl drain %s --ignore-daemonsets"
 	cordonNodeCmd   = "kubectl cordon %s"
 	uncordonNodeCmd = "kubectl uncordon %s"
@@ -46,6 +47,24 @@ const (
 	installKubeletCmd = "cp -rf %s/kubelet /usr/bin"
 	installKubectlCmd = "cp -rf %s/kubectl /usr/bin"
 )
+
+func buildUpgradeApplyCmd(version string, ignoreCreateJob bool) string {
+	if ignoreCreateJob {
+		return fmt.Sprintf(upgradeApplyIgnoreJobCheck, version)
+	}
+	return fmt.Sprintf(upgradeApplyCmd, version)
+}
+
+func shouldRetryUpgradeApply(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "[ERROR CreateJob]") ||
+		(strings.Contains(msg, "CreateJob") &&
+			strings.Contains(msg, "upgrade-health-check") &&
+			strings.Contains(msg, "did not complete in 15s"))
+}
 
 func (k *KubeadmRuntime) upgradeCluster(version string) error {
 	logger.Info("Change ClusterConfiguration up to newVersion if need.")
@@ -96,23 +115,30 @@ func (k *KubeadmRuntime) upgradeMaster0(version string) error {
 		return err
 	}
 
+	if err = k.sshCmdAsync(master0ip, fmt.Sprintf(installKubeadmCmd, kubeBinaryPath)); err != nil {
+		return err
+	}
+
 	// force cri to pull the image
 	err = k.imagePull(master0ip, version)
 	if err != nil {
 		logger.Warn("image pull pre-upgrade failed: %s", err.Error())
 	}
 
+	if err = k.sshCmdAsync(master0ip, buildUpgradeApplyCmd(version, false)); err != nil {
+		if !shouldRetryUpgradeApply(err) {
+			return err
+		}
+		logger.Warn("retry kubeadm upgrade apply with CreateJob preflight ignored: %s", err.Error())
+		if err = k.sshCmdAsync(master0ip, buildUpgradeApplyCmd(version, true)); err != nil {
+			return err
+		}
+	}
+
 	err = k.sshCmdAsync(master0ip,
-		//install kubeadm:{version} at master0
-		fmt.Sprintf(installKubeadmCmd, kubeBinaryPath),
-		//execute  kubeadm upgrade apply {version} at master0
-		fmt.Sprintf(upgradeApplyCmd, version),
-		//kubectl cordon <node-to-cordon>
 		fmt.Sprintf(cordonNodeCmd, master0Name),
-		//install kubelet:{version},kubectl{version} at master0
 		fmt.Sprintf(installKubectlCmd, kubeBinaryPath),
 		fmt.Sprintf(installKubeletCmd, kubeBinaryPath),
-		//reload kubelet daemon
 		daemonReload,
 		restartKubelet,
 	)
@@ -149,6 +175,10 @@ func (k *KubeadmRuntime) upgradeOtherNodes(ips []string, version string) error {
 			return err
 		}
 
+		if err = k.sshCmdAsync(ip, fmt.Sprintf(installKubeadmCmd, kubeBinaryPath)); err != nil {
+			return err
+		}
+
 		// force cri to pull the image
 		err = k.imagePull(ip, version)
 		if err != nil {
@@ -157,8 +187,6 @@ func (k *KubeadmRuntime) upgradeOtherNodes(ips []string, version string) error {
 
 		logger.Info("upgrade node %s", nodename)
 		err = k.sshCmdAsync(ip,
-			//install kubeadm:{version} at the node
-			fmt.Sprintf(installKubeadmCmd, kubeBinaryPath),
 			//upgrade other control-plane and nodes
 			upradeNodeCmd,
 			//kubectl cordon <node-to-cordon>
