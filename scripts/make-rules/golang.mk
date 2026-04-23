@@ -71,11 +71,39 @@ go.build.%:
 
 	@if [ "$(COMMAND)" == "sealos" ] || [ "$(COMMAND)" == "sealctl" ]; then \
 		CGO_ENABLED=1; \
-		CC=x86_64-linux-gnu-gcc; \
-		if [ "$(ARCH)" == "arm64" ]; then \
-			CC=aarch64-linux-gnu-gcc; \
+		CC_BIN="$(CC)"; \
+		if [ -z "$$CC_BIN" ]; then \
+			if [ "$(OS)" == "$(HOST_GOOS)" ] && [ "$(ARCH)" == "$(HOST_GOARCH)" ]; then \
+				CC_BIN="$(HOST_GO_CC)"; \
+			elif [ "$(ARCH)" == "amd64" ]; then \
+				CC_BIN="$(CC_amd64)"; \
+				if [ -z "$$CC_BIN" ]; then \
+					for candidate in x86_64-linux-gnu-gcc amd64-linux-gnu-gcc gcc; do \
+						if command -v $$candidate >/dev/null 2>&1; then \
+							CC_BIN=$$candidate; \
+							break; \
+						fi; \
+					done; \
+				fi; \
+			elif [ "$(ARCH)" == "arm64" ]; then \
+				CC_BIN="$(CC_arm64)"; \
+				if [ -z "$$CC_BIN" ]; then \
+					for candidate in aarch64-linux-gnu-gcc aarch64-none-linux-gnu-gcc gcc; do \
+						if command -v $$candidate >/dev/null 2>&1; then \
+							CC_BIN=$$candidate; \
+							break; \
+						fi; \
+					done; \
+				fi; \
+			else \
+				CC_BIN="$(HOST_GO_CC)"; \
+			fi; \
 		fi; \
-		CGO_ENABLED=$$CGO_ENABLED CC=$$CC GOOS=$(OS) GOARCH=$(ARCH) $(GO) build $(GO_BUILD_FLAGS) -o $(BIN_DIR)/$(PLATFORM)/$(COMMAND) $(ROOT_PACKAGE)/cmd/$(COMMAND); \
+		if [ -z "$$CC_BIN" ]; then \
+			echo "no suitable C compiler found for $(PLATFORM); set CC, CC_$(ARCH), or install a compiler toolchain"; \
+			exit 1; \
+		fi; \
+		CGO_ENABLED=$$CGO_ENABLED CC=$$CC_BIN GOOS=$(OS) GOARCH=$(ARCH) $(GO) build $(GO_BUILD_FLAGS) -o $(BIN_DIR)/$(PLATFORM)/$(COMMAND) $(ROOT_PACKAGE)/cmd/$(COMMAND); \
 	else \
 		CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) $(GO) build $(GO_BUILD_FLAGS) -o $(BIN_DIR)/$(PLATFORM)/$(COMMAND) $(ROOT_PACKAGE)/cmd/$(COMMAND); \
 	fi

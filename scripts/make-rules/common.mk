@@ -46,6 +46,10 @@ ifeq ($(origin VERSION), undefined)
 VERSION := $(shell git describe --abbrev=0 --dirty --always --tags | sed 's/-/./g')
 endif
 
+HOST_GOOS ?= $(shell go env GOOS)
+HOST_GOARCH ?= $(shell go env GOARCH)
+HOST_GO_CC ?= $(shell go env CC)
+
 PLATFORMS ?= linux_arm64 linux_amd64
 
 # only support linux

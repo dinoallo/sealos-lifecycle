@@ -39,6 +39,15 @@ Options:
                    By default btrfs is excluded so local builds/tests do not
                    require btrfs kernel headers.
 
+  CC               Override the C compiler for CGO-enabled binaries.
+                   Example: make build BINS=sealos CC=gcc
+
+  CC_amd64         Override the C compiler for linux/amd64 CGO builds.
+                   Example: make build.multiarch BINS=sealos CC_amd64=x86_64-linux-gnu-gcc
+
+  CC_arm64         Override the C compiler for linux/arm64 CGO builds.
+                   Example: make build.multiarch BINS=sealos CC_arm64=aarch64-linux-gnu-gcc
+
   BINS             Binaries to build. Default is all binaries under cmd.
                    This option is available when using: make {build}(.multiarch)
                    Example: make build BINS="sealos sealctl"

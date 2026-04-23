@@ -94,4 +94,4 @@ make build
 
 1. clone code slow, your can use ghproxy: `git clone https://ghproxy.com/https://github.com/labring/sealos`
 2. build download package slow, you can use goproxy: `go env -w GOPROXY=https://goproxy.cn,direct && make build`
-3. `cgo: C compiler "x86_64-linux-gnu-gcc" not found: exec: "x86_64-linux-gnu-gcc": executable file not found in $PATH` you need install gnu-gcc, like: `apt-get install build-essential` or `yum -y install gcc-c++-x86_64-linux-gnu`
+3. If CGO builds cannot find a compiler, install a C toolchain such as `gcc` / `build-essential`, or override the compiler explicitly, for example: `make build BINS=sealos CC=gcc` or `make build.multiarch BINS=sealos CC_arm64=aarch64-linux-gnu-gcc`
