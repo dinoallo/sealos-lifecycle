@@ -107,13 +107,13 @@ validate_real_payloads() {
   local missing=()
   local path
   for path in \
-    "${containerd_root}/containerd" \
-    "${containerd_root}/ctr" \
-    "${containerd_root}/containerd-shim-runc-v2" \
-    "${containerd_root}/runc" \
-    "${kubernetes_root}/kubeadm" \
-    "${kubernetes_root}/kubelet" \
-    "${kubernetes_root}/kubectl"; do
+    "${containerd_root}/usr/bin/containerd" \
+    "${containerd_root}/usr/bin/ctr" \
+    "${containerd_root}/usr/bin/containerd-shim-runc-v2" \
+    "${containerd_root}/usr/bin/runc" \
+    "${kubernetes_root}/usr/bin/kubeadm" \
+    "${kubernetes_root}/usr/bin/kubelet" \
+    "${kubernetes_root}/usr/bin/kubectl"; do
     [[ -f "${path}" ]] || missing+=("${path}")
   done
   if ((${#missing[@]} > 0)); then
@@ -172,6 +172,14 @@ reload_systemd() {
   if command -v systemctl >/dev/null 2>&1; then
     log "reloading systemd units"
     systemctl daemon-reload
+  fi
+}
+
+stop_service_if_active() {
+  local service="$1"
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "${service}"; then
+    log "stopping ${service} before replacing host binaries"
+    systemctl stop "${service}"
   fi
 }
 
@@ -266,16 +274,18 @@ main() {
   log "using rendered bundle at ${RESOLVED_BUNDLE_DIR}"
 
   run_hook "${CONTAINERD_HOOKS}/preflight.sh" "${CONTAINERD_COMPONENT_ROOT}" "running containerd preflight hook"
+  stop_service_if_active containerd
   copy_tree "${CONTAINERD_ROOTFS}" "/"
   copy_file_to_host "${CONTAINERD_CONFIG}" "/etc/containerd/config.toml"
   reload_systemd
   run_hook "${CONTAINERD_HOOKS}/bootstrap.sh" "${CONTAINERD_COMPONENT_ROOT}" "running containerd bootstrap hook"
   run_hook "${CONTAINERD_HOOKS}/healthcheck.sh" "${CONTAINERD_COMPONENT_ROOT}" "running containerd healthcheck hook"
 
-  run_hook "${KUBERNETES_HOOKS}/preflight.sh" "${KUBERNETES_COMPONENT_ROOT}" "running kubernetes preflight hook"
+  stop_service_if_active kubelet
   copy_tree "${KUBERNETES_ROOTFS}" "/"
   copy_file_to_host "${KUBERNETES_KUBEADM_CONFIG}" "/etc/kubernetes/kubeadm.yaml"
   copy_file_to_host "${KUBERNETES_SYSCTL}" "/etc/sysctl.d/99-kubernetes.conf"
+  run_hook "${KUBERNETES_HOOKS}/preflight.sh" "${KUBERNETES_COMPONENT_ROOT}" "running kubernetes preflight hook"
   apply_sysctl_if_present "/etc/sysctl.d/99-kubernetes.conf"
   reload_systemd
   run_hook "${KUBERNETES_HOOKS}/bootstrap.sh" "${KUBERNETES_COMPONENT_ROOT}" "running kubernetes bootstrap hook"
