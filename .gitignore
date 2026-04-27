@@ -17,6 +17,7 @@ coverage.out
 tools/*
 tools/!*.go
 tmp
+scripts/poc/minimal-single-node/artifacts/
 **/.DS_Store
 node_modules
 vendor

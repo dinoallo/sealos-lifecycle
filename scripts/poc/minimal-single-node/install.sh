@@ -141,7 +141,37 @@ copy_tree() {
   local dst="$2"
   require_dir "${src}"
   mkdir -p "${dst}"
-  cp -a "${src}/." "${dst}"
+
+  while IFS= read -r -d '' path; do
+    local rel="${path#"${src}/"}"
+    local target="${dst%/}/${rel}"
+
+    if [[ -d "${path}" ]]; then
+      mkdir -p "${target}"
+      continue
+    fi
+
+    if [[ -L "${path}" ]]; then
+      install -d "$(dirname "${target}")"
+      rm -f "${target}"
+      ln -s "$(readlink "${path}")" "${target}"
+      continue
+    fi
+
+    if [[ -f "${path}" ]]; then
+      local target_dir
+      local tmp
+
+      target_dir="$(dirname "${target}")"
+      install -d "${target_dir}"
+      tmp="$(mktemp "${target}.sealos-tmp.XXXXXX")"
+      cp -a "${path}" "${tmp}"
+      mv -f "${tmp}" "${target}"
+      continue
+    fi
+
+    fail "unsupported rootfs entry type: ${path}"
+  done < <(find "${src}" -mindepth 1 -print0)
 }
 
 copy_file_to_host() {

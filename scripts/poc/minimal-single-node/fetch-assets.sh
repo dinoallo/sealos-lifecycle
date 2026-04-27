@@ -10,7 +10,7 @@ RUNC_VERSION="1.1.13"
 CILIUM_VERSION="1.15.0"
 CILIUM_CLI_VERSION="${CILIUM_CLI_VERSION:-}"
 CILIUM_VALUES="${SCRIPT_DIR}/packages/cilium/files/values/basic.yaml"
-CILIUM_MANIFEST_OUT="${WORKDIR}/cilium/cilium.yaml"
+CILIUM_MANIFEST_OUT="${CILIUM_MANIFEST_OUT:-}"
 
 usage() {
   cat <<'EOF'
@@ -34,7 +34,7 @@ EOF
 }
 
 log() {
-  printf '==> %s\n' "$*"
+  printf '==> %s\n' "$*" >&2
 }
 
 fail() {
@@ -90,6 +90,10 @@ parse_args() {
         ;;
     esac
   done
+
+  if [[ -z "${CILIUM_MANIFEST_OUT}" ]]; then
+    CILIUM_MANIFEST_OUT="${WORKDIR}/cilium/cilium.yaml"
+  fi
 }
 
 require_command() {
@@ -154,7 +158,7 @@ download_cilium_cli() {
   download "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/${tarball}.sha256sum" "${outdir}/${tarball}.sha256sum"
   (
     cd "${outdir}"
-    sha256sum --check "${tarball}.sha256sum"
+    sha256sum --quiet --check "${tarball}.sha256sum"
     tar -xzf "${tarball}"
     chmod +x cilium
   )

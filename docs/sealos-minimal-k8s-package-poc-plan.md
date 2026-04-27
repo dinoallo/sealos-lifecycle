@@ -2,110 +2,131 @@
 
 ## Status
 
-Draft
+Verified on this machine
 
 ## Goal
 
-Run a minimal proof of concept that:
+Prove that the new package and BOM flow in this repository can bootstrap a real
+single-node Kubernetes cluster with the narrowest possible scope:
 
-1. builds package directories directly on one machine
-2. renders them through the new package and BOM flow
-3. installs the rendered result on that same machine
-4. produces a working single-node Kubernetes cluster
+1. use three local package directories
+2. render them through `sealos sync render`
+3. stage real runtime and Kubernetes payloads into the packages
+4. install the rendered bundle on one Linux host
+5. validate that Kubernetes API, node readiness, and Cilium all come up
 
-The PoC is intentionally narrow. It is not a general reconcile loop and it is not a production installer.
+This PoC is intentionally narrow. It is not a generic `sync apply` engine, not
+a reconcile loop, and not a production installer.
 
-## Key Decision
+## What Already Exists In This Repo
 
-For the first PoC, **three packages are enough**:
+The PoC is no longer just a proposal. The repo already contains the main
+render-side pieces:
 
-- one `containerd` package
-- one `kubernetes` package
-- one `cni` package
+- BOM, package, hydration, and applied-state types under `pkg/distribution/*`
+- `sealos sync render` in `cmd/sealos/cmd/sync.go`
+- a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
+- runnable PoC assets under `scripts/poc/minimal-single-node/`
+- a PoC-only installer and validator:
+  - `scripts/poc/minimal-single-node/install.sh`
+  - `scripts/poc/minimal-single-node/validate.sh`
 
-That is only true if the following stay **outside** the package scope for now:
+The main repo and host path has now been proven on this machine. The remaining
+gaps are broader follow-up work rather than blockers for the PoC itself:
 
-- base OS provisioning
-- SSH orchestration and multi-node coordination
-- upgrades, rollback, and drift management
+- deciding which generated PoC assets should stay tracked versus generated
+- making fresh-host setup more automated
+- extending the PoC beyond one machine and one cluster
 
-In other words, the PoC target is:
+## Current Machine Reality
 
-- one Linux machine
-- kernel modules and basic host prerequisites already available
+This section records the current state of the machine after successful setup and
+PoC execution on 2026-04-27.
 
-## Recommended PoC Shape
+| Item | Current State | Impact |
+| --- | --- | --- |
+| OS / arch | Linux x86_64 | Matches the amd64 PoC packages. |
+| User | `root` | Satisfies the installer's root requirement. |
+| `gcc` | present at `/usr/bin/gcc` | Satisfies the CGO build requirement for `sealos`. |
+| `go` | `go1.23.1` on `PATH` | `make build BINS=sealos` works. |
+| `sealos` | present on `PATH` | `sealos sync render` works directly. |
+| `containerd`, `ctr`, `runc` | present and staged at PoC versions | Runtime payload is install-ready. |
+| `kubeadm`, `kubelet`, `kubectl` | present and staged at PoC versions | Kubernetes payload is install-ready. |
+| PID 1 | `systemd` | `install.sh` can manage services on this host. |
+| `systemctl is-system-running` | `running` | Confirms this host is valid for the PoC install path. |
+| swap | disabled and `swap.img.swap` masked | Satisfies kubeadm preflight and survives reboot. |
+| cluster state | single-node cluster is up | `kubectl` reports one `Ready` control-plane node with Cilium healthy. |
 
-### Cluster Topology
+Bottom line for this environment:
 
-- single-node control plane
-- same machine also acts as the worker
-- no HA
-- no external load balancer
-
-This is the fastest path to prove the package model can bootstrap a real cluster.
-
-### Package Set
-
-Recommended package set:
-
-- `containerd-runtime`
-- `kubernetes-rootfs`
-- `cilium-cni`
-
-Recommended Cilium profile for PoC v1:
-
-- kube-proxy-compatible mode
-- no Hubble
-- no cluster mesh
-- no encryption
-- no BGP or advanced routing features
-
-This keeps the PoC focused on proving package-based bootstrap, not on proving the full Cilium feature set.
-
-## Next Packaging Model After PoC
-
-Once the three-package PoC works, the next packaging model should stay coarse-grained:
-
-- keep `containerd-runtime` as a separate runtime package
-- keep Kubernetes node bootstrap assets inside `kubernetes-rootfs`
-- add a later `kubernetes-control-plane-patch` package for reusable SRE customization
-- add more separate packages only for components with an independent lifecycle, such as CSI or ingress
-
-The important design choice is to avoid splitting core Kubernetes daemons into per-binary packages too early. Most customization pressure belongs in a patch layer or hydrated inputs, not in separate packages for `kubelet`, `kube-apiserver`, or similar components.
+- compile succeeded
+- render succeeded
+- install succeeded
+- validation succeeded
 
 ## PoC Scope
 
 ### In Scope
 
-- package directories authored locally on disk
-- one BOM referencing the three local packages
+- local package directories loaded via `packageformat.LoadDir`
+- one BOM with three components
 - rendering via `sealos sync render`
-- a temporary PoC installer script that consumes the rendered bundle
-- validation that Kubernetes API, node readiness, and CNI come up successfully
+- a PoC-only host installer script
+- a PoC-only validation script
+- single-node Kubernetes bootstrap on one Linux host
 
 ### Out Of Scope
 
 - OCI build and push pipeline
 - multi-node join flow
-- long-running reconcile loop
 - generic `sync apply`
-- promotion, rollback, or drift workflows
+- upgrades, rollback, or drift workflows
+- long-running reconcile loop
 - secret management beyond local static files
 
-## Host Assumptions
+## Required PoC Shape
 
-The target machine should already satisfy:
+### Cluster Topology
 
-- Linux with `systemd`
-- root access
-- `iptables`, `mount`, `modprobe`, `sysctl`, `conntrack`, and `nsenter` available
-- swap disabled
-- required kernel modules available such as `overlay` and `br_netfilter`
-- required sysctls allowed, especially bridge networking and IP forwarding
-- BPF filesystem and cgroup mounts available for the chosen Cilium profile
+- single-node control plane
+- same machine also schedules workloads
+- no HA
+- no external load balancer
 
-If these assumptions are not true, the PoC should fail fast during preflight rather than trying to own those concerns in v1.
+### Package Set
+
+The first PoC should continue to use exactly these three packages:
+
+1. `containerd-runtime`
+2. `kubernetes-rootfs`
+3. `cilium-cni`
+
+That remains the right split for this repo because:
+
+- `containerd` has its own host lifecycle boundary
+- Kubernetes node bootstrap assets should move together
+- CNI should remain independently swappable
+
+Current Cilium profile in the repo:
+
+- `kubeProxyReplacement: false`
+- `operator.replicas: 1`
+- `hubble.enabled: false`
+
+## Repo Assets To Use
+
+| Path | Role |
+| --- | --- |
+| `scripts/poc/minimal-single-node/bom.yaml` | The PoC BOM. |
+| `scripts/poc/minimal-single-node/packages/containerd/` | Local `containerd-runtime` package. |
+| `scripts/poc/minimal-single-node/packages/kubernetes/` | Local `kubernetes-rootfs` package. |
+| `scripts/poc/minimal-single-node/packages/cilium/` | Local `cilium-cni` package. |
+| `scripts/poc/minimal-single-node/render.sh` | Convenience wrapper around `sealos sync render`. |
+| `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
+| `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
+| `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end fresh-host wrapper for build, fetch, stage, render, install, and validate. |
+| `scripts/poc/minimal-single-node/install.sh` | PoC-only installer for the rendered bundle. |
+| `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
 
 ## Package Responsibilities
 
@@ -115,38 +136,27 @@ Class:
 
 - `rootfs`
 
-Responsibility:
+Current manifest:
 
-- deliver the container runtime binaries and default host configuration
-- install the `containerd` service and runtime dependencies needed by kubelet
-- start and validate the runtime before Kubernetes bootstrap begins
+- rootfs payload at `rootfs/`
+- config file at `files/etc/containerd/config.toml`
+- hooks:
+  - `preflight`
+  - `bootstrap`
+  - `healthcheck`
 
-Expected contents:
+Current repo behavior:
 
-- `rootfs/`
-  - `containerd`
-  - `ctr`
-  - `containerd-shim-runc-v2`
-  - `runc`
-  - systemd unit or drop-in files
-- `files/etc/containerd/config.toml`
-- `hooks/preflight.sh`
-- `hooks/bootstrap.sh`
-- `hooks/healthcheck.sh`
+- the manifest models `preflight` as a hook named `preflight` with
+  `phase: bootstrap`
+- this matches the current package API, which has no separate `preflight`
+  phase
 
-Expected hook behavior:
+Host responsibility:
 
-- `preflight`
-  - verify required cgroup and filesystem prerequisites
-  - verify no conflicting runtime service is already bound to the expected socket
-- `bootstrap`
-  - copy runtime payload into host locations
-  - install or refresh the `containerd` unit or drop-ins
-  - write default `config.toml`
-  - enable and start `containerd`
-- `healthcheck`
-  - verify the `containerd` socket exists
-  - verify the service is active
+- install `containerd`, `ctr`, `containerd-shim-runc-v2`, and `runc`
+- write `/etc/containerd/config.toml`
+- enable and restart `containerd`
 
 ### 2. `kubernetes-rootfs`
 
@@ -154,41 +164,24 @@ Class:
 
 - `rootfs`
 
-Responsibility:
+Current manifest:
 
-- deliver Kubernetes node binaries and baseline host files
-- install kubelet service defaults
-- provide kubeadm configuration defaults
-- bootstrap the single-node control plane
+- rootfs payload at `rootfs/`
+- kubeadm config at `files/etc/kubernetes/kubeadm.yaml`
+- sysctl profile at `files/etc/sysctl.d/99-kubernetes.conf`
+- bootstrap manifests at `manifests/bootstrap/`
+- hooks:
+  - `preflight`
+  - `bootstrap`
+  - `healthcheck`
 
-Expected contents:
+Host responsibility:
 
-- `rootfs/`
-  - `kubeadm`
-  - `kubelet`
-  - `kubectl`
-  - systemd unit or drop-in files
-- `files/etc/kubernetes/kubeadm.yaml`
-- `files/etc/sysctl.d/99-kubernetes.conf`
-- `hooks/preflight.sh`
-- `hooks/bootstrap.sh`
-- `hooks/healthcheck.sh`
-
-Expected hook behavior:
-
-- `preflight`
-  - verify swap is off
-  - verify containerd socket exists
-  - verify required kernel modules and sysctls
-- `bootstrap`
-  - copy rootfs payload into host locations
-  - install or refresh kubelet unit/drop-ins
-  - apply sysctl settings
-  - run `kubeadm init --config ...`
-  - export admin kubeconfig
-- `healthcheck`
-  - verify API server is healthy
-  - verify node reaches `Ready`
+- install `kubeadm`, `kubelet`, and `kubectl`
+- write kubeadm and sysctl files
+- run `kubeadm init --config /etc/kubernetes/kubeadm.yaml`
+- export admin kubeconfig
+- apply bootstrap manifests after API readiness
 
 ### 3. `cilium-cni`
 
@@ -196,151 +189,173 @@ Class:
 
 - `application`
 
-Responsibility:
+Current manifest:
 
-- install the pod networking layer after the control plane is up
+- Cilium manifest at `manifests/cilium.yaml`
+- values file at `files/values/basic.yaml`
+- hook:
+  - `healthcheck`
 
-Expected contents:
+Host responsibility:
 
-- `manifests/cilium.yaml` or `manifests/`
-  - namespace
-  - service account
-  - RBAC
-  - config map
-  - daemon set
-  - operator deployment
-- optional `files/values.yaml` if parameterization is needed
-- optional `hooks/healthcheck.sh`
+- apply the Cilium manifest after Kubernetes bootstrap
+- wait for Cilium daemonset and operator rollout
 
-Expected behavior:
+## Important Repo Constraint: Placeholder Payloads
 
-- install after `kubernetes-rootfs` bootstrap succeeds
-- apply manifests with `kubectl apply -f`
-- wait until the Cilium daemonset and operator are ready
-- keep kube-proxy replacement disabled for PoC v1
+The package directories intentionally contain placeholder payloads today:
+
+- `scripts/poc/minimal-single-node/packages/containerd/rootfs/README`
+- `scripts/poc/minimal-single-node/packages/kubernetes/rootfs/README`
+- `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`
+
+That is enough for render-only validation because `packageformat.LoadDir`
+requires referenced files to exist, but it does not care whether they are real
+binaries.
+
+It is not enough for install-time execution:
+
+- `install.sh` explicitly rejects placeholder rootfs payloads
+- `install.sh` would also reject hook scripts if they were still placeholders
+- `install.sh` also checks that the staged Cilium manifest contains a real
+  daemonset and deployment payload
+
+Therefore, any real host run must stage real assets first and then re-render the
+bundle.
 
 ## BOM Shape
 
-The BOM should reference exactly three components:
+The current BOM already matches the intended three-component dependency chain:
 
 1. `containerd`
-2. `kubernetes`
-3. `cilium`
+2. `kubernetes` depends on `containerd`
+3. `cilium` depends on `kubernetes`
 
-Recommended ordering and dependency:
+That ordering is consumed by `hydrate.BuildPlanFromResolved`, which topologically
+sorts component dependencies before rendering.
 
-- `kubernetes` depends on `containerd`
-- `cilium` depends on `kubernetes`
+## Render Output Shape
 
-That lets the existing hydrate plan sort and render them in a sane order.
+`sealos sync render` currently materializes the desired state bundle to:
 
-Example conceptual shape:
+- `/root/.sealos/poc-minimal/distribution/bundles/current`
 
-```yaml
-apiVersion: distribution.sealos.io/v1alpha1
-kind: BOM
-metadata:
-  name: minimal-single-node
-spec:
-  revision: rev-poc-001
-  channel: alpha
-  components:
-    - name: containerd
-      kind: infra
-      version: v1.7.18
-      artifact:
-        name: containerd-runtime
-        image: local/poc/containerd-runtime:v1.7.18
-        digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
-    - name: kubernetes
-      kind: infra
-      version: v1.30.3
-      dependencies:
-        - containerd
-      artifact:
-        name: kubernetes-rootfs
-        image: local/poc/kubernetes-rootfs:v1.30.3
-        digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
-    - name: cilium
-      kind: infra
-      version: v1.15.0
-      dependencies:
-        - kubernetes
-      artifact:
-        name: cilium-cni
-        image: local/poc/cilium-cni:v1.15.0
-        digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
-```
+and applied state to:
 
-For the PoC, the image and digest fields can be placeholders as long as `sealos sync render` is invoked with local `--package-source` overrides for all three components.
+- `/root/.sealos/poc-minimal/distribution/applied-revision.yaml`
 
-## Recommended Repo Layout
+The bundle contains:
 
-Use repo-local paths under `scripts/` for runnable PoC assets:
+- `bundle.yaml`
+- `components/<name>/package.yaml`
+- `components/<name>/files/...`
 
-```text
-scripts/poc/minimal-single-node/
-  bom.yaml
-  packages/
-    containerd/
-      package.yaml
-      rootfs/
-      files/
-      hooks/
-    kubernetes/
-      package.yaml
-      rootfs/
-      files/
-      hooks/
-    cilium/
-      package.yaml
-      manifests/
-      hooks/
-  inputs/
-    kubeadm.yaml
-  render.sh
-  install.sh
-  validate.sh
-```
+This is not hypothetical. It is the behavior implemented by:
 
-Why this layout:
-
-- `docs/` keeps the plan
-- `scripts/poc/` keeps runnable assets together
-- package directories remain local and do not require OCI build/push yet
+- `pkg/distribution/reconcile/materialize.go`
+- `pkg/distribution/hydrate/render.go`
 
 ## Execution Plan
 
-### Phase 0: Author The Three Local Packages
+### Phase 0: Compile Or Obtain `sealos`
 
-Deliverables:
+Status:
 
-- `scripts/poc/minimal-single-node/packages/containerd/package.yaml`
-- `scripts/poc/minimal-single-node/packages/kubernetes/package.yaml`
-- `scripts/poc/minimal-single-node/packages/cilium/package.yaml`
-- minimal payload files for all three packages
+- completed on this machine
 
-Success criteria:
+Required version:
 
-- all three package directories load through `packageformat.LoadDir`
+- Go `1.23.1`, matching `go.work` and `go.mod`
 
-### Phase 1: Draft The BOM
-
-Deliverables:
-
-- `scripts/poc/minimal-single-node/bom.yaml`
-
-Success criteria:
-
-- BOM validates
-- BOM resolves against local package sources
-
-### Phase 2: Render The Desired Bundle
-
-Use the existing local-package override path:
+Build command once Go is installed:
 
 ```bash
-sealos sync render \
+cd /root/sealos-lifecycle
+make build BINS=sealos
+```
+
+Expected binary:
+
+```text
+/root/sealos-lifecycle/bin/linux_amd64/sealos
+```
+
+Success criteria:
+
+- `./bin/linux_amd64/sealos version` runs
+
+### Phase 1: Stage Real PoC Assets
+
+Status:
+
+- completed on this machine
+
+Fastest path on this machine:
+
+- reuse the already installed host binaries for containerd and Kubernetes
+- provide a real Cilium manifest
+
+Command shape:
+
+```bash
+cd /root/sealos-lifecycle
+scripts/poc/minimal-single-node/stage-assets.sh \
+  --kubelet-bin /usr/bin/kubelet \
+  --cilium-manifest /absolute/path/to/real/cilium.yaml
+```
+
+Notes:
+
+- on this machine, `stage-assets.sh` can auto-discover:
+  - `/usr/bin/containerd`
+  - `/usr/bin/containerd-shim-runc-v2`
+  - `/usr/bin/ctr`
+  - `/usr/bin/runc`
+  - `/usr/bin/kubeadm`
+  - `/usr/bin/kubectl`
+- `--kubelet-bin` is still required
+- `--cilium-manifest` is required unless a chart directory and `helm` are
+  provided
+
+Optional helper path if you want the repo to fetch assets instead:
+
+```bash
+cd /root/sealos-lifecycle
+assets_file=/tmp/poc-minimal-assets.env
+scripts/poc/minimal-single-node/fetch-assets.sh > "${assets_file}"
+set -a
+. "${assets_file}"
+set +a
+
+scripts/poc/minimal-single-node/stage-assets.sh \
+  --containerd-bin "${containerd_bin}" \
+  --containerd-shim-bin "${containerd_shim_bin}" \
+  --ctr-bin "${ctr_bin}" \
+  --runc-bin "${runc_bin}" \
+  --kubeadm-bin "${kubeadm_bin}" \
+  --kubelet-bin "${kubelet_bin}" \
+  --kubectl-bin "${kubectl_bin}" \
+  --cilium-manifest "${cilium_manifest}"
+```
+
+Success criteria:
+
+- real binaries exist under:
+  - `packages/containerd/rootfs/usr/bin/`
+  - `packages/kubernetes/rootfs/usr/bin/`
+- `packages/cilium/manifests/cilium.yaml` is a real rendered install manifest
+
+### Phase 2: Render The Bundle
+
+Status:
+
+- completed on this machine
+
+Recommended command:
+
+```bash
+cd /root/sealos-lifecycle
+./bin/linux_amd64/sealos sync render \
   --file scripts/poc/minimal-single-node/bom.yaml \
   --cluster poc-minimal \
   --package-source containerd=scripts/poc/minimal-single-node/packages/containerd \
@@ -348,160 +363,215 @@ sealos sync render \
   --package-source cilium=scripts/poc/minimal-single-node/packages/cilium
 ```
 
-Expected output:
+Alternative wrapper once the binary is on `PATH`:
 
-- `~/.sealos/poc-minimal/distribution/bundles/current`
-- `~/.sealos/poc-minimal/distribution/applied-revision.yaml`
+```bash
+cd /root/sealos-lifecycle
+scripts/poc/minimal-single-node/render.sh
+```
 
 Success criteria:
 
 - render completes without buildah or registry usage
-- desired-state digest is produced
-- applied revision is persisted
+- `bundle.yaml` exists under
+  `/root/.sealos/poc-minimal/distribution/bundles/current`
+- a new desired-state digest is emitted
+- `/root/.sealos/poc-minimal/distribution/applied-revision.yaml` is updated
 
-### Phase 3: Implement A Temporary PoC Installer
+### Phase 3: Install On A Real Host
 
-Add a narrow script:
+Status:
 
-- `scripts/poc/minimal-single-node/install.sh`
+- completed on this machine
 
-This script should be intentionally specific to the PoC bundle layout, not a generic long-term installer.
+Minimum host prerequisites:
 
-Responsibilities:
+- Linux host or VM with `systemd` as PID 1
+- root access
+- swap disabled
+- suitable cgroup and BPF mounts for the chosen Cilium profile
+- kernel modules available:
+  - `overlay`
+  - `br_netfilter`
+- commands available:
+  - `systemctl`
+  - `modprobe`
+  - `sysctl`
+  - `kubectl`
+  - `kubeadm`
+  - `kubelet`
 
-1. locate the rendered bundle
-2. install the containerd runtime payload onto the host
-3. execute containerd preflight and bootstrap hooks
-4. install the Kubernetes rootfs payload onto the host
-5. execute Kubernetes preflight and bootstrap hooks
-6. apply Cilium manifests
-7. wait for cluster readiness
+Command used on this host:
 
-Suggested install sequence:
+```bash
+cd /root/sealos-lifecycle
+scripts/poc/minimal-single-node/install.sh \
+  --cluster poc-minimal \
+  --bundle-dir /root/.sealos/poc-minimal/distribution/bundles/current
+```
 
-1. Verify root privileges.
-2. Copy `components/containerd/files/rootfs/*` into `/`.
-3. Copy declared runtime config files into their target host paths.
-4. Run `components/containerd/files/hooks/preflight.sh`.
-5. Run `components/containerd/files/hooks/bootstrap.sh`.
-6. Copy `components/kubernetes/files/rootfs/*` into `/`.
-7. Copy declared Kubernetes config files into their target host paths.
-8. Run `components/kubernetes/files/hooks/preflight.sh`.
-9. Run `components/kubernetes/files/hooks/bootstrap.sh`.
-10. Export `KUBECONFIG=/etc/kubernetes/admin.conf`.
-11. Apply `components/cilium/files/manifests/...`.
-12. Wait for node and system pods to become ready.
+Expected install order in the current script:
+
+1. containerd preflight
+2. containerd rootfs and config copy
+3. containerd bootstrap
+4. containerd healthcheck
+5. Kubernetes rootfs and config copy
+6. Kubernetes preflight
+7. sysctl apply
+8. Kubernetes bootstrap
+9. wait for API and remove control-plane taints
+10. apply Kubernetes bootstrap manifests
+11. Kubernetes healthcheck
+12. apply Cilium manifests
+13. Cilium healthcheck
+14. optional `validate.sh`
 
 Success criteria:
 
+- `/etc/kubernetes/admin.conf` exists
 - `kubectl get nodes` shows one `Ready` node
-- `kubectl -n kube-system get pods` shows control plane and Cilium healthy
+- control plane and Cilium workloads are healthy
 
-### Phase 4: Add Validation Script
+### Phase 4: Validate
 
-Add:
+Status:
 
-- `scripts/poc/minimal-single-node/validate.sh`
+- completed on this machine
 
-Checks:
-
-- API server health endpoint
-- node readiness
-- `coredns` readiness
-- Cilium daemonset readiness
-- Cilium operator readiness
-- ability to create a basic test pod
-
-Minimal success command set:
+Command:
 
 ```bash
-kubectl get nodes
-kubectl get pods -A
-kubectl run smoke --image=busybox:1.36 --restart=Never --command -- sleep 30
-kubectl wait --for=condition=Ready pod/smoke --timeout=120s
+cd /root/sealos-lifecycle
+scripts/poc/minimal-single-node/validate.sh \
+  --cluster poc-minimal \
+  --bundle-dir /root/.sealos/poc-minimal/distribution/bundles/current \
+  --kubeconfig /etc/kubernetes/admin.conf
 ```
 
-## Suggested Milestones
+Validation checks already implemented:
+
+- API readiness via `/readyz`
+- node readiness
+- `coredns` rollout
+- `cilium` daemonset rollout
+- `cilium-operator` deployment rollout
+- smoke pod scheduling and readiness
+
+## Milestone Status
 
 ### Milestone 1: Render-Only PoC
 
-Goal:
+Status:
 
-- prove the three package directories and BOM can render deterministically
+- completed on this machine
 
 Exit criteria:
 
 - `sealos sync render` succeeds from local package sources
 
-### Milestone 2: Single-Node Bootstrap PoC
+### Milestone 2: Real-Payload Bundle
 
-Goal:
+Status:
 
-- bootstrap one control-plane node from the rendered bundle
+- completed on this machine
 
 Exit criteria:
 
-- API server is running
+- placeholder payloads are replaced with real runtime, Kubernetes, and Cilium
+  assets
+- bundle is re-rendered after staging
+
+### Milestone 3: Single-Node Host Bootstrap
+
+Status:
+
+- completed on this machine
+
+Exit criteria:
+
+- install succeeds on a real systemd host or VM
+- API server is healthy
 - node is `Ready`
 
-### Milestone 3: CNI-Complete PoC
+### Milestone 4: CNI-Complete PoC
 
-Goal:
+Status:
 
-- add pod networking and run a test pod
+- completed on this machine
 
 Exit criteria:
 
 - Cilium is healthy
-- test pod reaches `Ready`
+- smoke pod reaches `Ready`
 
-## Risks
+## Main Risks
 
-### Risk: Three packages are not actually enough
-
-This is the main architectural risk.
+### Risk: Confusing render-ready with install-ready
 
 Mitigation:
 
-- keep the runtime package narrowly scoped to `containerd`
-- if needed, add a later patch package for runtime or host overlays rather than overloading the Kubernetes package
+- keep the doc explicit that placeholders are acceptable for render tests but
+  not for host bootstrap
+- always stage assets before the final render used for install
 
-### Risk: Bootstrap logic becomes too installer-specific
-
-Mitigation:
-
-- keep `install.sh` clearly labeled as PoC-only
-- avoid turning it into the final `sync apply` design
-
-### Risk: CNI choice creates unnecessary complexity
+### Risk: Repeatability on a fresh host
 
 Mitigation:
 
-- keep Cilium in kube-proxy-compatible mode
-- defer Hubble, encryption, BGP, and kube-proxy replacement
+- keep the repo scripts executable and scriptable
+- keep generated artifacts out of git by default
+- preserve the exact package versions and host prerequisites in this doc
 
-## Recommended Next Implementation Order
+### Risk: Missing build prerequisite clarity
 
-1. Create the `containerd-runtime` PoC package directory.
-2. Create the `kubernetes-rootfs` PoC package directory.
-3. Create the `cilium-cni` PoC package directory.
-4. Add the PoC BOM.
-5. Verify `sealos sync render` with local package sources.
-6. Implement `install.sh`.
-7. Implement `validate.sh`.
+Mitigation:
+
+- require Go `1.23.1`
+- keep `make build BINS=sealos` as the single supported compile path in the doc
+
+### Risk: Hidden host preflight failures
+
+Mitigation:
+
+- keep swap disabled
+- fail fast on `systemctl`, `modprobe`, containerd socket, and kubeadm
+  prerequisites
+
+## Recommended Next Actions
+
+1. Reboot this host once and rerun a short health check to confirm swap stays
+   disabled and the cluster survives restart as expected.
+2. Decide whether the real Cilium manifest under
+   `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`
+   should remain tracked or return to a generated-only workflow.
+3. Use `scripts/poc/minimal-single-node/bootstrap.sh` as the default repeatable
+   path for fresh-host setup, and extend it only if new host prerequisites or
+   package inputs appear.
+4. If this PoC will be reused, add a reset or cleanup script for tearing down
+   the single-node cluster between runs.
 
 ## Bottom Line
 
-Yes, a minimal PoC can reasonably start with:
+This repo already contains the correct minimal shape for the package-based
+Kubernetes PoC:
 
-- one container runtime package
+- one `containerd` package
 - one Kubernetes package
-- one CNI package
+- one Cilium package
+- one BOM
+- one render command
+- one end-to-end bootstrap wrapper
+- one PoC-only installer
+- one PoC-only validator
 
-But only if the PoC explicitly assumes:
+The core PoC is no longer hypothetical in this repo or on this host:
 
-- single-node target
-- runtime-specific packaging remains narrowly scoped
-- temporary installer script instead of a generic apply engine
+- `sealos` built successfully
+- real payloads were staged successfully
+- the bundle rendered successfully
+- the single-node control plane bootstrapped successfully
+- Cilium became healthy
+- the smoke pod reached `Ready`
 
-That is the narrowest path that proves the new package model can bootstrap a real cluster without first solving the full reconcile/apply problem.
+The next work is hardening and repeatability, not first-time feasibility.
