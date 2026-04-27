@@ -47,7 +47,7 @@ Defaults:
   --ctr-bin:        command -v ctr
   --runc-bin:       command -v runc
   --kubectl-bin:    command -v kubectl
-  --kubeadm-bin:    /home/allosaurus/Workspace/kubernetes/_output/local/go/bin/kubeadm if present, else command -v kubeadm
+  --kubeadm-bin:    command -v kubeadm
 EOF
 }
 
@@ -129,13 +129,7 @@ resolve_default_binaries() {
   [[ -n "${RUNC_BIN}" ]] || RUNC_BIN="$(command -v runc || true)"
   [[ -n "${KUBECTL_BIN}" ]] || KUBECTL_BIN="$(command -v kubectl || true)"
 
-  if [[ -z "${KUBEADM_BIN}" ]]; then
-    if [[ -x "/home/allosaurus/Workspace/kubernetes/_output/local/go/bin/kubeadm" ]]; then
-      KUBEADM_BIN="/home/allosaurus/Workspace/kubernetes/_output/local/go/bin/kubeadm"
-    else
-      KUBEADM_BIN="$(command -v kubeadm || true)"
-    fi
-  fi
+  [[ -n "${KUBEADM_BIN}" ]] || KUBEADM_BIN="$(command -v kubeadm || true)"
 }
 
 require_file() {

@@ -20,13 +20,18 @@ usage() {
 Usage:
   bootstrap.sh [options]
 
-Runs the minimal single-node PoC end-to-end:
+Runs the minimal single-node PoC on a prepared Linux host:
   1. build sealos
   2. fetch assets
   3. stage assets into package directories
   4. render the bundle
   5. install the rendered bundle
   6. validate the cluster
+
+This wrapper expects host prerequisites to already be in place:
+  - systemd is running
+  - swap is disabled
+  - conntrack, crictl, and socat are installed
 
 Options:
   --cluster NAME

@@ -203,15 +203,19 @@ Host responsibility:
 
 ## Important Repo Constraint: Placeholder Payloads
 
-The package directories intentionally contain placeholder payloads today:
+The package directories intentionally still contain placeholder payloads for the
+runtime and Kubernetes rootfs content:
 
 - `scripts/poc/minimal-single-node/packages/containerd/rootfs/README`
 - `scripts/poc/minimal-single-node/packages/kubernetes/rootfs/README`
-- `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`
 
 That is enough for render-only validation because `packageformat.LoadDir`
 requires referenced files to exist, but it does not care whether they are real
 binaries.
+
+The Cilium package is different now: `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`
+is a tracked generated manifest because the package directory is meant to remain
+install-ready once assets have been refreshed.
 
 It is not enough for install-time execution:
 
