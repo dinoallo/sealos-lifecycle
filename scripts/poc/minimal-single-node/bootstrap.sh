@@ -107,6 +107,44 @@ ensure_command() {
   command -v "${name}" >/dev/null 2>&1 || fail "required command not found: ${name}"
 }
 
+ensure_swap_disabled() {
+  if swapon --noheadings --show | grep -q .; then
+    fail "swap must be disabled before running bootstrap.sh"
+  fi
+}
+
+ensure_systemd_ready() {
+  local state
+
+  state="$(systemctl is-system-running 2>/dev/null || true)"
+  case "${state}" in
+    running|degraded)
+      return
+      ;;
+    *)
+      fail "systemd is not ready for host mutation (state: ${state:-unknown})"
+      ;;
+  esac
+}
+
+preflight_host() {
+  if (( SKIP_INSTALL != 0 )); then
+    return
+  fi
+
+  log "checking host prerequisites"
+  ensure_command systemctl
+  ensure_command modprobe
+  ensure_command sysctl
+  ensure_command swapon
+  ensure_command conntrack
+  ensure_command crictl
+  ensure_command socat
+
+  ensure_swap_disabled
+  ensure_systemd_ready
+}
+
 resolve_sealos_bin() {
   if [[ -x "${SEALOS_BIN}" ]]; then
     return
@@ -186,7 +224,11 @@ validate_cluster() {
 main() {
   trap cleanup EXIT
   parse_args "$@"
+  if (( SKIP_INSTALL != 0 )); then
+    SKIP_VALIDATE=1
+  fi
   require_root_if_needed
+  preflight_host
 
   build_sealos
   resolve_sealos_bin

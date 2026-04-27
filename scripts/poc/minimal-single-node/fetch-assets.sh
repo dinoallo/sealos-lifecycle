@@ -8,7 +8,7 @@ KUBERNETES_VERSION="v1.30.3"
 CONTAINERD_VERSION="1.7.18"
 RUNC_VERSION="1.1.13"
 CILIUM_VERSION="1.15.0"
-CILIUM_CLI_VERSION="${CILIUM_CLI_VERSION:-}"
+CILIUM_CLI_VERSION="${CILIUM_CLI_VERSION:-v0.19.2}"
 CILIUM_VALUES="${SCRIPT_DIR}/packages/cilium/files/values/basic.yaml"
 CILIUM_MANIFEST_OUT="${CILIUM_MANIFEST_OUT:-}"
 
@@ -140,16 +140,7 @@ download_runc() {
   chmod +x "${outdir}/runc"
 }
 
-resolve_cilium_cli_version() {
-  if [[ -n "${CILIUM_CLI_VERSION}" ]]; then
-    return
-  fi
-  CILIUM_CLI_VERSION="$(curl -fsSL https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)"
-}
-
 download_cilium_cli() {
-  resolve_cilium_cli_version
-
   local outdir="${WORKDIR}/cilium-cli/${CILIUM_CLI_VERSION}"
   local tarball="cilium-linux-${ARCH}.tar.gz"
   install -d "${outdir}"
@@ -174,6 +165,10 @@ render_cilium_manifest() {
     --dry-run \
     --version "${CILIUM_VERSION}" \
     -f "${CILIUM_VALUES}" > "${CILIUM_MANIFEST_OUT}"
+
+  # Normalize generated output so reruns do not create whitespace-only diffs.
+  sed -i 's/[[:space:]]\+$//' "${CILIUM_MANIFEST_OUT}"
+  sed -i '${/^$/d;}' "${CILIUM_MANIFEST_OUT}"
 }
 
 print_summary() {
