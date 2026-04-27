@@ -1,0 +1,93 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: kubernetes-production-rootfs
+  labels:
+    app.kubernetes.io/name: kubernetes
+    distribution.sealos.io/example: "true"
+    distribution.sealos.io/profile: production
+spec:
+  component: kubernetes
+  version: v1.30.3
+  class: rootfs
+  compatibility:
+    kubernetes: ">=1.30.0 <1.31.0"
+    sealos: ">=4.0.0"
+    platforms:
+      - os: linux
+        arch: amd64
+      - os: linux
+        arch: arm64
+  dependencies:
+    - name: container-runtime
+      optional: true
+    - name: registry-mirror
+      optional: true
+  inputs:
+    - name: kubeadm-cluster-config
+      type: configFile
+      path: files/etc/kubernetes/kubeadm.yaml
+      format: yaml
+      required: true
+    - name: audit-policy
+      type: configFile
+      path: files/etc/kubernetes/audit-policy.yaml
+      format: yaml
+    - name: image-repository-overrides
+      type: valuesFile
+      path: files/values/images.yaml
+      format: yaml
+    - name: kubelet-extra-env
+      type: env
+      path: env/KUBELET_EXTRA_ARGS
+  contents:
+    - name: kubernetes-rootfs
+      type: rootfs
+      path: rootfs/
+      mediaType: application/vnd.sealos.rootfs.layer.v1+tar
+      required: true
+    - name: kubeadm-defaults
+      type: file
+      path: files/etc/kubernetes/kubeadm.yaml
+      mediaType: application/yaml
+    - name: audit-policy
+      type: file
+      path: files/etc/kubernetes/audit-policy.yaml
+      mediaType: application/yaml
+    - name: image-overrides
+      type: values
+      path: files/values/images.yaml
+      mediaType: application/yaml
+    - name: sysctl-profile
+      type: file
+      path: files/etc/sysctl.d/99-kubernetes.conf
+      mediaType: text/plain
+    - name: bootstrap-manifests
+      type: manifest
+      path: manifests/bootstrap/
+      mediaType: application/yaml
+    - name: healthcheck-manifest
+      type: manifest
+      path: manifests/healthcheck/job.yaml
+      mediaType: application/yaml
+  hooks:
+    - name: preflight
+      phase: bootstrap
+      target: firstMaster
+      path: hooks/preflight.sh
+      args:
+        - --mode=preflight
+      timeoutSeconds: 120
+    - name: bootstrap-nodes
+      phase: bootstrap
+      target: allNodes
+      path: hooks/bootstrap.sh
+      args:
+        - --with-sysctl
+        - --with-kubeadm-config=files/etc/kubernetes/kubeadm.yaml
+      timeoutSeconds: 600
+    - name: healthcheck
+      phase: healthcheck
+      target: cluster
+      path: hooks/healthcheck.sh
+      timeoutSeconds: 180

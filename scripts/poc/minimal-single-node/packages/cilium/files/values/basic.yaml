@@ -1,0 +1,5 @@
+kubeProxyReplacement: false
+operator:
+  replicas: 1
+hubble:
+  enabled: false

@@ -1,0 +1,61 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: kubernetes-rootfs
+  labels:
+    app.kubernetes.io/name: kubernetes
+    distribution.sealos.io/example: "true"
+    distribution.sealos.io/profile: poc
+spec:
+  component: kubernetes
+  version: v1.30.3
+  class: rootfs
+  compatibility:
+    kubernetes: ">=1.30.0 <1.31.0"
+    sealos: ">=4.0.0"
+    platforms:
+      - os: linux
+        arch: amd64
+  dependencies:
+    - name: containerd
+      version: v1.7.18
+  inputs:
+    - name: kubeadm-cluster-config
+      type: configFile
+      path: files/etc/kubernetes/kubeadm.yaml
+      format: yaml
+      required: true
+  contents:
+    - name: kubernetes-rootfs
+      type: rootfs
+      path: rootfs/
+      mediaType: application/vnd.sealos.rootfs.layer.v1+tar
+      required: true
+    - name: kubeadm-defaults
+      type: file
+      path: files/etc/kubernetes/kubeadm.yaml
+      mediaType: application/yaml
+    - name: sysctl-profile
+      type: file
+      path: files/etc/sysctl.d/99-kubernetes.conf
+      mediaType: text/plain
+    - name: bootstrap-manifests
+      type: manifest
+      path: manifests/bootstrap/
+      mediaType: application/yaml
+  hooks:
+    - name: preflight
+      phase: bootstrap
+      target: firstMaster
+      path: hooks/preflight.sh
+      timeoutSeconds: 120
+    - name: bootstrap
+      phase: bootstrap
+      target: allNodes
+      path: hooks/bootstrap.sh
+      timeoutSeconds: 600
+    - name: healthcheck
+      phase: healthcheck
+      target: cluster
+      path: hooks/healthcheck.sh
+      timeoutSeconds: 180

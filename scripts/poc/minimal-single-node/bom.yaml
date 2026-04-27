@@ -1,0 +1,36 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: BOM
+metadata:
+  name: minimal-single-node
+  labels:
+    distribution.sealos.io/example: "true"
+    distribution.sealos.io/profile: poc
+spec:
+  revision: rev-poc-001
+  channel: alpha
+  components:
+    - name: containerd
+      kind: infra
+      version: v1.7.18
+      artifact:
+        name: containerd-runtime
+        image: local/poc/containerd-runtime:v1.7.18
+        digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    - name: kubernetes
+      kind: infra
+      version: v1.30.3
+      dependencies:
+        - containerd
+      artifact:
+        name: kubernetes-rootfs
+        image: local/poc/kubernetes-rootfs:v1.30.3
+        digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    - name: cilium
+      kind: infra
+      version: v1.15.0
+      dependencies:
+        - kubernetes
+      artifact:
+        name: cilium-cni
+        image: local/poc/cilium-cni:v1.15.0
+        digest: sha256:3333333333333333333333333333333333333333333333333333333333333333

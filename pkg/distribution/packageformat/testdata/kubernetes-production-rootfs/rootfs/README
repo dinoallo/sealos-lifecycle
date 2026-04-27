@@ -1,0 +1,2 @@
+This directory stands in for the production Kubernetes node rootfs payload.
+It would normally contain binaries, systemd units, and baseline host files.

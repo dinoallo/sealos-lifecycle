@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubeadm-bootstrap-defaults
+  namespace: kube-system
+data:
+  source: package-defaults

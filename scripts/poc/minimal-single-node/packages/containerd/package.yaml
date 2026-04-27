@@ -1,0 +1,49 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: containerd-runtime
+  labels:
+    app.kubernetes.io/name: containerd
+    distribution.sealos.io/example: "true"
+    distribution.sealos.io/profile: poc
+spec:
+  component: containerd
+  version: v1.7.18
+  class: rootfs
+  compatibility:
+    sealos: ">=4.0.0"
+    platforms:
+      - os: linux
+        arch: amd64
+  inputs:
+    - name: containerd-config
+      type: configFile
+      path: files/etc/containerd/config.toml
+      format: toml
+      required: true
+  contents:
+    - name: runtime-rootfs
+      type: rootfs
+      path: rootfs/
+      mediaType: application/vnd.sealos.rootfs.layer.v1+tar
+      required: true
+    - name: runtime-config
+      type: file
+      path: files/etc/containerd/config.toml
+      mediaType: text/plain
+  hooks:
+    - name: preflight
+      phase: bootstrap
+      target: allNodes
+      path: hooks/preflight.sh
+      timeoutSeconds: 120
+    - name: bootstrap
+      phase: bootstrap
+      target: allNodes
+      path: hooks/bootstrap.sh
+      timeoutSeconds: 300
+    - name: healthcheck
+      phase: healthcheck
+      target: allNodes
+      path: hooks/healthcheck.sh
+      timeoutSeconds: 120

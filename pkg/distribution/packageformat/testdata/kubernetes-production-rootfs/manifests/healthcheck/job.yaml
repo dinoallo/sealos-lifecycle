@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kubernetes-bootstrap-healthcheck
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: kubectl
+          image: registry.k8s.io/kubectl:v1.30.3
+          command:
+            - /bin/sh
+            - -c
+            - kubectl get nodes

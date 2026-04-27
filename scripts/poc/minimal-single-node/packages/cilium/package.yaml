@@ -1,0 +1,41 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: cilium-cni
+  labels:
+    app.kubernetes.io/name: cilium
+    distribution.sealos.io/example: "true"
+    distribution.sealos.io/profile: poc
+spec:
+  component: cilium
+  version: v1.15.0
+  class: application
+  compatibility:
+    kubernetes: ">=1.30.0 <1.31.0"
+    sealos: ">=4.0.0"
+    platforms:
+      - os: linux
+        arch: amd64
+  dependencies:
+    - name: kubernetes
+      version: v1.30.3
+  inputs:
+    - name: cilium-values
+      type: valuesFile
+      path: files/values/basic.yaml
+      format: yaml
+  contents:
+    - name: cilium-manifests
+      type: manifest
+      path: manifests/cilium.yaml
+      mediaType: application/yaml
+    - name: cilium-values
+      type: values
+      path: files/values/basic.yaml
+      mediaType: application/yaml
+  hooks:
+    - name: healthcheck
+      phase: healthcheck
+      target: cluster
+      path: hooks/healthcheck.sh
+      timeoutSeconds: 180

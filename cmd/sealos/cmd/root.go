@@ -85,6 +85,7 @@ func init() {
 			Message: "Experimental Commands:",
 			Commands: []*cobra.Command{
 				newRegistryCmd(rootCmd.Name()),
+				newSyncCmd(),
 			},
 		},
 		{

@@ -1,0 +1,24 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: BOM
+metadata:
+  name: default-platform-production
+  labels:
+    distribution.sealos.io/channel-track: beta
+    distribution.sealos.io/example: "true"
+spec:
+  revision: rev-20240424-prod
+  channel: beta
+  baseArtifacts:
+    - name: linux-base
+      image: registry.example.io/sealos/platform-base:2024.04.24
+      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      platform: linux/amd64
+  components:
+    - name: kubernetes
+      kind: infra
+      version: v1.30.3
+      artifact:
+        name: kubernetes-production-rootfs
+        image: registry.example.io/sealos/kubernetes-production-rootfs:v1.30.3
+        digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      required: true
