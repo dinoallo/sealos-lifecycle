@@ -69,6 +69,9 @@ func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppliedRevision() error = %v", err)
 	}
+	if got, want := doc.Status.State, state.StateDirty; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
+	}
 	if got, want := doc.Spec.LocalPatchRevision, "local-rev-1"; got != want {
 		t.Fatalf("spec.localPatchRevision = %q, want %q", got, want)
 	}
@@ -157,6 +160,9 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 	doc, err := state.LoadAppliedRevision("poc-minimal")
 	if err != nil {
 		t.Fatalf("LoadAppliedRevision() error = %v", err)
+	}
+	if got, want := doc.Status.State, state.StateDirty; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
 	}
 	if got, want := doc.Spec.BOM.Name, "minimal-single-node"; got != want {
 		t.Fatalf("spec.bom.name = %q, want %q", got, want)

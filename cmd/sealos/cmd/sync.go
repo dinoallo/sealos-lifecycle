@@ -38,10 +38,11 @@ var newSyncBuildah syncBuildahFactory = buildah.New
 func newSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Experimental multi-cluster distribution workflows",
+		Short: "Experimental distribution workflows",
 		Args:  cobra.NoArgs,
 	}
 	cmd.AddCommand(newSyncRenderCmd())
+	cmd.AddCommand(newSyncApplyCmd())
 	return cmd
 }
 
@@ -103,6 +104,68 @@ func newSyncRenderCmd() *cobra.Command {
 }
 
 type syncRenderOutput struct {
+	ClusterName        string `json:"clusterName" yaml:"clusterName"`
+	BOMName            string `json:"bomName" yaml:"bomName"`
+	Revision           string `json:"revision" yaml:"revision"`
+	Channel            string `json:"channel" yaml:"channel"`
+	BundlePath         string `json:"bundlePath" yaml:"bundlePath"`
+	DesiredStateDigest string `json:"desiredStateDigest" yaml:"desiredStateDigest"`
+	AppliedRevision    string `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
+}
+
+func newSyncApplyCmd() *cobra.Command {
+	var flags struct {
+		clusterName    string
+		bundleDir      string
+		kubeconfigPath string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "apply",
+		Short: "Apply a rendered desired-state bundle to a prepared single-node host",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bundlePath := flags.bundleDir
+			if bundlePath == "" {
+				bundlePath = reconcile.CurrentBundlePath(flags.clusterName)
+			}
+
+			result, err := reconcile.Apply(reconcile.ApplyOptions{
+				ClusterName:    flags.clusterName,
+				BundlePath:     bundlePath,
+				KubeconfigPath: flags.kubeconfigPath,
+				Stderr:         cmd.ErrOrStderr(),
+			})
+			if err != nil {
+				return err
+			}
+
+			out := syncApplyOutput{
+				ClusterName:        flags.clusterName,
+				BOMName:            result.Bundle.Spec.BOMName,
+				Revision:           result.Bundle.Spec.Revision,
+				Channel:            string(result.Bundle.Spec.Channel),
+				BundlePath:         result.BundlePath,
+				DesiredStateDigest: result.DesiredStateDigest,
+				AppliedRevision:    state.AppliedRevisionPath(flags.clusterName),
+			}
+			data, err := yaml.Marshal(out)
+			if err != nil {
+				return fmt.Errorf("marshal apply result: %w", err)
+			}
+			if _, err := cmd.OutOrStdout().Write(data); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of single-node cluster to apply desired state for")
+	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory that matches the cluster rendered state; defaults to the cluster current bundle")
+	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for manifest and healthcheck steps")
+	return cmd
+}
+
+type syncApplyOutput struct {
 	ClusterName        string `json:"clusterName" yaml:"clusterName"`
 	BOMName            string `json:"bomName" yaml:"bomName"`
 	Revision           string `json:"revision" yaml:"revision"`

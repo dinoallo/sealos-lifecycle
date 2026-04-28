@@ -15,6 +15,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,6 +77,39 @@ func SaveAppliedRevision(doc *AppliedRevision) error {
 	return nil
 }
 
+func PersistRenderedState(clusterName string, ref BOMReference, desiredStateDigest, localPatchRevision string) (*AppliedRevision, error) {
+	doc := NewAppliedRevision(CurrentAppliedRevisionName(clusterName), clusterName, ref, desiredStateDigest)
+	doc.Spec.LocalPatchRevision = localPatchRevision
+
+	existing, err := LoadAppliedRevision(clusterName)
+	switch {
+	case err == nil:
+		doc.Status.LastAppliedTime = existing.Status.LastAppliedTime
+		doc.Status.LastSuccessfulRevision = existing.Status.LastSuccessfulRevision
+	case errors.Is(err, os.ErrNotExist):
+		existing = nil
+	default:
+		return nil, err
+	}
+
+	if existing != nil &&
+		existing.Status.State == StateClean &&
+		existing.Status.LastSuccessfulRevision != nil &&
+		existing.Status.LastSuccessfulRevision.DesiredStateDigest == desiredStateDigest {
+		doc.Status = existing.Status
+	} else {
+		doc.Status.State = StateDirty
+		doc.Status.Conditions = []Condition{
+			NewCondition("Applied", corev1.ConditionFalse, "DesiredStateRendered", "desired revision rendered but not yet applied"),
+		}
+	}
+
+	if err := SaveAppliedRevision(doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
 func PersistSuccessfulApply(clusterName string, ref BOMReference, desiredStateDigest, localPatchRevision string) (*AppliedRevision, error) {
 	doc := NewAppliedRevision(CurrentAppliedRevisionName(clusterName), clusterName, ref, desiredStateDigest)
 	doc.Spec.LocalPatchRevision = localPatchRevision
@@ -87,6 +121,30 @@ func PersistSuccessfulApply(clusterName string, ref BOMReference, desiredStateDi
 		BOM:                ref,
 		LocalPatchRevision: localPatchRevision,
 		DesiredStateDigest: desiredStateDigest,
+	}
+	doc.Status.Conditions = []Condition{
+		NewCondition("Applied", corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
+	}
+
+	if err := SaveAppliedRevision(doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+func MarkSuccessfulApply(clusterName string) (*AppliedRevision, error) {
+	doc, err := LoadAppliedRevision(clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	now := metav1.Now()
+	doc.Status.State = StateClean
+	doc.Status.LastAppliedTime = &now
+	doc.Status.LastSuccessfulRevision = &RevisionSnapshot{
+		BOM:                doc.Spec.BOM,
+		LocalPatchRevision: doc.Spec.LocalPatchRevision,
+		DesiredStateDigest: doc.Spec.DesiredStateDigest,
 	}
 	doc.Status.Conditions = []Condition{
 		NewCondition("Applied", corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),

@@ -115,7 +115,7 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
-	appliedRevision, err := state.PersistSuccessfulApply(
+	appliedRevision, err := state.PersistRenderedState(
 		opts.ClusterName,
 		ref,
 		desiredStateDigest.String(),

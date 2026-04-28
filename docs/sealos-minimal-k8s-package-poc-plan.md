@@ -12,19 +12,21 @@ single-node Kubernetes cluster with the narrowest possible scope:
 1. use three local package directories
 2. render them through `sealos sync render`
 3. stage real runtime and Kubernetes payloads into the packages
-4. install the rendered bundle on one Linux host
+4. apply the rendered bundle on one Linux host
 5. validate that Kubernetes API, node readiness, and Cilium all come up
 
-This PoC is intentionally narrow. It is not a generic `sync apply` engine, not
-a reconcile loop, and not a production installer.
+This PoC is intentionally narrow. `sealos sync apply` now exists for the
+prepared single-node host flow, but this is still not a generic multi-node
+engine, not a reconcile loop, and not a production installer.
 
 ## What Already Exists In This Repo
 
 The PoC is no longer just a proposal. The repo already contains the main
-render-side pieces:
+render/apply pieces:
 
 - BOM, package, hydration, and applied-state types under `pkg/distribution/*`
 - `sealos sync render` in `cmd/sealos/cmd/sync.go`
+- `sealos sync apply` in `cmd/sealos/cmd/sync.go`
 - a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
 - runnable PoC assets under `scripts/poc/minimal-single-node/`
 - a PoC-only installer and validator:
@@ -36,6 +38,7 @@ gaps are broader follow-up work rather than blockers for the PoC itself:
 
 - deciding which generated PoC assets should stay tracked versus generated
 - making fresh-host setup more automated
+- broadening `sync apply` beyond the prepared single-node host path
 - extending the PoC beyond one machine and one cluster
 
 ## Current Machine Reality
@@ -71,6 +74,7 @@ Bottom line for this environment:
 - local package directories loaded via `packageformat.LoadDir`
 - one BOM with three components
 - rendering via `sealos sync render`
+- applying via `sealos sync apply`
 - a PoC-only host installer script
 - a PoC-only validation script
 - single-node Kubernetes bootstrap on one Linux host
@@ -79,7 +83,7 @@ Bottom line for this environment:
 
 - OCI build and push pipeline
 - multi-node join flow
-- generic `sync apply`
+- generic multi-node `sync apply`
 - upgrades, rollback, or drift workflows
 - long-running reconcile loop
 - secret management beyond local static files

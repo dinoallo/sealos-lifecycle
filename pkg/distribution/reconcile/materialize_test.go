@@ -82,6 +82,9 @@ func TestMaterializeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppliedRevision() error = %v", err)
 	}
+	if got, want := loaded.Status.State, state.StateDirty; got != want {
+		t.Fatalf("loaded.status.state = %q, want %q", got, want)
+	}
 	if got, want := loaded.Spec.DesiredStateDigest, result.DesiredStateDigest; got != want {
 		t.Fatalf("loaded.spec.desiredStateDigest = %q, want %q", got, want)
 	}
@@ -143,6 +146,9 @@ func TestMaterializeReplacesCurrentBundle(t *testing.T) {
 	loaded, err := state.LoadAppliedRevision("cluster-a")
 	if err != nil {
 		t.Fatalf("LoadAppliedRevision() error = %v", err)
+	}
+	if got, want := loaded.Status.State, state.StateDirty; got != want {
+		t.Fatalf("loaded.status.state = %q, want %q", got, want)
 	}
 	if got, want := loaded.Spec.DesiredStateDigest, second.DesiredStateDigest; got != want {
 		t.Fatalf("loaded.spec.desiredStateDigest = %q, want %q", got, want)
