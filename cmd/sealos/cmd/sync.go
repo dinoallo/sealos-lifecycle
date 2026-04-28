@@ -42,6 +42,7 @@ func newSyncCmd() *cobra.Command {
 		Short: "Experimental distribution workflows for package-based cluster state",
 		Args:  cobra.NoArgs,
 	}
+	cmd.AddCommand(newSyncPackageCmd())
 	cmd.AddCommand(newSyncRenderCmd())
 	cmd.AddCommand(newSyncApplyCmd())
 	return cmd
