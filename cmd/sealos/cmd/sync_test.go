@@ -13,6 +13,8 @@ import (
 	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/bom"
+	"github.com/labring/sealos/pkg/distribution/hydrate"
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/state"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
@@ -95,6 +97,94 @@ func TestSyncRenderCmdRejectsInvalidPackageSource(t *testing.T) {
 
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("Execute() error = nil, want error")
+	}
+}
+
+func TestSyncRenderCmdWithOCIPackageArtifact(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	fixtureRoot, err := filepath.Abs(syncFixtureRoot())
+	if err != nil {
+		t.Fatalf("Abs() error = %v", err)
+	}
+
+	doc := testSyncBOM()
+	artifactRef := doc.Spec.Components[0].Artifact.Reference()
+
+	previousResolver := newSyncMountedArtifactResolver
+	newSyncMountedArtifactResolver = func() (packageformat.Loader, hydrate.SourceProvider, error) {
+		mounter := &fakeSyncImageMounter{
+			mounts: map[string]packageformat.MountedImage{
+				artifactRef: {
+					Name:       "oci-kubernetes",
+					MountPoint: fixtureRoot,
+				},
+			},
+		}
+		return packageformat.MountedImageLoader{Mounter: mounter}, hydrate.NewMountedArtifactSourceProvider(mounter), nil
+	}
+	t.Cleanup(func() {
+		newSyncMountedArtifactResolver = previousResolver
+	})
+
+	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile() error = %v", err)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"render",
+		"--file", bomPath,
+		"--cluster", "cluster-oci",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var out syncRenderOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+
+	if got, want := out.ClusterName, "cluster-oci"; got != want {
+		t.Fatalf("out.ClusterName = %q, want %q", got, want)
+	}
+	if got, want := out.BOMName, "default-platform"; got != want {
+		t.Fatalf("out.BOMName = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(out.DesiredStateDigest, "sha256:") {
+		t.Fatalf("out.DesiredStateDigest = %q, want sha256 digest", out.DesiredStateDigest)
+	}
+
+	for _, rel := range []string{
+		"bundle.yaml",
+		"components/kubernetes/package.yaml",
+		"components/kubernetes/files/rootfs/README",
+		"components/kubernetes/files/hooks/bootstrap.sh",
+	} {
+		if _, err := os.Stat(filepath.Join(out.BundlePath, rel)); err != nil {
+			t.Fatalf("rendered bundle missing %q: %v", rel, err)
+		}
+	}
+
+	applied, err := state.LoadAppliedRevision("cluster-oci")
+	if err != nil {
+		t.Fatalf("LoadAppliedRevision() error = %v", err)
+	}
+	if got, want := applied.Status.State, state.StateDirty; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
+	}
+	if got, want := applied.Spec.DesiredStateDigest, out.DesiredStateDigest; got != want {
+		t.Fatalf("spec.desiredStateDigest = %q, want %q", got, want)
 	}
 }
 
@@ -207,4 +297,20 @@ func syncPOCPackageRoot(name string) string {
 
 func syncPOCRoot() string {
 	return filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node")
+}
+
+type fakeSyncImageMounter struct {
+	mounts map[string]packageformat.MountedImage
+}
+
+func (m *fakeSyncImageMounter) Mount(image string) (packageformat.MountedImage, error) {
+	info, ok := m.mounts[image]
+	if !ok {
+		return packageformat.MountedImage{}, os.ErrNotExist
+	}
+	return info, nil
+}
+
+func (m *fakeSyncImageMounter) Unmount(string) error {
+	return nil
 }

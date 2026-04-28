@@ -106,6 +106,81 @@ func TestRenderPlan(t *testing.T) {
 	}
 }
 
+func TestRenderPlanWithMountedArtifactSourceProvider(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join("..", "packageformat", "testdata", "kubernetes-rootfs")
+	pkg, err := packageformat.LoadDir(root)
+	if err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+
+	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+	}
+
+	plan, err := BuildPlanFromResolved(doc, map[string]*packageformat.ComponentPackage{
+		"kubernetes": pkg,
+	})
+	if err != nil {
+		t.Fatalf("BuildPlanFromResolved() error = %v", err)
+	}
+
+	artifactRef := doc.Spec.Components[0].Artifact.Reference()
+	fake := &fakeRenderMounter{
+		mounts: map[string]packageformat.MountedImage{
+			artifactRef: {
+				Name:       "mounted-kubernetes",
+				MountPoint: root,
+			},
+		},
+	}
+	provider := NewMountedArtifactSourceProvider(fake)
+	t.Cleanup(func() {
+		if err := provider.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	out := t.TempDir()
+	rendered, err := RenderPlan(plan, provider, out)
+	if err != nil {
+		t.Fatalf("RenderPlan() error = %v", err)
+	}
+
+	if got, want := len(fake.mounted), 1; got != want {
+		t.Fatalf("len(fake.mounted) = %d, want %d", got, want)
+	}
+	if got, want := fake.mounted[0], artifactRef; got != want {
+		t.Fatalf("fake.mounted[0] = %q, want %q", got, want)
+	}
+	if got, want := rendered.Spec.Components[0].Artifact, artifactRef; got != want {
+		t.Fatalf("component artifact = %q, want %q", got, want)
+	}
+
+	for _, rel := range []string{
+		"bundle.yaml",
+		"components/kubernetes/package.yaml",
+		"components/kubernetes/files/rootfs/README",
+		"components/kubernetes/files/manifests/bootstrap.yaml",
+		"components/kubernetes/files/hooks/bootstrap.sh",
+	} {
+		if !exists(filepath.Join(out, rel)) {
+			t.Fatalf("expected rendered file %q to exist", rel)
+		}
+	}
+}
+
 func TestRenderPlanMissingSource(t *testing.T) {
 	t.Parallel()
 

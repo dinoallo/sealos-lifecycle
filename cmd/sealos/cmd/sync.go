@@ -34,11 +34,12 @@ import (
 type syncBuildahFactory func(id string) (buildah.Interface, error)
 
 var newSyncBuildah syncBuildahFactory = buildah.New
+var newSyncMountedArtifactResolver = defaultSyncMountedArtifactResolver
 
 func newSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Experimental distribution workflows",
+		Short: "Experimental distribution workflows for package-based cluster state",
 		Args:  cobra.NoArgs,
 	}
 	cmd.AddCommand(newSyncRenderCmd())
@@ -56,8 +57,15 @@ func newSyncRenderCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "render",
-		Short: "Render a BOM into a cluster-local desired-state bundle",
-		Args:  cobra.NoArgs,
+		Short: "Render a BOM into a cluster-local desired-state bundle from package artifacts",
+		Long: strings.TrimSpace(`
+Render resolves component packages from the BOM's OCI image and digest
+references by default.
+
+Use --package-source only as a local development override for individual
+components when iterating on package directories in-tree.
+`),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			doc, err := bom.LoadFile(flags.bomFile)
 			if err != nil {
@@ -96,7 +104,7 @@ func newSyncRenderCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file to render")
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to materialize desired state for")
 	cmd.Flags().StringVar(&flags.localPatchRevision, "local-patch-revision", "", "optional local patch revision recorded in applied state")
-	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override component package source as component=dir")
+	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local development")
 	if err := cmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
 	}
@@ -184,16 +192,10 @@ func newSyncMaterializeOptions(doc *bom.BOM, clusterName, localPatchRevision str
 	var fallbackLoader packageformat.Loader
 	var fallbackSources hydrate.SourceProvider
 	if len(localRootsByComponent) < len(doc.Spec.Components) {
-		if err := buildah.TrySetupWithDefaults(); err != nil {
-			return reconcile.Options{}, err
-		}
-		builder, err := newSyncBuildah("sync")
+		fallbackLoader, fallbackSources, err = newSyncMountedArtifactResolver()
 		if err != nil {
 			return reconcile.Options{}, err
 		}
-		mounter := processor.NewPackageImageMounter(builder)
-		fallbackLoader = packageformat.MountedImageLoader{Mounter: mounter}
-		fallbackSources = hydrate.NewMountedArtifactSourceProvider(mounter)
 	}
 
 	return reconcile.Options{
@@ -208,6 +210,18 @@ func newSyncMaterializeOptions(doc *bom.BOM, clusterName, localPatchRevision str
 			fallback: fallbackSources,
 		},
 	}, nil
+}
+
+func defaultSyncMountedArtifactResolver() (packageformat.Loader, hydrate.SourceProvider, error) {
+	if err := buildah.TrySetupWithDefaults(); err != nil {
+		return nil, nil, err
+	}
+	builder, err := newSyncBuildah("sync")
+	if err != nil {
+		return nil, nil, err
+	}
+	mounter := processor.NewPackageImageMounter(builder)
+	return packageformat.MountedImageLoader{Mounter: mounter}, hydrate.NewMountedArtifactSourceProvider(mounter), nil
 }
 
 func resolveSyncPackageSources(doc *bom.BOM, values []string) (map[string]string, map[string]*packageformat.ComponentPackage, error) {
