@@ -26,7 +26,7 @@ ifeq ($(ENABLE_BTRFS),1)
 endif
 GO_TAGS ?= $(strip $(GO_BASE_TAGS) $(GO_DRIVER_TAGS))
 GO_TAGS_CSV := $(subst $(SPACE),$(COMMA),$(GO_TAGS))
-GOLANGCI_BUILD_TAGS := $(subst $(SPACE),$(COMMA),$(strip musl $(GO_TAGS)))
+GOLANGCI_BUILD_TAGS := $(strip musl $(GO_TAGS))
 ifeq ($(DEBUG), 1)
 	GO_BUILD_FLAGS += -gcflags "all=-N -l"
 	GO_LDFLAGS=
@@ -127,7 +127,7 @@ go.tidy:
 .PHONY: go.lint
 go.lint: tools.verify.golangci-lint
 	@echo "===========> Run golangci to lint source codes"
-	@$(TOOLS_DIR)/golangci-lint run --build-tags=$(GOLANGCI_BUILD_TAGS) -c $(ROOT_DIR)/.golangci.yml
+	@$(TOOLS_DIR)/golangci-lint run --build-tags="$(GOLANGCI_BUILD_TAGS)" -c $(ROOT_DIR)/.golangci.yml
 
 .PHONY: go.format
 go.format: tools.verify.goimports

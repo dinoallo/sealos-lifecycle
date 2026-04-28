@@ -13,6 +13,7 @@
 # limitations under the License.
 
 BUILD_TOOLS ?= golangci-lint goimports addlicense deepcopy-gen conversion-gen
+GOLANGCI_LINT_VERSION ?= v2.11.4
 
 .PHONY: tools.install
 tools.install: $(addprefix tools.install., $(BUILD_TOOLS))
@@ -28,7 +29,7 @@ tools.verify.%:
 
 .PHONY: install.golangci-lint
 install.golangci-lint:
-	@$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: install.goimports
 install.goimports:
