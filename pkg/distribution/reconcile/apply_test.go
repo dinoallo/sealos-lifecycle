@@ -93,13 +93,26 @@ echo "kubernetes-healthcheck" >>"$TEST_LOG"
 echo "cilium-health" >>"$TEST_LOG"
 `)
 
-	writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", "usr", "bin", "containerd"), "#!/bin/sh\nexit 0\n", 0o755)
+	for _, rel := range []string{
+		filepath.Join("usr", "bin", "containerd"),
+		filepath.Join("usr", "bin", "ctr"),
+		filepath.Join("usr", "bin", "containerd-shim-runc-v2"),
+		filepath.Join("usr", "bin", "runc"),
+	} {
+		writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", rel), "#!/bin/sh\nexit 0\n", 0o755)
+	}
 	writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "files", "etc", "containerd", "config.toml"), "version = 2\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet"), "#!/bin/sh\nexit 0\n", 0o755)
+	for _, rel := range []string{
+		filepath.Join("usr", "bin", "kubeadm"),
+		filepath.Join("usr", "bin", "kubelet"),
+		filepath.Join("usr", "bin", "kubectl"),
+	} {
+		writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", rel), "#!/bin/sh\nexit 0\n", 0o755)
+	}
 	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml"), "apiVersion: kubeadm.k8s.io/v1beta3\n", 0o644)
 	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "sysctl.d", "99-kubernetes.conf"), "net.ipv4.ip_forward = 1\n", 0o644)
 	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap", "rbac.yaml"), "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: kube-system\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n", 0o644)
+	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n", 0o644)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -392,7 +405,7 @@ func TestApplyRequiresRenderedState(t *testing.T) {
 			},
 		},
 	}
-	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n", 0o644)
+	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n", 0o644)
 	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
 		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
@@ -446,7 +459,7 @@ exit 0
 	writeExecutable(t, filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"), `#!/bin/sh
 exit 0
 `)
-	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n", 0o644)
+	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n", 0o644)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -514,6 +527,200 @@ exit 0
 	})
 	if err == nil || !strings.Contains(err.Error(), "single-node clusters") {
 		t.Fatalf("Apply() error = %v, want single-node rejection", err)
+	}
+}
+
+func TestApplyRejectsIncompletePreparedHostBundle(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	testCases := []struct {
+		name    string
+		setup   func(t *testing.T, bundleDir string)
+		bundle  *hydrate.Bundle
+		wantErr string
+	}{
+		{
+			name: "missing runtime binary",
+			setup: func(t *testing.T, bundleDir string) {
+				writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
+				writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", "README"), "placeholder\n", 0o644)
+			},
+			bundle: &hydrate.Bundle{
+				APIVersion: distribution.APIVersion,
+				Kind:       distribution.KindHydratedBundle,
+				Spec: hydrate.BundleSpec{
+					BOMName:  "minimal-single-node",
+					Revision: "rev-1",
+					Channel:  bom.ChannelAlpha,
+					Components: []hydrate.RenderedComponent{{
+						Name:        "containerd",
+						PackageName: "containerd-runtime",
+						Version:     "v1.7.18",
+						Class:       packageformat.ClassRootfs,
+						RootPath:    "components/containerd/files",
+						Steps: []hydrate.RenderedStep{
+							{
+								Name:        "runtime-rootfs",
+								Kind:        hydrate.StepContent,
+								BundlePath:  "components/containerd/files/rootfs",
+								SourcePath:  "rootfs/",
+								ContentType: packageformat.ContentRootfs,
+							},
+							{
+								Name:           "preflight",
+								Kind:           hydrate.StepHook,
+								BundlePath:     "components/containerd/files/hooks/preflight.sh",
+								SourcePath:     "hooks/preflight.sh",
+								HookPhase:      packageformat.PhaseBootstrap,
+								Target:         packageformat.TargetAllNodes,
+								TimeoutSeconds: 5,
+							},
+						},
+					}},
+				},
+			},
+			wantErr: "missing required staged payloads",
+		},
+		{
+			name: "placeholder hook content",
+			setup: func(t *testing.T, bundleDir string) {
+				for _, rel := range []string{
+					filepath.Join("usr", "bin", "containerd"),
+					filepath.Join("usr", "bin", "ctr"),
+					filepath.Join("usr", "bin", "containerd-shim-runc-v2"),
+					filepath.Join("usr", "bin", "runc"),
+				} {
+					writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", rel), "#!/bin/sh\nexit 0\n", 0o755)
+				}
+				writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "preflight.sh"), "#!/bin/sh\n# placeholder\nexit 0\n")
+			},
+			bundle: &hydrate.Bundle{
+				APIVersion: distribution.APIVersion,
+				Kind:       distribution.KindHydratedBundle,
+				Spec: hydrate.BundleSpec{
+					BOMName:  "minimal-single-node",
+					Revision: "rev-1",
+					Channel:  bom.ChannelAlpha,
+					Components: []hydrate.RenderedComponent{{
+						Name:        "containerd",
+						PackageName: "containerd-runtime",
+						Version:     "v1.7.18",
+						Class:       packageformat.ClassRootfs,
+						RootPath:    "components/containerd/files",
+						Steps: []hydrate.RenderedStep{
+							{
+								Name:        "runtime-rootfs",
+								Kind:        hydrate.StepContent,
+								BundlePath:  "components/containerd/files/rootfs",
+								SourcePath:  "rootfs/",
+								ContentType: packageformat.ContentRootfs,
+							},
+							{
+								Name:           "preflight",
+								Kind:           hydrate.StepHook,
+								BundlePath:     "components/containerd/files/hooks/preflight.sh",
+								SourcePath:     "hooks/preflight.sh",
+								HookPhase:      packageformat.PhaseBootstrap,
+								Target:         packageformat.TargetAllNodes,
+								TimeoutSeconds: 5,
+							},
+						},
+					}},
+				},
+			},
+			wantErr: "still contains placeholder content",
+		},
+		{
+			name: "invalid cilium manifest payload",
+			setup: func(t *testing.T, bundleDir string) {
+				writeExecutable(t, filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
+				writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n", 0o644)
+			},
+			bundle: &hydrate.Bundle{
+				APIVersion: distribution.APIVersion,
+				Kind:       distribution.KindHydratedBundle,
+				Spec: hydrate.BundleSpec{
+					BOMName:  "minimal-single-node",
+					Revision: "rev-1",
+					Channel:  bom.ChannelAlpha,
+					Components: []hydrate.RenderedComponent{{
+						Name:        "cilium",
+						PackageName: "cilium-cni",
+						Version:     "v1.15.0",
+						Class:       packageformat.ClassApplication,
+						RootPath:    "components/cilium/files",
+						Steps: []hydrate.RenderedStep{
+							{
+								Name:        "cilium-manifest",
+								Kind:        hydrate.StepContent,
+								BundlePath:  "components/cilium/files/manifests/cilium.yaml",
+								SourcePath:  "manifests/cilium.yaml",
+								ContentType: packageformat.ContentManifest,
+							},
+							{
+								Name:           "healthcheck",
+								Kind:           hydrate.StepHook,
+								BundlePath:     "components/cilium/files/hooks/healthcheck.sh",
+								SourcePath:     "hooks/healthcheck.sh",
+								HookPhase:      packageformat.PhaseHealth,
+								Target:         packageformat.TargetCluster,
+								TimeoutSeconds: 5,
+							},
+						},
+					}},
+				},
+			},
+			wantErr: "missing required manifest kinds",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundleDir := filepath.Join(t.TempDir(), "bundle")
+			tc.setup(t, bundleDir)
+			if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), tc.bundle); err != nil {
+				t.Fatalf("MarshalFile(bundle) error = %v", err)
+			}
+
+			clusterName := strings.ReplaceAll(tc.name, " ", "-")
+			persistRenderedStateForBundle(t, clusterName, bundleDir, tc.bundle)
+
+			_, err := Apply(ApplyOptions{
+				ClusterName: clusterName,
+				BundlePath:  bundleDir,
+				HostRoot:    t.TempDir(),
+				Stderr:      bytes.NewBuffer(nil),
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Apply() error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, bundle *hydrate.Bundle) {
+	t.Helper()
+
+	bundleDigest, err := hydrate.DigestBundle(bundleDir)
+	if err != nil {
+		t.Fatalf("DigestBundle() error = %v", err)
+	}
+	if _, err := state.PersistRenderedState(
+		clusterName,
+		state.BOMReference{
+			Name:     bundle.Spec.BOMName,
+			Revision: bundle.Spec.Revision,
+			Channel:  bundle.Spec.Channel,
+			Digest:   "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		},
+		bundleDigest.String(),
+		"local-rev-1",
+	); err != nil {
+		t.Fatalf("PersistRenderedState() error = %v", err)
 	}
 }
 

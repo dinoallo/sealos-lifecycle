@@ -134,7 +134,7 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
 | `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
 | `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, apply, and validate. |
-| `scripts/poc/minimal-single-node/install.sh` | Legacy compatibility wrapper that validates the bundle, then delegates to `sealos sync apply`. |
+| `scripts/poc/minimal-single-node/install.sh` | Legacy compatibility wrapper around `sealos sync apply` plus optional `validate.sh`. |
 | `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
 
 ## Package Responsibilities
@@ -228,11 +228,11 @@ install-ready once assets have been refreshed.
 
 It is not enough for host apply:
 
-- `install.sh` still rejects placeholder rootfs payloads before delegating
-  to `sync apply`
-- `install.sh` also rejects hook scripts if they are still placeholders
-- `install.sh` also checks that the staged Cilium manifest contains a real
-  daemonset and deployment payload
+- `sealos sync apply` now rejects placeholder or incomplete staged bundles
+  before host mutation starts
+- that includes missing staged runtime or Kubernetes binaries
+- it also rejects placeholder hook scripts and a staged Cilium manifest that
+  does not contain the expected daemonset and deployment payloads
 
 Therefore, any real host run must stage real assets first and then re-render the
 bundle.

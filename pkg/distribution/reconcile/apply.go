@@ -90,6 +90,9 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	if _, err := loadRenderedRevision(opts.ClusterName, desiredStateDigest); err != nil {
 		return nil, err
 	}
+	if err := validatePreparedHostBundle(bundlePath, bundle); err != nil {
+		return nil, err
+	}
 	executor := bundleExecutor{
 		bundlePath:     bundlePath,
 		clusterName:    opts.ClusterName,
@@ -346,6 +349,172 @@ func validateSingleNodeBundle(bundle *hydrate.Bundle) error {
 		}
 		if _, err := determineSingleNodeComponentMode(component, files, hooks); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validatePreparedHostBundle(bundlePath string, bundle *hydrate.Bundle) error {
+	if err := validateSingleNodeBundle(bundle); err != nil {
+		return err
+	}
+
+	for _, component := range bundle.Spec.Components {
+		files, hooks, err := classifyComponent(component)
+		if err != nil {
+			return err
+		}
+		mode, err := determineSingleNodeComponentMode(component, files, hooks)
+		if err != nil {
+			return err
+		}
+
+		if err := validateHookPayloads(bundlePath, component, hooks); err != nil {
+			return err
+		}
+
+		switch {
+		case component.PackageName == "containerd-runtime" || component.Name == "containerd":
+			if err := validateRequiredRootfsFiles(bundlePath, component, files.rootfs, []string{
+				filepath.Join("usr", "bin", "containerd"),
+				filepath.Join("usr", "bin", "ctr"),
+				filepath.Join("usr", "bin", "containerd-shim-runc-v2"),
+				filepath.Join("usr", "bin", "runc"),
+			}); err != nil {
+				return err
+			}
+		case component.PackageName == "kubernetes-rootfs" || component.Name == "kubernetes":
+			if err := validateRequiredRootfsFiles(bundlePath, component, files.rootfs, []string{
+				filepath.Join("usr", "bin", "kubeadm"),
+				filepath.Join("usr", "bin", "kubelet"),
+				filepath.Join("usr", "bin", "kubectl"),
+			}); err != nil {
+				return err
+			}
+		case mode == componentModeClusterApplication && (component.PackageName == "cilium-cni" || component.Name == "cilium"):
+			if err := validateManifestKinds(bundlePath, component, files.manifests, "DaemonSet", "Deployment"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateHookPayloads(bundlePath string, component hydrate.RenderedComponent, hooks hookSet) error {
+	for _, hook := range append(append(append(append(
+		slices.Clone(hooks.preflight),
+		hooks.bootstrap...),
+		hooks.configure...),
+		hooks.install...),
+		hooks.healthcheck...) {
+		hookPath, err := resolveBundleRelativePath(bundlePath, hook.BundlePath)
+		if err != nil {
+			return fmt.Errorf("component %q hook %q: %w", component.Name, hook.Name, err)
+		}
+		data, err := os.ReadFile(hookPath)
+		if err != nil {
+			return fmt.Errorf("component %q hook %q: read %q: %w", component.Name, hook.Name, hookPath, err)
+		}
+		if strings.Contains(strings.ToLower(string(data)), "placeholder") {
+			return fmt.Errorf("component %q hook %q still contains placeholder content", component.Name, hook.Name)
+		}
+	}
+	return nil
+}
+
+func validateRequiredRootfsFiles(bundlePath string, component hydrate.RenderedComponent, steps []hydrate.RenderedStep, required []string) error {
+	var missing []string
+	for _, relPath := range required {
+		found := false
+		for _, step := range steps {
+			stepPath, err := resolveBundleRelativePath(bundlePath, step.BundlePath)
+			if err != nil {
+				return fmt.Errorf("component %q rootfs step %q: %w", component.Name, step.Name, err)
+			}
+			if _, err := os.Stat(filepath.Join(stepPath, relPath)); err == nil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, filepath.ToSlash(relPath))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"component %q bundle is missing required staged payloads: %s",
+			component.Name,
+			strings.Join(missing, ", "),
+		)
+	}
+	return nil
+}
+
+func validateManifestKinds(bundlePath string, component hydrate.RenderedComponent, steps []hydrate.RenderedStep, kinds ...string) error {
+	found := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		found[kind] = false
+	}
+
+	for _, step := range steps {
+		stepPath, err := resolveBundleRelativePath(bundlePath, step.BundlePath)
+		if err != nil {
+			return fmt.Errorf("component %q manifest step %q: %w", component.Name, step.Name, err)
+		}
+
+		info, err := os.Stat(stepPath)
+		if err != nil {
+			return fmt.Errorf("component %q manifest step %q: stat %q: %w", component.Name, step.Name, stepPath, err)
+		}
+
+		if info.IsDir() {
+			if err := filepath.WalkDir(stepPath, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if d.IsDir() {
+					return nil
+				}
+				return markManifestKinds(path, found)
+			}); err != nil {
+				return fmt.Errorf("component %q manifest step %q: %w", component.Name, step.Name, err)
+			}
+			continue
+		}
+
+		if err := markManifestKinds(stepPath, found); err != nil {
+			return fmt.Errorf("component %q manifest step %q: %w", component.Name, step.Name, err)
+		}
+	}
+
+	var missing []string
+	for _, kind := range kinds {
+		if !found[kind] {
+			missing = append(missing, kind)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"component %q bundle is missing required manifest kinds: %s",
+			component.Name,
+			strings.Join(missing, ", "),
+		)
+	}
+	return nil
+}
+
+func markManifestKinds(path string, found map[string]bool) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text := string(data)
+	for kind := range found {
+		if strings.Contains(text, "\nkind: "+kind+"\n") ||
+			strings.HasPrefix(text, "kind: "+kind+"\n") ||
+			strings.Contains(text, "\nkind: "+kind+"\r\n") ||
+			strings.HasPrefix(text, "kind: "+kind+"\r\n") {
+			found[kind] = true
 		}
 	}
 	return nil
@@ -749,6 +918,10 @@ func (e *bundleExecutor) resolveBundleStepPath(step hydrate.RenderedStep) (strin
 }
 
 func (e *bundleExecutor) resolveBundlePath(bundleRel string) (string, error) {
+	return resolveBundleRelativePath(e.bundlePath, bundleRel)
+}
+
+func resolveBundleRelativePath(bundleRoot, bundleRel string) (string, error) {
 	if strings.TrimSpace(bundleRel) == "" {
 		return "", fmt.Errorf("bundle path cannot be empty")
 	}
@@ -756,8 +929,8 @@ func (e *bundleExecutor) resolveBundlePath(bundleRel string) (string, error) {
 		return "", fmt.Errorf("bundle path %q must be relative", bundleRel)
 	}
 
-	resolved := filepath.Join(e.bundlePath, filepath.FromSlash(bundleRel))
-	relative, err := filepath.Rel(e.bundlePath, resolved)
+	resolved := filepath.Join(bundleRoot, filepath.FromSlash(bundleRel))
+	relative, err := filepath.Rel(bundleRoot, resolved)
 	if err != nil {
 		return "", err
 	}
