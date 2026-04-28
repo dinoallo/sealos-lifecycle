@@ -104,6 +104,7 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 	t.Cleanup(func() {
 		constants.DefaultRuntimeRootDir = previousRuntimeRoot
 	})
+	clusterName := "poc-minimal-sync-test"
 
 	previousFactory := newSyncBuildah
 	newSyncBuildah = func(string) (buildah.Interface, error) {
@@ -120,7 +121,7 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 	cmd.SetArgs([]string{
 		"render",
 		"--file", syncPOCBOMPath(),
-		"--cluster", "poc-minimal",
+		"--cluster", clusterName,
 		"--package-source", "containerd=" + syncPOCPackageRoot("containerd"),
 		"--package-source", "kubernetes=" + syncPOCPackageRoot("kubernetes"),
 		"--package-source", "cilium=" + syncPOCPackageRoot("cilium"),
@@ -135,7 +136,7 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
 	}
 
-	if got, want := out.ClusterName, "poc-minimal"; got != want {
+	if got, want := out.ClusterName, clusterName; got != want {
 		t.Fatalf("out.ClusterName = %q, want %q", got, want)
 	}
 	if got, want := out.Revision, "rev-poc-001"; got != want {
@@ -143,6 +144,9 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 	}
 	if !strings.HasPrefix(out.DesiredStateDigest, "sha256:") {
 		t.Fatalf("out.DesiredStateDigest = %q, want sha256 digest", out.DesiredStateDigest)
+	}
+	if got, want := out.AppliedRevision, state.AppliedRevisionPath(clusterName); got != want {
+		t.Fatalf("out.AppliedRevision = %q, want %q", got, want)
 	}
 
 	for _, rel := range []string{
@@ -157,7 +161,7 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 		}
 	}
 
-	doc, err := state.LoadAppliedRevision("poc-minimal")
+	doc, err := state.LoadAppliedRevision(clusterName)
 	if err != nil {
 		t.Fatalf("LoadAppliedRevision() error = %v", err)
 	}
