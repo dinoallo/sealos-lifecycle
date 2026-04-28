@@ -2,15 +2,25 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+POC_DIR="${REPO_ROOT}/scripts/poc/minimal-single-node"
 CLUSTER_NAME="poc-minimal"
 SEALOS_BIN="${SEALOS_BIN:-}"
+BOM_FILE="${POC_DIR}/bom.yaml"
+DEFAULT_LOCAL_BOM="${POC_DIR}/bom.yaml"
+DEFAULT_OCI_BOM="${POC_DIR}/artifacts/oci/bom.oci.yaml"
+PACKAGE_MODE="local"
 
 usage() {
   cat <<'EOF'
 Usage:
-  render.sh [--cluster NAME] [--sealos-bin PATH]
+  render.sh [--cluster NAME] [--bom-file PATH] [--package-mode MODE] [--sealos-bin PATH]
 
-Renders the minimal single-node PoC bundle from local package directories.
+Renders the minimal single-node PoC bundle.
+
+Package modes:
+  local  Render from in-tree package directories via --package-source overrides.
+  oci    Render from the BOM artifact image and digest references directly.
+         Defaults to artifacts/oci/bom.oci.yaml when present.
 EOF
 }
 
@@ -24,6 +34,14 @@ parse_args() {
     case "$1" in
       --cluster)
         CLUSTER_NAME="${2:?missing value for --cluster}"
+        shift 2
+        ;;
+      --bom-file)
+        BOM_FILE="${2:?missing value for --bom-file}"
+        shift 2
+        ;;
+      --package-mode)
+        PACKAGE_MODE="${2:?missing value for --package-mode}"
         shift 2
         ;;
       --sealos-bin)
@@ -64,12 +82,39 @@ main() {
   parse_args "$@"
   resolve_sealos_bin
 
-  exec "${SEALOS_BIN}" sync render \
-    --file "${REPO_ROOT}/scripts/poc/minimal-single-node/bom.yaml" \
-    --cluster "${CLUSTER_NAME}" \
-    --package-source "containerd=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/containerd" \
-    --package-source "kubernetes=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/kubernetes" \
-    --package-source "cilium=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/cilium"
+  if [[ "${PACKAGE_MODE}" == "oci" && "${BOM_FILE}" == "${DEFAULT_LOCAL_BOM}" ]]; then
+    if [[ -f "${DEFAULT_OCI_BOM}" ]]; then
+      BOM_FILE="${DEFAULT_OCI_BOM}"
+    else
+      fail "oci package mode requires --bom-file or a generated BOM at ${DEFAULT_OCI_BOM}; run publish-oci.sh first"
+    fi
+  fi
+
+  [[ -f "${BOM_FILE}" ]] || fail "bom file not found: ${BOM_FILE}"
+
+  local -a args=(
+    sync
+    render
+    --file "${BOM_FILE}"
+    --cluster "${CLUSTER_NAME}"
+  )
+
+  case "${PACKAGE_MODE}" in
+    local)
+      args+=(
+        --package-source "containerd=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/containerd"
+        --package-source "kubernetes=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/kubernetes"
+        --package-source "cilium=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/cilium"
+      )
+      ;;
+    oci)
+      ;;
+    *)
+      fail "unsupported package mode: ${PACKAGE_MODE} (want local or oci)"
+      ;;
+  esac
+
+  exec "${SEALOS_BIN}" "${args[@]}"
 }
 
 main "$@"

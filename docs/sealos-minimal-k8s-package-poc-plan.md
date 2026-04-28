@@ -26,6 +26,8 @@ render/apply pieces:
 
 - BOM, package, hydration, and applied-state types under `pkg/distribution/*`
 - `sealos sync render` in `cmd/sealos/cmd/sync.go`
+  - resolves BOM package artifacts from OCI image references by default
+  - still supports `--package-source` as a local package-directory override for development
 - `sealos sync apply` in `cmd/sealos/cmd/sync.go`
 - a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
 - runnable PoC assets under `scripts/poc/minimal-single-node/`
@@ -71,7 +73,8 @@ Bottom line for this environment:
 
 ### In Scope
 
-- local package directories loaded via `packageformat.LoadDir`
+- BOM artifact resolution through mounted OCI package images
+- local package directories loaded via `packageformat.LoadDir` as the current verified PoC override path
 - one BOM with three components
 - rendering via `sealos sync render`
 - applying via `sealos sync apply`
@@ -126,6 +129,7 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/packages/kubernetes/` | Local `kubernetes-rootfs` package. |
 | `scripts/poc/minimal-single-node/packages/cilium/` | Local `cilium-cni` package. |
 | `scripts/poc/minimal-single-node/render.sh` | Convenience wrapper around `sealos sync render`. |
+| `scripts/poc/minimal-single-node/publish-oci.sh` | Builds and pushes OCI package images for the PoC package set and writes an OCI-backed BOM. |
 | `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
 | `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
 | `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end fresh-host wrapper for build, fetch, stage, render, install, and validate. |
@@ -378,13 +382,34 @@ cd /root/sealos-lifecycle
 scripts/poc/minimal-single-node/render.sh
 ```
 
+Verified OCI-backed variant on this machine:
+
+```bash
+cd /root/sealos-lifecycle
+scripts/poc/minimal-single-node/publish-oci.sh \
+  --registry-prefix localhost:5065/poc-minimal > /tmp/poc-oci.env
+
+set -a
+source /tmp/poc-oci.env
+set +a
+
+scripts/poc/minimal-single-node/render.sh \
+  --cluster poc-minimal \
+  --bom-file "${bom_path}" \
+  --package-mode oci
+```
+
 Success criteria:
 
-- render completes without buildah or registry usage
+- local override render completes without buildah or registry usage
 - `bundle.yaml` exists under
   `/root/.sealos/poc-minimal/distribution/bundles/current`
 - a new desired-state digest is emitted
 - `/root/.sealos/poc-minimal/distribution/applied-revision.yaml` is updated
+- the same render path also succeeds from OCI-backed BOM artifact references
+  with no `--package-source` overrides
+- the OCI-backed render path pulls package images from a registry and still
+  produces the same rendered bundle shape
 
 ### Phase 3: Install On A Real Host
 
