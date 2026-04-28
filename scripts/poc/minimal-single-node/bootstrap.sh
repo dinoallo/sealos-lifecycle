@@ -9,11 +9,15 @@ CLUSTER_NAME="poc-minimal"
 ASSETS_WORKDIR="${SCRIPT_DIR}/artifacts"
 KUBECONFIG_PATH="/etc/kubernetes/admin.conf"
 SEALOS_BIN="${REPO_ROOT}/bin/linux_amd64/sealos"
+REGISTRY_PORT="5065"
 SKIP_BUILD=0
 SKIP_INSTALL=0
 SKIP_VALIDATE=0
 
-FETCH_ENV_FILE=""
+PUBLISH_ENV_FILE=""
+REGISTRY_PID=""
+REGISTRY_PREFIX=""
+REGISTRY_LOG=""
 
 usage() {
   cat <<'EOF'
@@ -22,9 +26,9 @@ Usage:
 
 Runs the minimal single-node PoC on a prepared Linux host:
   1. build sealos
-  2. fetch assets
-  3. stage assets into package directories
-  4. render the bundle
+  2. start a temporary local registry
+  3. publish the three PoC package images to OCI
+  4. render the bundle from the generated OCI-backed BOM
   5. install the rendered bundle
   6. validate the cluster
 
@@ -37,6 +41,7 @@ Options:
   --cluster NAME
   --assets-workdir DIR
   --kubeconfig PATH
+  --registry-port PORT
   --sealos-bin PATH
   --skip-build
   --skip-install
@@ -54,8 +59,12 @@ fail() {
 }
 
 cleanup() {
-  if [[ -n "${FETCH_ENV_FILE}" && -f "${FETCH_ENV_FILE}" ]]; then
-    rm -f "${FETCH_ENV_FILE}"
+  if [[ -n "${PUBLISH_ENV_FILE}" && -f "${PUBLISH_ENV_FILE}" ]]; then
+    rm -f "${PUBLISH_ENV_FILE}"
+  fi
+  if [[ -n "${REGISTRY_PID}" ]] && kill -0 "${REGISTRY_PID}" >/dev/null 2>&1; then
+    kill "${REGISTRY_PID}" >/dev/null 2>&1 || true
+    wait "${REGISTRY_PID}" >/dev/null 2>&1 || true
   fi
 }
 
@@ -72,6 +81,10 @@ parse_args() {
         ;;
       --kubeconfig)
         KUBECONFIG_PATH="${2:?missing value for --kubeconfig}"
+        shift 2
+        ;;
+      --registry-port)
+        REGISTRY_PORT="${2:?missing value for --registry-port}"
         shift 2
         ;;
       --sealos-bin)
@@ -145,6 +158,7 @@ preflight_host() {
   ensure_command conntrack
   ensure_command crictl
   ensure_command socat
+  ensure_command curl
 
   ensure_swap_disabled
   ensure_systemd_ready
@@ -179,36 +193,52 @@ build_sealos() {
   )
 }
 
-fetch_assets() {
-  FETCH_ENV_FILE="$(mktemp)"
-  readonly FETCH_ENV_FILE
+start_registry() {
+  local registry_dir="${ASSETS_WORKDIR}/registry"
+  REGISTRY_LOG="${ASSETS_WORKDIR}/registry.log"
+  REGISTRY_PREFIX="localhost:${REGISTRY_PORT}/${CLUSTER_NAME}"
 
-  log "fetching PoC assets"
-  "${SCRIPT_DIR}/fetch-assets.sh" --workdir "${ASSETS_WORKDIR}" > "${FETCH_ENV_FILE}"
+  ensure_command curl
+  install -d "${registry_dir}"
+
+  log "starting temporary local registry on port ${REGISTRY_PORT}"
+  "${SEALOS_BIN}" registry serve filesystem "${registry_dir}" --port "${REGISTRY_PORT}" >"${REGISTRY_LOG}" 2>&1 &
+  REGISTRY_PID=$!
+
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:${REGISTRY_PORT}/v2/" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+
+  fail "temporary registry did not become ready on port ${REGISTRY_PORT}; see ${REGISTRY_LOG}"
 }
 
-stage_assets() {
-  log "staging assets into package directories"
+publish_packages() {
+  PUBLISH_ENV_FILE="$(mktemp)"
+  readonly PUBLISH_ENV_FILE
 
-  set -a
-  # shellcheck disable=SC1090
-  . "${FETCH_ENV_FILE}"
-  set +a
-
-  "${SCRIPT_DIR}/stage-assets.sh" \
-    --containerd-bin "${containerd_bin}" \
-    --containerd-shim-bin "${containerd_shim_bin}" \
-    --ctr-bin "${ctr_bin}" \
-    --runc-bin "${runc_bin}" \
-    --kubeadm-bin "${kubeadm_bin}" \
-    --kubelet-bin "${kubelet_bin}" \
-    --kubectl-bin "${kubectl_bin}" \
-    --cilium-manifest "${cilium_manifest}"
+  log "publishing OCI package images"
+  SEALOS_BIN="${SEALOS_BIN}" "${SCRIPT_DIR}/publish-oci.sh" \
+    --registry-prefix "${REGISTRY_PREFIX}" \
+    --workdir "${ASSETS_WORKDIR}/oci" > "${PUBLISH_ENV_FILE}"
 }
 
 render_bundle() {
-  log "rendering desired-state bundle"
-  SEALOS_BIN="${SEALOS_BIN}" "${SCRIPT_DIR}/render.sh" --cluster "${CLUSTER_NAME}" --sealos-bin "${SEALOS_BIN}"
+  log "rendering desired-state bundle from OCI-backed BOM"
+
+  set -a
+  # shellcheck disable=SC1090
+  . "${PUBLISH_ENV_FILE}"
+  set +a
+
+  SEALOS_BIN="${SEALOS_BIN}" "${SCRIPT_DIR}/render.sh" \
+    --cluster "${CLUSTER_NAME}" \
+    --package-mode oci \
+    --bom-file "${bom_path}" \
+    --sealos-bin "${SEALOS_BIN}"
 }
 
 install_bundle() {
@@ -237,9 +267,11 @@ main() {
 
   build_sealos
   resolve_sealos_bin
-  fetch_assets
-  stage_assets
+  start_registry
+  publish_packages
   render_bundle
+  cleanup
+  trap cleanup EXIT
 
   if (( SKIP_INSTALL == 0 )); then
     install_bundle

@@ -128,11 +128,12 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/packages/containerd/` | Local `containerd-runtime` package. |
 | `scripts/poc/minimal-single-node/packages/kubernetes/` | Local `kubernetes-rootfs` package. |
 | `scripts/poc/minimal-single-node/packages/cilium/` | Local `cilium-cni` package. |
-| `scripts/poc/minimal-single-node/render.sh` | Convenience wrapper around `sealos sync render`. |
-| `scripts/poc/minimal-single-node/publish-oci.sh` | Builds and pushes OCI package images for the PoC package set and writes an OCI-backed BOM. |
+| `cmd/sealos/cmd/sync_package.go` | First-class `sealos sync package build/push` CLI for OCI component package images. |
+| `scripts/poc/minimal-single-node/render.sh` | Convenience wrapper around `sealos sync render`, preferring the generated OCI BOM when present. |
+| `scripts/poc/minimal-single-node/publish-oci.sh` | Publishes the PoC package set to OCI and writes an OCI-backed BOM. |
 | `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
 | `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
-| `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end fresh-host wrapper for build, fetch, stage, render, install, and validate. |
+| `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, install, and validate. |
 | `scripts/poc/minimal-single-node/install.sh` | PoC-only installer for the rendered bundle. |
 | `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
 
@@ -367,6 +368,20 @@ Recommended command:
 
 ```bash
 cd /root/sealos-lifecycle
+scripts/poc/minimal-single-node/publish-oci.sh \
+  --registry-prefix localhost:5065/poc-minimal > /tmp/poc-oci.env
+
+set -a
+source /tmp/poc-oci.env
+set +a
+
+scripts/poc/minimal-single-node/render.sh --cluster poc-minimal
+```
+
+Developer override path when iterating on in-tree package directories:
+
+```bash
+cd /root/sealos-lifecycle
 ./bin/linux_amd64/sealos sync render \
   --file scripts/poc/minimal-single-node/bom.yaml \
   --cluster poc-minimal \
@@ -375,41 +390,17 @@ cd /root/sealos-lifecycle
   --package-source cilium=scripts/poc/minimal-single-node/packages/cilium
 ```
 
-Alternative wrapper once the binary is on `PATH`:
-
-```bash
-cd /root/sealos-lifecycle
-scripts/poc/minimal-single-node/render.sh
-```
-
-Verified OCI-backed variant on this machine:
-
-```bash
-cd /root/sealos-lifecycle
-scripts/poc/minimal-single-node/publish-oci.sh \
-  --registry-prefix localhost:5065/poc-minimal > /tmp/poc-oci.env
-
-set -a
-source /tmp/poc-oci.env
-set +a
-
-scripts/poc/minimal-single-node/render.sh \
-  --cluster poc-minimal \
-  --bom-file "${bom_path}" \
-  --package-mode oci
-```
-
 Success criteria:
 
-- local override render completes without buildah or registry usage
+- OCI-backed render completes with no `--package-source` overrides
 - `bundle.yaml` exists under
   `/root/.sealos/poc-minimal/distribution/bundles/current`
 - a new desired-state digest is emitted
 - `/root/.sealos/poc-minimal/distribution/applied-revision.yaml` is updated
-- the same render path also succeeds from OCI-backed BOM artifact references
-  with no `--package-source` overrides
 - the OCI-backed render path pulls package images from a registry and still
   produces the same rendered bundle shape
+- the local override path still works for in-tree development without buildah or
+  registry usage
 
 ### Phase 3: Install On A Real Host
 
@@ -579,8 +570,9 @@ Mitigation:
    `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`
    should remain tracked or return to a generated-only workflow.
 3. Use `scripts/poc/minimal-single-node/bootstrap.sh` as the default repeatable
-   path for fresh-host setup, and extend it only if new host prerequisites or
-   package inputs appear.
+   prepared-host path. It now exercises `publish -> render -> apply` through the
+   OCI-backed package flow, and should be extended only if new host
+   prerequisites or package inputs appear.
 4. If this PoC will be reused, add a reset or cleanup script for tearing down
    the single-node cluster between runs.
 

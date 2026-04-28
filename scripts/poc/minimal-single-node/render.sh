@@ -8,7 +8,7 @@ SEALOS_BIN="${SEALOS_BIN:-}"
 BOM_FILE="${POC_DIR}/bom.yaml"
 DEFAULT_LOCAL_BOM="${POC_DIR}/bom.yaml"
 DEFAULT_OCI_BOM="${POC_DIR}/artifacts/oci/bom.oci.yaml"
-PACKAGE_MODE="local"
+PACKAGE_MODE="auto"
 
 usage() {
   cat <<'EOF'
@@ -18,6 +18,7 @@ Usage:
 Renders the minimal single-node PoC bundle.
 
 Package modes:
+  auto   Prefer the generated OCI BOM when present, otherwise use local packages.
   local  Render from in-tree package directories via --package-source overrides.
   oci    Render from the BOM artifact image and digest references directly.
          Defaults to artifacts/oci/bom.oci.yaml when present.
@@ -82,13 +83,31 @@ main() {
   parse_args "$@"
   resolve_sealos_bin
 
-  if [[ "${PACKAGE_MODE}" == "oci" && "${BOM_FILE}" == "${DEFAULT_LOCAL_BOM}" ]]; then
-    if [[ -f "${DEFAULT_OCI_BOM}" ]]; then
-      BOM_FILE="${DEFAULT_OCI_BOM}"
-    else
-      fail "oci package mode requires --bom-file or a generated BOM at ${DEFAULT_OCI_BOM}; run publish-oci.sh first"
-    fi
-  fi
+  local resolved_mode="${PACKAGE_MODE}"
+  case "${PACKAGE_MODE}" in
+    auto)
+      if [[ "${BOM_FILE}" == "${DEFAULT_LOCAL_BOM}" && -f "${DEFAULT_OCI_BOM}" ]]; then
+        BOM_FILE="${DEFAULT_OCI_BOM}"
+        resolved_mode="oci"
+      else
+        resolved_mode="local"
+      fi
+      ;;
+    oci)
+      if [[ "${BOM_FILE}" == "${DEFAULT_LOCAL_BOM}" ]]; then
+        if [[ -f "${DEFAULT_OCI_BOM}" ]]; then
+          BOM_FILE="${DEFAULT_OCI_BOM}"
+        else
+          fail "oci package mode requires --bom-file or a generated BOM at ${DEFAULT_OCI_BOM}; run publish-oci.sh first"
+        fi
+      fi
+      ;;
+    local)
+      ;;
+    *)
+      fail "unsupported package mode: ${PACKAGE_MODE} (want auto, local, or oci)"
+      ;;
+  esac
 
   [[ -f "${BOM_FILE}" ]] || fail "bom file not found: ${BOM_FILE}"
 
@@ -99,7 +118,7 @@ main() {
     --cluster "${CLUSTER_NAME}"
   )
 
-  case "${PACKAGE_MODE}" in
+  case "${resolved_mode}" in
     local)
       args+=(
         --package-source "containerd=${REPO_ROOT}/scripts/poc/minimal-single-node/packages/containerd"
@@ -108,9 +127,6 @@ main() {
       )
       ;;
     oci)
-      ;;
-    *)
-      fail "unsupported package mode: ${PACKAGE_MODE} (want local or oci)"
       ;;
   esac
 

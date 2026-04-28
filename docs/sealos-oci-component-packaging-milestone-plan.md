@@ -46,15 +46,17 @@ What already exists:
   through the repo's existing buildah path
 - `cmd/sealos/cmd/sync.go` already falls back to the mounted-image path when a
   component is not supplied by `--package-source`
+- `cmd/sealos/cmd/sync_package.go` now provides first-class
+  `sealos sync package build` and `sealos sync package push` commands
 - `cmd/sealos/cmd/sync_test.go` now covers render from BOM-only OCI artifact
   references without real registry access
 - `pkg/distribution/hydrate/render_test.go` now covers render through the
   mounted-artifact source provider
-- `scripts/distribution/oci-package/build.sh` now builds deterministic package
-  images from package directories and disables manifest image saving during
-  package-image creation
-- `scripts/distribution/oci-package/push.sh` now pushes those images and prints
-  BOM-ready `image` and `digest` output
+- `pkg/distribution/ocipackage` now owns package metadata inspection,
+  manifest-referenced context staging, and deterministic timestamps for package
+  image builds
+- `scripts/distribution/oci-package/build.sh` and `push.sh` now act as thin
+  compatibility wrappers around the first-class `sync package` commands
 - `scripts/poc/minimal-single-node/publish-oci.sh` now stages a temporary
   package root, builds and pushes all three PoC package images, and writes an
   OCI-backed BOM
@@ -111,19 +113,17 @@ mount semantics.
 should stop at render input. Once the bundle is rendered, apply should behave
 exactly as it does today.
 
-### 3. Keep Packaging UX Narrow
+### 3. Productize Packaging In `sync package`
 
-The shortest path is not a full productized `sealos sync package` command yet.
-For this milestone, a repo helper script is enough if it is deterministic and
-testable.
+The initial helper path proved stable enough to promote into the CLI.
 
-Recommended initial packaging surface:
+The canonical packaging surface is now:
 
-- `scripts/distribution/oci-package/build.sh`
-- `scripts/distribution/oci-package/push.sh`
+- `sealos sync package build`
+- `sealos sync package push`
 
-If the helper path proves stable, a later milestone can promote it into CLI
-subcommands.
+The shell helpers under `scripts/distribution/oci-package/` remain as
+compatibility wrappers for repo scripts.
 
 ### 4. Keep Local `--package-source` As A Dev Override
 
@@ -164,10 +164,11 @@ This milestone is complete when all of the following are true:
 
 | Path | Responsibility |
 | --- | --- |
-| `scripts/distribution/oci-package/build.sh` | Build a package directory into an OCI image deterministically. |
-| `scripts/distribution/oci-package/push.sh` | Push the built image and print the resolved digest/reference data needed by the BOM. |
-| `scripts/distribution/oci-package/common.sh` | Shared helper logic for package metadata, sealos resolution, and destination normalization. |
-| `scripts/distribution/oci-package/metadata/` | Repo-local package metadata and path inspection used by the helper scripts. |
+| `cmd/sealos/cmd/sync_package.go` | Add first-class `sync package build/push` commands. |
+| `pkg/distribution/ocipackage/` | Own package metadata inspection, manifest-referenced path staging, and deterministic context normalization. |
+| `scripts/distribution/oci-package/build.sh` | Compatibility wrapper around `sealos sync package build`. |
+| `scripts/distribution/oci-package/push.sh` | Compatibility wrapper around `sealos sync package push`. |
+| `scripts/distribution/oci-package/common.sh` | Shared `sealos` binary resolution for the compatibility wrappers. |
 | `cmd/sealos/cmd/sync_test.go` | Add command-level coverage for render from OCI-backed package sources. |
 | `pkg/distribution/hydrate/render_test.go` | Add lower-level render coverage through the mounted-artifact source provider. |
 | `scripts/poc/minimal-single-node/publish-oci.sh` | Publish the full three-package PoC set to OCI and write a render-ready BOM. |
@@ -191,17 +192,19 @@ Exit criteria:
 - one package directory can be built into a mountable OCI image and loaded back
   through `packageformat.LoadFromImage`
 
-### Phase 1: Add Repo Helper Packaging Scripts
+### Phase 1: Add Packaging Commands And Compatibility Wrappers
 
-Goal: create the narrowest repo-owned path for building and pushing package
-images.
+Goal: create a first-class CLI path for building and pushing package images
+without breaking the repo scripts that already use the helper surface.
 
 Tasks:
 
 - add a helper that validates a package directory before image build
-- add a helper that builds an OCI image from that directory
-- add a helper that pushes the image and prints the resulting digest
-- use the helper to package the three minimal single-node PoC components
+- add a first-class CLI command that builds an OCI image from that directory
+- add a first-class CLI command that pushes the image and prints the resulting
+  digest
+- keep thin shell wrappers for repo orchestration scripts
+- use the CLI path to package the three minimal single-node PoC components
 
 Exit criteria:
 

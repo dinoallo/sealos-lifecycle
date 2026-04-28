@@ -152,8 +152,8 @@ build_and_push_component() {
   local package_dir="${PACKAGE_ROOT}/${component}"
   local image=""
 
-  eval "$(load_package_metadata "${package_dir}")"
-  image="${REGISTRY_PREFIX}/${PACKAGE_NAME}:${PACKAGE_VERSION}"
+  eval "$("${SEALOS_BIN}" sync package inspect --package-dir "${package_dir}" --output env)"
+  image="${REGISTRY_PREFIX}/${package_name}:${package_version}"
 
   log "building package image for ${component}"
   "${OCI_HELPER_DIR}/build.sh" \
@@ -161,33 +161,31 @@ build_and_push_component() {
     --image "${image}" \
     --platform "${PLATFORM}" \
     --timestamp "${TIMESTAMP}" \
-    --distribution "${DISTRIBUTION}" \
-    --sealos-bin "${SEALOS_BIN}" >/dev/null
+    --distribution "${DISTRIBUTION}" >/dev/null
 
   log "pushing package image for ${component}"
   eval "$(
     "${OCI_HELPER_DIR}/push.sh" \
       --image "${image}" \
-      --destination "${image}" \
-      --sealos-bin "${SEALOS_BIN}"
+      --destination "${image}"
   )"
 
   case "${component}" in
     containerd)
-      CONTAINERD_PACKAGE_NAME="${PACKAGE_NAME}"
-      CONTAINERD_PACKAGE_VERSION="${PACKAGE_VERSION}"
+      CONTAINERD_PACKAGE_NAME="${package_name}"
+      CONTAINERD_PACKAGE_VERSION="${package_version}"
       CONTAINERD_IMAGE="${image}"
       CONTAINERD_DIGEST="${digest}"
       ;;
     kubernetes)
-      KUBERNETES_PACKAGE_NAME="${PACKAGE_NAME}"
-      KUBERNETES_PACKAGE_VERSION="${PACKAGE_VERSION}"
+      KUBERNETES_PACKAGE_NAME="${package_name}"
+      KUBERNETES_PACKAGE_VERSION="${package_version}"
       KUBERNETES_IMAGE="${image}"
       KUBERNETES_DIGEST="${digest}"
       ;;
     cilium)
-      CILIUM_PACKAGE_NAME="${PACKAGE_NAME}"
-      CILIUM_PACKAGE_VERSION="${PACKAGE_VERSION}"
+      CILIUM_PACKAGE_NAME="${package_name}"
+      CILIUM_PACKAGE_VERSION="${package_version}"
       CILIUM_IMAGE="${image}"
       CILIUM_DIGEST="${digest}"
       ;;
