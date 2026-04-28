@@ -29,7 +29,7 @@ Runs the minimal single-node PoC on a prepared Linux host:
   2. start a temporary local registry
   3. publish the three PoC package images to OCI
   4. render the bundle from the generated OCI-backed BOM
-  5. install the rendered bundle
+  5. apply the rendered bundle with sealos sync apply
   6. validate the cluster
 
 This wrapper expects host prerequisites to already be in place:
@@ -116,7 +116,7 @@ parse_args() {
 
 require_root_if_needed() {
   if (( SKIP_INSTALL == 0 )) && [[ "${EUID}" -ne 0 ]]; then
-    fail "bootstrap install path must run as root"
+    fail "bootstrap apply path must run as root"
   fi
 }
 
@@ -241,12 +241,14 @@ render_bundle() {
     --sealos-bin "${SEALOS_BIN}"
 }
 
-install_bundle() {
-  log "installing rendered bundle"
-  "${SCRIPT_DIR}/install.sh" \
+apply_bundle() {
+  local bundle_dir="${SEALOS_HOME}/${CLUSTER_NAME}/distribution/bundles/current"
+
+  log "applying rendered bundle with sealos sync apply"
+  "${SEALOS_BIN}" sync apply \
     --cluster "${CLUSTER_NAME}" \
-    --kubeconfig "${KUBECONFIG_PATH}" \
-    --skip-validate
+    --bundle-dir "${bundle_dir}" \
+    --kubeconfig "${KUBECONFIG_PATH}"
 }
 
 validate_cluster() {
@@ -274,9 +276,9 @@ main() {
   trap cleanup EXIT
 
   if (( SKIP_INSTALL == 0 )); then
-    install_bundle
+    apply_bundle
   else
-    log "skipping install"
+    log "skipping apply"
   fi
 
   if (( SKIP_VALIDATE == 0 )); then

@@ -31,9 +31,9 @@ render/apply pieces:
 - `sealos sync apply` in `cmd/sealos/cmd/sync.go`
 - a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
 - runnable PoC assets under `scripts/poc/minimal-single-node/`
-- a PoC-only installer and validator:
-  - `scripts/poc/minimal-single-node/install.sh`
+- a PoC-only validation script plus a legacy compatibility wrapper:
   - `scripts/poc/minimal-single-node/validate.sh`
+  - `scripts/poc/minimal-single-node/install.sh`
 
 The main repo and host path has now been proven on this machine. The remaining
 gaps are broader follow-up work rather than blockers for the PoC itself:
@@ -51,14 +51,14 @@ PoC execution on 2026-04-27.
 | Item | Current State | Impact |
 | --- | --- | --- |
 | OS / arch | Linux x86_64 | Matches the amd64 PoC packages. |
-| User | `root` | Satisfies the installer's root requirement. |
+| User | `root` | Satisfies the host-apply root requirement. |
 | `gcc` | present at `/usr/bin/gcc` | Satisfies the CGO build requirement for `sealos`. |
 | `go` | `go1.23.1` on `PATH` | `make build BINS=sealos` works. |
 | `sealos` | present on `PATH` | `sealos sync render` works directly. |
 | `containerd`, `ctr`, `runc` | present and staged at PoC versions | Runtime payload is install-ready. |
 | `kubeadm`, `kubelet`, `kubectl` | present and staged at PoC versions | Kubernetes payload is install-ready. |
-| PID 1 | `systemd` | `install.sh` can manage services on this host. |
-| `systemctl is-system-running` | `running` | Confirms this host is valid for the PoC install path. |
+| PID 1 | `systemd` | `sealos sync apply` can manage services on this host. |
+| `systemctl is-system-running` | `running` | Confirms this host is valid for the PoC apply path. |
 | swap | disabled and `swap.img.swap` masked | Satisfies kubeadm preflight and survives reboot. |
 | cluster state | single-node cluster is up | `kubectl` reports one `Ready` control-plane node with Cilium healthy. |
 
@@ -66,7 +66,7 @@ Bottom line for this environment:
 
 - compile succeeded
 - render succeeded
-- install succeeded
+- apply succeeded
 - validation succeeded
 
 ## PoC Scope
@@ -78,7 +78,7 @@ Bottom line for this environment:
 - one BOM with three components
 - rendering via `sealos sync render`
 - applying via `sealos sync apply`
-- a PoC-only host installer script
+- a legacy compatibility install wrapper around `sync apply`
 - a PoC-only validation script
 - single-node Kubernetes bootstrap on one Linux host
 
@@ -133,8 +133,8 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/publish-oci.sh` | Publishes the PoC package set to OCI and writes an OCI-backed BOM. |
 | `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
 | `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
-| `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, install, and validate. |
-| `scripts/poc/minimal-single-node/install.sh` | PoC-only installer for the rendered bundle. |
+| `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, apply, and validate. |
+| `scripts/poc/minimal-single-node/install.sh` | Legacy compatibility wrapper that validates the bundle, then delegates to `sealos sync apply`. |
 | `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
 
 ## Package Responsibilities
@@ -226,10 +226,11 @@ The Cilium package is different now: `scripts/poc/minimal-single-node/packages/c
 is a tracked generated manifest because the package directory is meant to remain
 install-ready once assets have been refreshed.
 
-It is not enough for install-time execution:
+It is not enough for host apply:
 
-- `install.sh` explicitly rejects placeholder rootfs payloads
-- `install.sh` would also reject hook scripts if they were still placeholders
+- `install.sh` still rejects placeholder rootfs payloads before delegating
+  to `sync apply`
+- `install.sh` also rejects hook scripts if they are still placeholders
 - `install.sh` also checks that the staged Cilium manifest contains a real
   daemonset and deployment payload
 
@@ -402,7 +403,7 @@ Success criteria:
 - the local override path still works for in-tree development without buildah or
   registry usage
 
-### Phase 3: Install On A Real Host
+### Phase 3: Apply On A Real Host
 
 Status:
 
@@ -425,16 +426,17 @@ Minimum host prerequisites:
   - `kubeadm`
   - `kubelet`
 
-Command used on this host:
+Product CLI command used on this host:
 
 ```bash
 cd /root/sealos-lifecycle
-scripts/poc/minimal-single-node/install.sh \
+./bin/linux_amd64/sealos sync apply \
   --cluster poc-minimal \
-  --bundle-dir /root/.sealos/poc-minimal/distribution/bundles/current
+  --bundle-dir /root/.sealos/poc-minimal/distribution/bundles/current \
+  --kubeconfig /etc/kubernetes/admin.conf
 ```
 
-Expected install order in the current script:
+Expected apply order in the current `sync apply` executor:
 
 1. containerd preflight
 2. containerd rootfs and config copy
@@ -514,7 +516,7 @@ Status:
 
 Exit criteria:
 
-- install succeeds on a real systemd host or VM
+- apply succeeds on a real systemd host or VM
 - API server is healthy
 - node is `Ready`
 
@@ -587,7 +589,8 @@ Kubernetes PoC:
 - one BOM
 - one render command
 - one end-to-end bootstrap wrapper
-- one PoC-only installer
+- one `sync apply` command
+- one legacy compatibility installer wrapper
 - one PoC-only validator
 
 The core PoC is no longer hypothetical in this repo or on this host:
