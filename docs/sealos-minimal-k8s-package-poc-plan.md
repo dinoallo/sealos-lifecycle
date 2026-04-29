@@ -31,9 +31,8 @@ render/apply pieces:
 - `sealos sync apply` in `cmd/sealos/cmd/sync.go`
 - a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
 - runnable PoC assets under `scripts/poc/minimal-single-node/`
-- a PoC-only validation script plus a legacy compatibility wrapper:
+- a PoC-only validation script:
   - `scripts/poc/minimal-single-node/validate.sh`
-  - `scripts/poc/minimal-single-node/install.sh`
 
 The main repo and host path has now been proven on this machine. The remaining
 gaps are broader follow-up work rather than blockers for the PoC itself:
@@ -78,7 +77,6 @@ Bottom line for this environment:
 - one BOM with three components
 - rendering via `sealos sync render`
 - applying via `sealos sync apply`
-- a legacy compatibility install wrapper around `sync apply`
 - a PoC-only validation script
 - single-node Kubernetes bootstrap on one Linux host
 
@@ -134,7 +132,6 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
 | `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
 | `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, apply, and validate. |
-| `scripts/poc/minimal-single-node/install.sh` | Legacy compatibility wrapper around `sealos sync apply` plus optional `validate.sh`. |
 | `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
 
 ## Package Responsibilities
@@ -590,7 +587,6 @@ Kubernetes PoC:
 - one render command
 - one end-to-end bootstrap wrapper
 - one `sync apply` command
-- one legacy compatibility installer wrapper
 - one PoC-only validator
 
 The core PoC is no longer hypothetical in this repo or on this host:

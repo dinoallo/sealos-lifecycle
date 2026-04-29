@@ -11,7 +11,7 @@ KUBECONFIG_PATH="/etc/kubernetes/admin.conf"
 SEALOS_BIN="${REPO_ROOT}/bin/linux_amd64/sealos"
 REGISTRY_PORT="5065"
 SKIP_BUILD=0
-SKIP_INSTALL=0
+SKIP_APPLY=0
 SKIP_VALIDATE=0
 
 PUBLISH_ENV_FILE=""
@@ -44,7 +44,7 @@ Options:
   --registry-port PORT
   --sealos-bin PATH
   --skip-build
-  --skip-install
+  --skip-apply
   --skip-validate
 EOF
 }
@@ -95,8 +95,12 @@ parse_args() {
         SKIP_BUILD=1
         shift
         ;;
+      --skip-apply)
+        SKIP_APPLY=1
+        shift
+        ;;
       --skip-install)
-        SKIP_INSTALL=1
+        SKIP_APPLY=1
         shift
         ;;
       --skip-validate)
@@ -115,7 +119,7 @@ parse_args() {
 }
 
 require_root_if_needed() {
-  if (( SKIP_INSTALL == 0 )) && [[ "${EUID}" -ne 0 ]]; then
+  if (( SKIP_APPLY == 0 )) && [[ "${EUID}" -ne 0 ]]; then
     fail "bootstrap apply path must run as root"
   fi
 }
@@ -146,7 +150,7 @@ ensure_systemd_ready() {
 }
 
 preflight_host() {
-  if (( SKIP_INSTALL != 0 )); then
+  if (( SKIP_APPLY != 0 )); then
     return
   fi
 
@@ -261,7 +265,7 @@ validate_cluster() {
 main() {
   trap cleanup EXIT
   parse_args "$@"
-  if (( SKIP_INSTALL != 0 )); then
+  if (( SKIP_APPLY != 0 )); then
     SKIP_VALIDATE=1
   fi
   require_root_if_needed
@@ -275,7 +279,7 @@ main() {
   cleanup
   trap cleanup EXIT
 
-  if (( SKIP_INSTALL == 0 )); then
+  if (( SKIP_APPLY == 0 )); then
     apply_bundle
   else
     log "skipping apply"
