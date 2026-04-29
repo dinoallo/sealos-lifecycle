@@ -62,6 +62,7 @@ func init() {
 			Commands: []*cobra.Command{
 				newApplyCmd(),
 				newCertCmd(),
+				newKubeadmCmd(),
 				newKubeconfigCmd(),
 				newRunCmd(),
 				newResetCmd(),

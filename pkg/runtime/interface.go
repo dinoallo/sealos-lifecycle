@@ -37,6 +37,10 @@ type KubeConfigManager interface {
 	RefreshKubeConfigFiles(regenerateAll bool) error
 }
 
+type KubeadmCacheManager interface {
+	RefreshKubeadmCache(refreshToken, refreshCertificateKey bool) error
+}
+
 type Config interface {
 	GetComponents() []any
 }
