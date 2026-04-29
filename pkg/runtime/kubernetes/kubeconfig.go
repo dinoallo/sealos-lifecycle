@@ -18,12 +18,20 @@ package kubernetes
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/labring/sealos/pkg/cert"
 )
 
 const copyKubeAdminConfigCommand = `rm -rf $HOME/.kube/config && mkdir -p $HOME/.kube && cp /etc/kubernetes/admin.conf $HOME/.kube/config`
+
+var resolveLocalKubeConfigNodeName = func(k *KubeadmRuntime) (string, error) {
+	return k.execHostname(k.getMaster0IPAndPort())
+}
 
 func (k *KubeadmRuntime) copyKubeConfigFileToNodes(hosts ...string) error {
 	src := k.pathResolver.AdminFile()
@@ -44,4 +52,44 @@ func (k *KubeadmRuntime) copyKubeConfigFileToNodes(hosts ...string) error {
 
 func (k *KubeadmRuntime) copyMasterKubeConfig(host string) error {
 	return k.sshCmdAsync(host, copyKubeAdminConfigCommand)
+}
+
+func (k *KubeadmRuntime) RefreshKubeConfigFiles(regenerateAll bool) error {
+	nodeName := k.getMaster0IP()
+	files := []string{AdminConf}
+	if regenerateAll {
+		var err error
+		nodeName, err = resolveLocalKubeConfigNodeName(k)
+		if err != nil {
+			return fmt.Errorf("failed to resolve master0 hostname: %w", err)
+		}
+		files = []string{AdminConf, ControllerConf, SchedulerConf, KubeletConf}
+	}
+	return k.refreshLocalKubeConfigFiles(nodeName, files...)
+}
+
+func (k *KubeadmRuntime) refreshLocalKubeConfigFiles(nodeName string, files ...string) error {
+	if err := k.CompleteKubeadmConfig(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(k.pathResolver.EtcPath(), 0o755); err != nil {
+		return err
+	}
+
+	// The admin kubeconfig embeds a client cert signed by the cluster CA, so the
+	// kubeconfig can be rebuilt locally from the persisted PKI and API endpoint.
+	cfg := cert.Config{
+		Path:     k.pathResolver.PkiPath(),
+		BaseName: "ca",
+	}
+	for _, name := range files {
+		target := filepath.Join(k.pathResolver.EtcPath(), name)
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := cert.CreateKubeConfigFile(name, k.pathResolver.EtcPath(), cfg, nodeName, k.getClusterAPIServer(), "kubernetes"); err != nil {
+			return fmt.Errorf("failed to regenerate %s: %w", name, err)
+		}
+	}
+	return nil
 }

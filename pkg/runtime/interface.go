@@ -33,6 +33,10 @@ type CertManager interface {
 	UpdateCertSANs(certSANs []string) error
 }
 
+type KubeConfigManager interface {
+	RefreshKubeConfigFiles(regenerateAll bool) error
+}
+
 type Config interface {
 	GetComponents() []any
 }

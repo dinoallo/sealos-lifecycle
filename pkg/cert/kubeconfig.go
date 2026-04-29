@@ -72,7 +72,7 @@ func CreateJoinControlPlaneKubeConfigFiles(outDir string, cfg Config, nodeName, 
 // cmd/kubeadm/app/phases/kubeconfig/kubeconfig.go
 func CreateKubeConfigFile(kubeConfigFileName string, outDir string, cfg Config, nodeName, controlPlaneEndpoint, clusterName string) error {
 	logger.Info("creating kubeconfig file for %s", kubeConfigFileName)
-	return createKubeConfigFiles(outDir, cfg, kubeConfigFileName, nodeName, controlPlaneEndpoint, clusterName)
+	return createKubeConfigFiles(outDir, cfg, nodeName, controlPlaneEndpoint, clusterName, kubeConfigFileName)
 }
 
 // createKubeConfigFiles creates all the requested kubeconfig files.
