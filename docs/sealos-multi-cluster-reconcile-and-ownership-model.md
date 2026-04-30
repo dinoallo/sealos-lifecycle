@@ -17,6 +17,9 @@ adaptation, drift, or unsupported mutation.
   [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md).
 - For the OCI component package contract consumed during hydration, see
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md).
+- For the tracking model used after content is materialized into files,
+  Kubernetes objects, or generated outputs, see
+  [sealos-materialization-tracking-and-drift-detection-model.md](./sealos-materialization-tracking-and-drift-detection-model.md).
 - For release channels, health proof, and promotion rules, see
   [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md).
 - For repo-scoped package boundaries and implementation order, see

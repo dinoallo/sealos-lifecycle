@@ -21,6 +21,8 @@ recommended direction for the MVP and beyond.
   [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md)
 - Ownership and reconcile model:
   [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md)
+- Tracking model for rendered files, objects, and generated outputs:
+  [sealos-materialization-tracking-and-drift-detection-model.md](./sealos-materialization-tracking-and-drift-detection-model.md)
 - Package contract and `spec.inputs`:
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md)
 - Grafana and database example:

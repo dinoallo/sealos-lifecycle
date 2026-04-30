@@ -530,11 +530,246 @@ Initial execution targets:
 - `firstMaster`
 - `cluster`
 
+`target` currently applies to hooks, not to `spec.contents` entries.
+
+The important meaning is not “where the script happens to run”, but “what
+control surface and scope this hook is acting on”.
+
+Recommended semantics:
+
+- `allNodes`
+  The hook is a node-local action that must run separately on every selected
+  node. Use this for per-node preflight checks, host bootstrap, service
+  restarts, runtime installation, or node-local health checks.
+- `firstMaster`
+  The hook is a singleton control-plane bootstrap action that should run once
+  on the initial control-plane leader, not on every node. Use this for
+  `kubeadm init`-style first-writer operations or one-time cluster bring-up
+  steps that materialize the initial control plane.
+- `cluster`
+  The hook acts on the Kubernetes cluster as one logical API surface rather
+  than on one specific host. Use this for manifest health checks, cluster-wide
+  readiness checks, and other operations that talk to kube-apiserver or reason
+  about cluster objects.
+
+### Target Selection Rules
+
+Packagers should choose `target` by answering one question first:
+
+- is this hook operating on node-local host state, one-time control-plane
+  bootstrap state, or cluster API state?
+
+That leads to these rules:
+
+- Choose `allNodes` when every node must execute the hook independently.
+- Choose `firstMaster` when the action must run exactly once to initialize the
+  control plane or some singleton cluster primitive.
+- Choose `cluster` when the action is logically about Kubernetes objects or
+  cluster readiness, even if the command happens to run from one control-plane
+  host.
+
+### Typical Mappings
+
+| Hook Intent | Recommended Target | Why |
+| --- | --- | --- |
+| host preflight such as swap, kernel module, filesystem, or binary checks | `allNodes` | The check is node-local and must hold on each participating node. |
+| install or configure container runtime on each node | `allNodes` | Runtime state and service activation are per-node concerns. |
+| `kubeadm init` or similar one-time control-plane creation | `firstMaster` | This must run once on the bootstrap control-plane node. |
+| `kubeadm join`-style worker or secondary-control-plane preparation | `allNodes` in the current simplified model | The action is executed per node rather than against the cluster API as one object. |
+| health check for CNI, Grafana, or another application installed through manifests | `cluster` | The outcome is a property of cluster objects and workloads. |
+| validating a `Deployment`, `DaemonSet`, or `Job` reached ready state | `cluster` | Readiness is observed through kube-apiserver, not by inspecting one host only. |
+| checking a node-local systemd service after host mutation | `allNodes` | Service health is per-node. |
+
+### Recommended Class Defaults
+
+These are defaults, not hard schema rules:
+
+- `rootfs` packages usually use `allNodes` for preflight, bootstrap, and
+  node-local health checks.
+- `rootfs` packages may use `firstMaster` for one-time control-plane bootstrap
+  steps.
+- `application` packages usually use `cluster`.
+- `patch` packages may use `cluster` for manifest or API-level policy changes,
+  or `allNodes` when the patch really mutates node-local host state.
+
+Current package examples in this repository already follow this pattern:
+
+- `containerd-runtime`
+  - `preflight`: `allNodes`
+  - `bootstrap`: `allNodes`
+  - `healthcheck`: `allNodes`
+- `kubernetes-rootfs`
+  - `preflight`: `firstMaster`
+  - `bootstrap`: `allNodes`
+  - `healthcheck`: `cluster`
+- `cilium-cni`
+  - `healthcheck`: `cluster`
+
+### Anti-Patterns
+
+These choices should usually be rejected in review:
+
+- using `cluster` for a hook that only edits host files or restarts systemd
+  services
+- using `allNodes` for a singleton bootstrap action such as first control-plane
+  initialization
+- using `firstMaster` for ordinary application health checks
+- using `firstMaster` as a vague “default control-plane machine” target when
+  the real intent is cluster-scoped API interaction
+
+### Who Sets The Target, And When
+
+`target` should be declared by the package author when the package revision is
+authored.
+
+That means:
+
+- the packager chooses `spec.hooks[].target` in `package.yaml`
+- the chosen target becomes part of the immutable package contract
+- the BOM does not redefine it
+- the local repo does not redefine it
+
+So the logical target is determined at package-definition time, not during Day
+0 bootstrap and not during local hydration.
+
+The runtime system then has a separate responsibility:
+
+- hydration copies the declared target into the plan and rendered bundle
+- reconcile or apply resolves that logical target into concrete execution
+  placement for the current cluster
+
+In other words, there are two separate moments:
+
+1. `target declaration`
+   This happens at package authoring and package build time.
+2. `target resolution`
+   This happens at runtime, when the current cluster topology and execution
+   environment are known.
+
+### What Runtime Resolution Means
+
+The logical targets should resolve like this:
+
+- `allNodes`
+  Expand to the set of nodes that should execute the hook independently.
+- `firstMaster`
+  Resolve to the bootstrap control-plane leader or another well-defined first
+  control-plane node.
+- `cluster`
+  Resolve to one cluster-scoped execution context that can talk to
+  kube-apiserver and reason about cluster objects.
+
+The important point is that runtime resolution chooses the concrete placement,
+but it does not change the package's declared intent.
+
+### Where Node Inventory And Cluster Topology Come From
+
+For multi-node execution, target resolution needs two runtime inputs:
+
+- `node inventory`
+  The concrete set of nodes that belong to the cluster and their role
+  assignments.
+- `cluster topology`
+  The higher-level execution shape needed to interpret those nodes, especially:
+  - which node is `master0` or bootstrap leader
+  - which nodes are control-plane nodes
+  - which nodes are workers
+  - whether kube-apiserver is already expected to exist for `cluster`-scoped
+    hooks
+
+In the current Sealos repository, these concepts already exist in the older
+cluster-install path.
+
+The main source is the cluster object carried by the Clusterfile flow:
+
+- `ClusterSpec.Hosts` in [pkg/types/v1beta1/cluster.go](../pkg/types/v1beta1/cluster.go)
+- role- and order-aware getters in
+  [pkg/types/v1beta1/utils.go](../pkg/types/v1beta1/utils.go)
+
+That means the repository already has a first-pass runtime inventory model:
+
+- `GetMasterIPAndPortList()`
+- `GetNodeIPAndPortList()`
+- `GetMaster0IPAndPort()`
+
+Those are enough to resolve the current logical targets:
+
+- `allNodes` -> all selected hosts from the cluster inventory
+- `firstMaster` -> `master0`
+- `cluster` -> one cluster-scoped execution context that has kubeconfig and can
+  reach kube-apiserver
+
+### When Inventory And Topology Are Determined
+
+There are two different moments here as well:
+
+1. `installation-time topology declaration`
+   In the existing `sealos run` and Clusterfile flows, the operator declares
+   masters and nodes up front. That data is normalized into
+   `ClusterSpec.Hosts`.
+2. `reconcile-time topology loading`
+   A later distribution executor should load the current cluster inventory for
+   the named cluster and use it to resolve hook targets.
+
+So package authors declare the logical target, but the concrete node set should
+come from the cluster's runtime inventory, not from the package and not from
+the BOM.
+
+### Do We Need To Change Installation-Time Code
+
+For the current single-node PoC path, no additional install-time integration is
+required. The existing `sync apply` path is explicitly single-node today.
+
+For real multi-node distribution execution, yes, some code changes are needed,
+but they should be integration changes rather than a full rewrite of cluster
+installation.
+
+The repository already has installation-time inventory creation in the older
+cluster path, for example:
+
+- `sealos run` and related apply logic populate `ClusterSpec.Hosts`
+- the Kubernetes runtime already uses getters such as `getMaster0IPAndPort()`,
+  `getMasterIPAndPortList()`, and `getNodeIPAndPortList()`
+
+What is missing is that the new distribution path does not yet consume that
+inventory. Today:
+
+- `sync render` only takes a cluster name plus package sources
+- `sync apply` is described as applying to a prepared single-node host
+- the current distribution executor does not load cluster topology from the
+  existing Clusterfile or runtime objects
+
+So the likely next step is not “rewrite install”, but:
+
+- add one inventory/topology provider for the distribution runtime
+- load the named cluster's `ClusterSpec.Hosts` or equivalent runtime state
+- resolve `allNodes`, `firstMaster`, and `cluster` from that provider
+- keep the package contract unchanged
+
+That is the clean boundary:
+
+- install-time code creates or updates cluster inventory
+- distribution-time code consumes that inventory to resolve hook targets
+- package definitions keep declaring only logical scope
+
 Rules:
 
 - Hooks must reference a relative path inside the package.
 - Hooks should be used sparingly and only when declarative content is not sufficient.
 - Hydration and reconcile should be able to see hook intent from the manifest before execution.
+- `target` should describe the operational scope of the hook, not an arbitrary
+  machine choice.
+
+Current implementation note:
+
+- the current repository validates these target values and carries them through
+  hydration, but the multi-node execution model is still a design direction,
+  not a fully implemented distributed scheduler
+- in the current code path, `target` is declared in
+  `pkg/distribution/packageformat/types.go`, copied into hydrate steps in
+  `pkg/distribution/hydrate/plan.go`, rendered into the bundle in
+  `pkg/distribution/hydrate/render.go`, and only lightly validated in the
+  current single-node apply path
 
 ## Compatibility Contract
 

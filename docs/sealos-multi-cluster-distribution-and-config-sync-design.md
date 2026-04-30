@@ -182,6 +182,7 @@ mixed back into the top-level document:
 | Area | Why It Exists | Document |
 | --- | --- | --- |
 | Reconcile, ownership, and drift | Defines how the agent assembles desired state, classifies live changes, and handles failures. | [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md) |
+| Materialization tracking and drift detection | Defines how rendered files, Kubernetes objects, and generated outputs are identified and compared against live state. | [sealos-materialization-tracking-and-drift-detection-model.md](./sealos-materialization-tracking-and-drift-detection-model.md) |
 | Release channels, health proof, and promotion | Defines how validated changes move from local or canary use into shared baselines. | [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md) |
 | Repo execution plan | Defines command layout, Go package boundaries, milestones, and verification order for this repository. | [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md) |
 
