@@ -2,7 +2,11 @@
 
 ## Status
 
-Completed on this machine
+Locally validated milestone record
+
+This document now serves as both the milestone definition and a local validation
+record. Completion notes refer to one local environment unless stated
+otherwise.
 
 ## Source
 

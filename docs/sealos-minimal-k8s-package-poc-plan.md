@@ -2,7 +2,11 @@
 
 ## Status
 
-Verified on this machine
+Locally validated PoC record
+
+This document now serves as both the original PoC plan and a local validation
+record. Host-specific notes describe one prepared Linux environment and should
+not be read as a generic repo guarantee.
 
 ## Goal
 

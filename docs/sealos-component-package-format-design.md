@@ -10,6 +10,11 @@ This document defines how a Sealos component should be packaged as an OCI artifa
 
 The package format is intentionally based on the repository's current image model rather than replacing it. Today the code already distinguishes `rootfs`, `patch`, and `application` images, merges image metadata, and applies them with different execution semantics. The package format makes that contract explicit and machine-readable.
 
+## Related Documents
+
+- For the repo-verified OCI packaging milestone built on top of this contract, see [sealos-oci-component-packaging-milestone-plan.md](./sealos-oci-component-packaging-milestone-plan.md).
+- For the minimal prepared-host Kubernetes PoC that consumes these packages, see [sealos-minimal-k8s-package-poc-plan.md](./sealos-minimal-k8s-package-poc-plan.md).
+
 ## Why This Design Is Needed
 
 The multi-cluster design now has BOM and applied-revision schemas, but it still lacks a clear answer to one operational question: what exactly is a component artifact?
@@ -25,10 +30,10 @@ Without a formal package contract:
 
 The current repository already contains the seeds of a package model:
 
-- `rootfs`, `patch`, and `application` image classes in [pkg/types/v1beta1/cluster.go](/home/allosaurus/Workspace/sealos-lifecycle/pkg/types/v1beta1/cluster.go:52)
-- image metadata merging in [pkg/image/merge.go](/home/allosaurus/Workspace/sealos-lifecycle/pkg/image/merge.go:50)
-- class-specific execution behavior in [pkg/guest/guest.go](/home/allosaurus/Workspace/sealos-lifecycle/pkg/guest/guest.go:43)
-- config file injection through Clusterfile `Config` objects in [pkg/config/config.go](/home/allosaurus/Workspace/sealos-lifecycle/pkg/config/config.go:31)
+- `rootfs`, `patch`, and `application` image classes in [pkg/types/v1beta1/cluster.go](../pkg/types/v1beta1/cluster.go)
+- image metadata merging in [pkg/image/merge.go](../pkg/image/merge.go)
+- class-specific execution behavior in [pkg/guest/guest.go](../pkg/guest/guest.go)
+- config file injection through Clusterfile `Config` objects in [pkg/config/config.go](../pkg/config/config.go)
 
 The new package format should preserve compatibility with this behavior while making the package layout explicit.
 
@@ -189,9 +194,9 @@ Layout rules:
 
 ## Worked Example
 
-A fuller production-style Kubernetes rootfs example now lives at [pkg/distribution/packageformat/testdata/kubernetes-production-rootfs/package.yaml](/home/allosaurus/Workspace/sealos-lifecycle/pkg/distribution/packageformat/testdata/kubernetes-production-rootfs/package.yaml:1).
+A fuller production-style Kubernetes rootfs example now lives at [pkg/distribution/packageformat/testdata/kubernetes-production-rootfs/package.yaml](../pkg/distribution/packageformat/testdata/kubernetes-production-rootfs/package.yaml).
 
-A matching BOM example for that package now lives at [pkg/distribution/bom/testdata/default-platform-production-bom.yaml](/home/allosaurus/Workspace/sealos-lifecycle/pkg/distribution/bom/testdata/default-platform-production-bom.yaml:1).
+A matching BOM example for that package now lives at [pkg/distribution/bom/testdata/default-platform-production-bom.yaml](../pkg/distribution/bom/testdata/default-platform-production-bom.yaml).
 
 That fixture is intentionally more complete than the minimal bootstrap example. It shows:
 
@@ -341,7 +346,7 @@ Recommended migration path:
 
 ## Initial Go Schema
 
-The initial schema lives in [pkg/distribution/packageformat/types.go](/home/allosaurus/Workspace/sealos-lifecycle/pkg/distribution/packageformat/types.go:15).
+The initial schema lives in [pkg/distribution/packageformat/types.go](../pkg/distribution/packageformat/types.go).
 
 It covers:
 

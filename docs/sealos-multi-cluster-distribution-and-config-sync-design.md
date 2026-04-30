@@ -10,6 +10,11 @@ This document proposes a Sealos architecture for distributing system baselines a
 
 The core idea is to separate immutable global baselines from cluster-local differences, then let an in-cluster agent pull, hydrate, and apply the final desired state. The design aims to preserve offline autonomy, keep secrets local, and provide a controlled path for promoting validated local fixes into the upstream distribution baseline.
 
+## Related Documents
+
+- For the component artifact contract that this design assumes, see [sealos-component-package-format-design.md](./sealos-component-package-format-design.md).
+- For the repo-scoped epics, milestones, and package boundaries, see [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md).
+
 ## Problem Statement
 
 Operating Sealos across multiple clusters creates several conflicting requirements:
@@ -209,11 +214,15 @@ Rejected because it mixes cluster-local secrets and environment-specific configu
 
 Rejected because it removes a shared baseline, makes promotion difficult, and increases long-term drift.
 
-## Implementation Plan
+## Implementation Outlook
 
-Yes. This design is sufficient to draft an implementation plan, but the plan should explicitly separate decision-gating work from feature delivery. The current open questions do not block planning, but they do block parts of implementation.
+This design is sufficient to drive implementation planning, but the detailed
+repo execution breakdown should live outside the design document. The current
+open questions do not block planning, but they do block parts of implementation.
 
-For a repo-aligned execution breakdown with epics, milestones, and suggested package boundaries, see `docs/sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md`.
+For the repo-aligned execution breakdown with epics, milestones, suggested
+package boundaries, and testing order, see
+[sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md).
 
 ### Decision Gates
 
