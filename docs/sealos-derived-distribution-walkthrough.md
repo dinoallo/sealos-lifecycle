@@ -30,6 +30,8 @@ productized one-command workflow.
   [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md)
 - Release channels and promotion policy:
   [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md)
+- BOM and `DistributionChannel` semantics:
+  [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md)
 - Component package contract:
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md)
 - Current PoC BOM:
@@ -198,7 +200,9 @@ Typical changes:
 
 - change `metadata.name`
 - change `spec.revision`
-- optionally change `spec.channel`
+- in the current BOM schema, optionally change `spec.channel`
+- in the target release model, publish or update a separate
+  `DistributionChannel`
 - keep the dependency graph explicit
 - keep unchanged components on their upstream artifact digests
 

@@ -28,6 +28,8 @@ distribution line，通常表现为：
   [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md)
 - release channel 与 promotion：
   [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md)
+- BOM 与 `DistributionChannel` 语义：
+  [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md)
 - 组件包契约：
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md)
 - 当前 PoC BOM：
@@ -182,7 +184,8 @@ distribution line，通常表现为：
 
 - `metadata.name`
 - `spec.revision`
-- 必要时 `spec.channel`
+- 在当前 BOM schema 里，必要时 `spec.channel`
+- 在目标 release 模型里，发布或更新单独的 `DistributionChannel`
 - 明确保留依赖图
 - 未变更的组件继续引用上游 artifact digest
 

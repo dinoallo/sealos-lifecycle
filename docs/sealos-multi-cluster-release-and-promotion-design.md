@@ -18,6 +18,9 @@ and explicit promotion rules.
   [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md).
 - For the OCI component artifact contract consumed by BOMs, see
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md).
+- For the concrete object model around BOM revisions and `DistributionChannel`,
+  see
+  [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md).
 - For repo-scoped implementation sequencing, see
   [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md).
 

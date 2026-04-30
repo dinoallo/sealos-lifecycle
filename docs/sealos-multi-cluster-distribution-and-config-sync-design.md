@@ -24,6 +24,9 @@ this document can stay at the architecture level.
   [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md).
 - For release channels, health proof, and promotion policy, see
   [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md).
+- For the object model around BOM revisions, distribution lines, and
+  `DistributionChannel`, see
+  [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md).
 - For repo-scoped epics, milestones, package boundaries, and testing order, see
   [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md).
 
