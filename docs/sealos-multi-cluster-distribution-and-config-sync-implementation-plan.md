@@ -6,11 +6,17 @@ Draft
 
 ## Source
 
-This plan is derived from `docs/sealos-multi-cluster-distribution-and-config-sync-design.md` and translates the design into repo-scoped implementation work.
+This plan is derived from:
+
+- `docs/sealos-multi-cluster-distribution-and-config-sync-design.md`
+- `docs/sealos-multi-cluster-reconcile-and-ownership-model.md`
+- `docs/sealos-multi-cluster-release-and-promotion-design.md`
+
+It translates those design documents into repo-scoped implementation work.
 
 ## Planning Assumptions
 
-- The design document remains the source of truth for architecture intent.
+- The design documents remain the source of truth for architecture intent.
 - The patch format, ownership rules, revision metadata, and promotion workflow are still decision gates.
 - Early implementation should target infrastructure distribution first and defer broad tenant workload support.
 - The first useful outcome is not full automation. It is a deterministic, recoverable infrastructure MVP.

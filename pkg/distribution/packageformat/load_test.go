@@ -38,7 +38,7 @@ func TestLoadDirProductionKubernetesExample(t *testing.T) {
 	if got, want := pkg.Metadata.Name, "kubernetes-production-rootfs"; got != want {
 		t.Fatalf("metadata.name = %q, want %q", got, want)
 	}
-	if got, want := len(pkg.Spec.Inputs), 4; got != want {
+	if got, want := len(pkg.Spec.Inputs), 3; got != want {
 		t.Fatalf("len(spec.inputs) = %d, want %d", got, want)
 	}
 	if got, want := len(pkg.Spec.Contents), 7; got != want {

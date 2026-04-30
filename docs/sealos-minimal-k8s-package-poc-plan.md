@@ -253,11 +253,11 @@ sorts component dependencies before rendering.
 
 `sealos sync render` currently materializes the desired state bundle to:
 
-- `/root/.sealos/poc-minimal/distribution/bundles/current`
+- `<sealos-run-root>/distribution/bundles/current`
 
 and applied state to:
 
-- `/root/.sealos/poc-minimal/distribution/applied-revision.yaml`
+- `<sealos-run-root>/distribution/applied-revision.yaml`
 
 The bundle contains:
 
@@ -269,6 +269,11 @@ This is not hypothetical. It is the behavior implemented by:
 
 - `pkg/distribution/reconcile/materialize.go`
 - `pkg/distribution/hydrate/render.go`
+
+For the validated run recorded in this document:
+
+- `<repo-root>` was `/root/sealos-lifecycle`
+- `<sealos-run-root>` was `/root/.sealos/poc-minimal`
 
 ## Execution Plan
 
@@ -285,14 +290,14 @@ Required version:
 Build command once Go is installed:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 make build BINS=sealos
 ```
 
 Expected binary:
 
 ```text
-/root/sealos-lifecycle/bin/linux_amd64/sealos
+<repo-root>/bin/linux_amd64/sealos
 ```
 
 Success criteria:
@@ -313,7 +318,7 @@ Fastest path on this machine:
 Command shape:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 scripts/poc/minimal-single-node/stage-assets.sh \
   --kubelet-bin /usr/bin/kubelet \
   --cilium-manifest /absolute/path/to/real/cilium.yaml
@@ -335,7 +340,7 @@ Notes:
 Optional helper path if you want the repo to fetch assets instead:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 assets_file=/tmp/poc-minimal-assets.env
 scripts/poc/minimal-single-node/fetch-assets.sh > "${assets_file}"
 set -a
@@ -369,7 +374,7 @@ Status:
 Recommended command:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 scripts/poc/minimal-single-node/publish-oci.sh \
   --registry-prefix localhost:5065/poc-minimal > /tmp/poc-oci.env
 
@@ -383,7 +388,7 @@ scripts/poc/minimal-single-node/render.sh --cluster poc-minimal
 Developer override path when iterating on in-tree package directories:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 ./bin/linux_amd64/sealos sync render \
   --file scripts/poc/minimal-single-node/bom.yaml \
   --cluster poc-minimal \
@@ -396,9 +401,9 @@ Success criteria:
 
 - OCI-backed render completes with no `--package-source` overrides
 - `bundle.yaml` exists under
-  `/root/.sealos/poc-minimal/distribution/bundles/current`
+  `<sealos-run-root>/distribution/bundles/current`
 - a new desired-state digest is emitted
-- `/root/.sealos/poc-minimal/distribution/applied-revision.yaml` is updated
+- `<sealos-run-root>/distribution/applied-revision.yaml` is updated
 - the OCI-backed render path pulls package images from a registry and still
   produces the same rendered bundle shape
 - the local override path still works for in-tree development without buildah or
@@ -430,10 +435,10 @@ Minimum host prerequisites:
 Product CLI command used on this host:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 ./bin/linux_amd64/sealos sync apply \
   --cluster poc-minimal \
-  --bundle-dir /root/.sealos/poc-minimal/distribution/bundles/current \
+  --bundle-dir <sealos-run-root>/distribution/bundles/current \
   --kubeconfig /etc/kubernetes/admin.conf
 ```
 
@@ -469,10 +474,10 @@ Status:
 Command:
 
 ```bash
-cd /root/sealos-lifecycle
+cd <repo-root>
 scripts/poc/minimal-single-node/validate.sh \
   --cluster poc-minimal \
-  --bundle-dir /root/.sealos/poc-minimal/distribution/bundles/current \
+  --bundle-dir <sealos-run-root>/distribution/bundles/current \
   --kubeconfig /etc/kubernetes/admin.conf
 ```
 

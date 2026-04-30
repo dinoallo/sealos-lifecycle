@@ -145,6 +145,251 @@ Anti-recommendation:
 
 That split would create unnecessary dependency and upgrade complexity without matching how most operators actually manage Kubernetes.
 
+### Packager Checklist: One Package Or Many
+
+The default packaging choice should be one package.
+
+Do not split a component into multiple packages unless there is a clear
+operational lifecycle boundary. Package count is not an optimization target by
+itself. Every extra package adds more BOM edges, upgrade ordering, ownership
+rules, and test combinations.
+
+Use this decision order when packaging a component:
+
+1. Start with one package for the whole component.
+2. If a value is expected to vary per cluster, model it as a declared `input`,
+   not as a new package.
+3. If a change is a reusable platform opinion shared by many clusters, model it
+   as shared package content or a `patch` package, not as ad-hoc local data.
+4. Split into a separate package only if the candidate slice has a genuinely
+   independent lifecycle.
+
+### Quick Decision Table
+
+| Question | If Yes | If No |
+| --- | --- | --- |
+| Does this vary mainly by cluster installation facts such as CIDR, endpoint, mirror, secret, or node inventory? | Keep one package and expose a declared `input`. | Go to the next question. |
+| Is this a reusable SRE or platform opinion that several clusters should share? | Keep it `global` as package content or move it into a `patch` package. | Go to the next question. |
+| Does it have its own release cadence, owner, upgrade window, or rollback need? | Consider a separate package. | Keep it in the existing package. |
+| Would operators reasonably want to manage or replace it independently? | Consider a separate package. | Keep it in the existing package. |
+| Would splitting reduce blast radius without creating tightly coupled version choreography? | A separate package may be justified. | Keep it in the existing package. |
+
+### Independent Lifecycle Signals
+
+The strongest reasons to split into a separate package are:
+
+- independent version stream
+- independent operational owner or team
+- independent upgrade and rollback workflow
+- independent dependency graph
+- independent failure domain or blast radius
+- realistic operator need to swap or omit it
+
+If most of those signals are absent, do not split.
+
+### Strong Reasons Not To Split
+
+Keep content in one package when:
+
+- the parts are tightly version-coupled
+- they are almost always upgraded together
+- one part is only a small implementation detail of another
+- splitting would introduce ordering complexity without real operator value
+- the only difference is that some fields vary per cluster
+
+### Output Choices
+
+After walking the checklist, there are only four normal outcomes:
+
+| Situation | Packaging Outcome |
+| --- | --- |
+| Per-cluster installation fact | Declared `input` |
+| Shared reusable policy or hardening layer | `patch` package or shared package content |
+| Genuine independent subsystem | Separate package |
+| Everything else | Keep it in the current package |
+
+### Examples In This Design
+
+| Candidate | Recommended Outcome | Why |
+| --- | --- | --- |
+| cluster name, CIDR, advertise address | `input` | These are installation facts that vary per cluster. |
+| image mirror overrides | `input` | These are environment bindings, not a new lifecycle boundary. |
+| audit policy | `patch` package or shared package content | This is a reusable platform opinion, not per-cluster installation data. |
+| admission controller defaults | `patch` package | These should travel as one shared policy layer. |
+| container runtime | Separate package | It has a distinct host lifecycle boundary and may be managed independently from Kubernetes bootstrap. |
+| CNI | Separate package | It has its own release cadence, owner, and operational blast radius. |
+| `kubelet` versus `kube-apiserver` as separate first-class packages | Do not split | They are tightly coupled and usually move together. |
+
+### Global Vs Local At Package Scope
+
+A component package is global by default.
+
+That means everything physically stored in the OCI artifact is part of the
+shared, immutable baseline unless the package manifest explicitly models it as a
+local binding surface.
+
+| Package Element | Default Scope | Why |
+| --- | --- | --- |
+| `metadata`, `spec.component`, `spec.version`, `spec.class` | `global` | Package identity and lifecycle boundary must be the same for every cluster that consumes the artifact digest. |
+| `spec.compatibility`, `spec.dependencies` | `global` | Selection rules and dependency intent are part of the reusable package contract, not per-cluster data. |
+| `spec.contents` entries and the bytes stored under `rootfs/`, `manifests/`, `charts/`, `files/`, `hooks/` | `global` | These are the payload being distributed and must remain immutable for a digest-pinned artifact. |
+| `spec.hooks` and the referenced hook scripts | `global` | Execution logic is package behavior, not cluster-local state. |
+| `spec.inputs` declarations | `global` | The package declares which surfaces are allowed to vary, but the declaration itself is part of the shared contract. |
+| Actual values bound to `spec.inputs` during hydration | `local` | These values come from the target cluster's local repo or secret path and may legitimately vary per cluster. |
+| Local overlays against package-defined extension points | `local` | These are cluster-specific adaptations applied after artifact selection and must be validated by ownership rules. |
+| Secrets, node inventory, runtime-discovered state | `local` | These are environment-bound and must not be baked into the shared artifact. |
+
+The practical rule is:
+
+- if it must be digest-pinned and reused across clusters, it is `global`
+- if it is supplied after artifact selection and is expected to vary by cluster,
+  it is `local`
+- if it represents a reusable platform opinion that should travel across many
+  clusters, it should become package content or a separate patch package, not an
+  ad-hoc local input
+
+For example, in a `kubernetes-rootfs` package:
+
+- `global`: kubelet and kubeadm binaries, systemd units, bootstrap hooks,
+  healthcheck manifests, default kubeadm config structure, baseline audit
+  policy, and dependency declarations
+- `local`: cluster name, advertise address, pod CIDR, service CIDR, image
+  mirror overrides, kubelet extra environment values, private certificates, and
+  environment-specific registry settings
+
+This is why audit policy belongs more naturally in a shared package or patch
+package than in a cluster-local input path. It is usually a reusable platform
+opinion, not an installation-specific fact like CIDR or endpoint address.
+
+### Initial Per-Package Global/Local Matrix
+
+The following matrix applies the ownership rule to the initial package set used
+throughout this design.
+
+`Local binding surface` means the cluster-specific data that may be bound at
+hydrate time. It does not mean the package can be overridden arbitrarily.
+
+| Package | Global Baseline In The Package | Local Binding Surface | Shared But Not Local |
+| --- | --- | --- | --- |
+| `containerd-runtime` | `containerd`, `ctr`, `runc`, packaged runtime config defaults, service units or drop-ins, preflight/bootstrap/healthcheck hooks | registry mirror endpoints, sandbox image location, private CA or auth references, proxy settings, environment-specific runtime path tweaks if unavoidable | common runtime hardening, default snapshotter choice, standard plugin enablement, reusable registry policy |
+| `kubernetes-rootfs` | `kubeadm`, `kubelet`, `kubectl`, systemd units, sysctl profile, bootstrap manifests, bootstrap and healthcheck hooks, baseline kubeadm config structure | cluster name, control-plane endpoint, advertise address, node IP inventory, pod/service CIDR, image repository overrides, private certificates or CA refs, kubelet extra env | audit policy, admission controller config, reusable API server flags, static-pod patches, common kubelet config overlays |
+| `cilium-cni` | Cilium manifest or chart revision, baseline RBAC and DaemonSet resources, default feature profile, healthcheck logic | cluster-specific IPAM values, native-routing or pod-CIDR integration, MTU overrides, environment-specific mirror refs, approved nodeSelector or toleration overrides | whether Cilium is the chosen CNI, shared `kubeProxyReplacement` policy, shared Hubble profile, standard operator sizing policy |
+| `kubernetes-control-plane-patch` (later) | reusable control-plane hardening overlays, audit policy, admission config, shared policy manifests, reusable static-pod patches | cluster-specific endpoint refs, certificate refs, narrowly scoped environment-specific exemptions | the hardening profile itself, standard platform security defaults |
+
+The decision pattern should be consistent across packages:
+
+- versioned binaries, manifests, hook logic, and default policy belong to
+  `global`
+- installation facts, private endpoints, secrets, and topology-specific values
+  belong to `local`
+- reusable SRE or platform opinions that many clusters should share belong to
+  `global`, often as package content or a separate patch package
+
+### About Packaged Default Files Used By Inputs
+
+Some current package examples use the same path both as packaged content and as
+an input declaration, such as:
+
+- `files/etc/containerd/config.toml`
+- `files/etc/kubernetes/kubeadm.yaml`
+- `files/values/basic.yaml`
+
+Those files should be interpreted as package-owned defaults, schemas, or merge
+bases.
+
+They do not become `local` just because the manifest declares an input at that
+path. What is `local` is the concrete value bound during hydration, not the
+baseline file carried by the artifact.
+
+### Promoting Repeated Local Binding Into Official Inputs
+
+Repeated use of local binding is strong product feedback, but it should not be
+treated as an automatic rule that every high-frequency override becomes a new
+`input`.
+
+The right interpretation is:
+
+- repeated local binding means the package boundary probably needs refinement
+- the refinement may be a new `input`
+- but it may also be a better baseline default, a `patch` package, or a
+  separate package
+
+Use this decision order:
+
+1. If many clusters adjust the same dimension, first ask whether the dimension
+   is truly expected to differ per cluster.
+2. If the answer is yes, promote it into an explicit `input` so the package
+   contract names it, validates it, and documents it.
+3. If the answer is no because clusters are converging on the same value, move
+   that value into the shared baseline or a `patch` package instead.
+4. If the overrides are starting to express a reusable capability layer with its
+   own lifecycle, stop expanding the input surface and consider a separate
+   package boundary.
+
+### Promotion Checklist
+
+Promote repeated local binding into an official `input` only when most of these
+statements are true:
+
+- the value is expected to vary by cluster, not just by release history
+- the variation does not change the component's core ownership boundary
+- the input can be named clearly in the package contract
+- the input can be validated structurally or semantically
+- the allowed value range is small enough to keep package behavior predictable
+- exposing the input does not turn the package into a generic pass-through for
+  arbitrary internal settings
+
+If several of those statements are false, do not automatically expand the input
+surface.
+
+### Anti-Pattern Checks
+
+Repeated local binding should usually **not** become a new `input` when:
+
+- clusters are converging on the same final value
+- the override is really a shared SRE or platform policy
+- the override changes too much of the package's internal behavior
+- the value cannot be validated cleanly
+- the new input would become a catch-all escape hatch for implementation detail
+
+In those cases, the better answer is usually one of:
+
+- improve the baseline default
+- add shared package content
+- introduce a `patch` package
+- split a genuinely independent subsystem into its own package
+
+### Outcome Matrix
+
+| Observed Pattern Across Clusters | Recommended Outcome |
+| --- | --- |
+| Same dimension changes often, but each cluster needs its own value | Promote to an explicit `input` |
+| Many clusters independently converge on the same setting | Move it into the shared baseline or a `patch` package |
+| A reusable policy bundle appears across clusters | Model it as shared content or a `patch` package |
+| Overrides start to describe a subsystem with its own lifecycle | Consider a separate package |
+
+### Cilium Examples
+
+For `cilium-cni`, these are good candidates to promote into or keep as official
+inputs:
+
+- cluster-specific IPAM values
+- native routing or pod-CIDR integration values
+- MTU
+- environment-specific mirror settings
+- narrowly scoped placement or toleration overrides
+
+These are better candidates for shared baseline or patch-level treatment if
+many clusters converge on them:
+
+- whether `hubble` is enabled by default
+- whether `kubeProxyReplacement` is part of the platform standard
+- a standard operator sizing profile
+- a standard observability or security profile around Cilium
+
+The goal is not to maximize the number of inputs. The goal is to make the input
+surface explicit, stable, and intentionally small.
+
 ### Evolution Path
 
 Recommended adoption sequence:
@@ -197,6 +442,9 @@ Layout rules:
 A fuller production-style Kubernetes rootfs example now lives at [pkg/distribution/packageformat/testdata/kubernetes-production-rootfs/package.yaml](../pkg/distribution/packageformat/testdata/kubernetes-production-rootfs/package.yaml).
 
 A matching BOM example for that package now lives at [pkg/distribution/bom/testdata/default-platform-production-bom.yaml](../pkg/distribution/bom/testdata/default-platform-production-bom.yaml).
+
+A workload-oriented example with a database boundary and local Secret handling
+now lives at [sealos-grafana-kubeblocks-example.md](./sealos-grafana-kubeblocks-example.md).
 
 That fixture is intentionally more complete than the minimal bootstrap example. It shows:
 
@@ -253,6 +501,15 @@ Initial input types:
 - `env`
 
 This is important because current application packaging often relies on implicit config file paths such as `etc/mysql-config.yaml`. The package format should make those expectations explicit so hydration can validate them before apply.
+
+Important boundary rule:
+
+- `spec.inputs` declares a `global` contract surface
+- the concrete value bound to an input is `local`
+
+If an input path points at a file inside the package, that packaged file should
+be interpreted as a default, schema anchor, or merge base. The package still
+owns the baseline file. The cluster only owns the value bound at hydration time.
 
 ## Hooks
 

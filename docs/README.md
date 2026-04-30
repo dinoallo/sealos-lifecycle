@@ -12,20 +12,31 @@ repo-scoped execution work, and some record PoC or milestone validation.
 | Document | Role | Status |
 | --- | --- | --- |
 | [sealos-component-package-format-design.md](./sealos-component-package-format-design.md) | Defines the OCI-backed component package contract consumed by BOM resolution and hydration. | Design draft with implementation-aligned examples. |
-| [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md) | Describes the top-level multi-cluster distribution model, ownership rules, and reconcile architecture. | Design draft. |
+| [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md) | Defines the top-level multi-cluster distribution architecture and its core boundaries. | Design draft. |
+| [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md) | Defines desired-state assembly, ownership rules, drift states, and reconcile failure semantics. | Sub-design draft. |
+| [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md) | Defines release channels, health proof, and promotion guardrails for shared baselines. | Sub-design draft. |
 | [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md) | Breaks the multi-cluster design into repo-scoped epics, milestones, package boundaries, and testing order. | Execution draft. |
+| [sealos-cilium-packaging-walkthrough.md](./sealos-cilium-packaging-walkthrough.md) | Walks through the current Cilium component package flow from package directory to OCI image, BOM, and render output. | How-to draft with [Chinese translation](./sealos-cilium-packaging-walkthrough.zh-CN.md). |
+| [sealos-grafana-kubeblocks-example.md](./sealos-grafana-kubeblocks-example.md) | Shows a design example for packaging Grafana with a KubeBlocks-managed PostgreSQL backend while keeping Secret bytes local. | Design example with [Chinese translation](./sealos-grafana-kubeblocks-example.zh-CN.md). |
+| [sealos-derived-distribution-walkthrough.md](./sealos-derived-distribution-walkthrough.md) | Explains how a cluster should diverge from the shared baseline by creating a derived BOM and selectively forked package revisions. | How-to draft with [Chinese translation](./sealos-derived-distribution-walkthrough.zh-CN.md). |
 | [sealos-oci-component-packaging-milestone-plan.md](./sealos-oci-component-packaging-milestone-plan.md) | Captures the milestone boundary for OCI-backed component packaging and records the verified repo outcome. | Locally validated milestone record. |
 | [sealos-minimal-k8s-package-poc-plan.md](./sealos-minimal-k8s-package-poc-plan.md) | Defines and records the minimal single-node Kubernetes PoC for the package and BOM flow. | Locally validated PoC record. |
 
 ## Recommended Reading Order
 
 1. Start with [sealos-component-package-format-design.md](./sealos-component-package-format-design.md) to understand the component artifact contract.
-2. Read [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md) for the broader pull-based distribution model.
-3. Use [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md) for repo implementation sequencing.
-4. Use [sealos-oci-component-packaging-milestone-plan.md](./sealos-oci-component-packaging-milestone-plan.md) to understand the OCI packaging milestone that has already been proven in this repo.
-5. Use [sealos-minimal-k8s-package-poc-plan.md](./sealos-minimal-k8s-package-poc-plan.md) when you need the prepared-host PoC flow and validation shape.
+2. Read [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md) for the architecture-level distribution model.
+3. Read [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md) for control-loop behavior, ownership, and drift semantics.
+4. Read [sealos-multi-cluster-release-and-promotion-design.md](./sealos-multi-cluster-release-and-promotion-design.md) for release-channel and promotion policy.
+5. Use [sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md](./sealos-multi-cluster-distribution-and-config-sync-implementation-plan.md) for repo implementation sequencing.
+6. Read [sealos-cilium-packaging-walkthrough.md](./sealos-cilium-packaging-walkthrough.md) when you want a concrete example of the current packaging flow.
+7. Read [sealos-grafana-kubeblocks-example.md](./sealos-grafana-kubeblocks-example.md) when you want a stateful application example that includes a database boundary and Secret handling.
+8. Read [sealos-derived-distribution-walkthrough.md](./sealos-derived-distribution-walkthrough.md) when you want the supported conceptual path for a cluster to fork into a derived distribution line.
+9. Use [sealos-oci-component-packaging-milestone-plan.md](./sealos-oci-component-packaging-milestone-plan.md) to understand the OCI packaging milestone that has already been proven in this repo.
+10. Use [sealos-minimal-k8s-package-poc-plan.md](./sealos-minimal-k8s-package-poc-plan.md) when you need the prepared-host PoC flow and validation shape.
 
 ## Notes
 
 - The two plan documents with local validation notes are useful as historical evidence, but they should not be read as generic guarantees for every environment.
-- The multi-cluster design document captures architecture intent. The dedicated implementation plan is the source for epics, milestones, and package-by-package execution breakdown.
+- The multi-cluster docs now follow a three-layer structure: architecture overview, focused sub-designs, and one dedicated implementation plan.
+- The implementation plan is the source for epics, milestones, command layout, and package-by-package execution breakdown.

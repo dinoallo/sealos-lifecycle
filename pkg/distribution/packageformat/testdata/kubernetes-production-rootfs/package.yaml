@@ -29,10 +29,6 @@ spec:
       path: files/etc/kubernetes/kubeadm.yaml
       format: yaml
       required: true
-    - name: audit-policy
-      type: configFile
-      path: files/etc/kubernetes/audit-policy.yaml
-      format: yaml
     - name: image-repository-overrides
       type: valuesFile
       path: files/values/images.yaml
