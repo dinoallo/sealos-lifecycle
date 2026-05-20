@@ -165,6 +165,23 @@ func MarkSuccessfulApply(clusterName string) (*AppliedRevision, error) {
 	return doc, nil
 }
 
+func MarkDegraded(clusterName, reason, message string) (*AppliedRevision, bool, error) {
+	doc, err := LoadAppliedRevision(clusterName)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	doc.Status.State = StateDegraded
+	doc.Status.Conditions = upsertCondition(doc.Status.Conditions, NewCondition(ConditionTypeApplied, corev1.ConditionFalse, reason, message))
+	if err := SaveAppliedRevision(doc); err != nil {
+		return nil, false, err
+	}
+	return doc, true, nil
+}
+
 func PersistObservedState(clusterName, desiredStateDigest string, observedState ClusterState, observedSummary *ObservedSummary, message string) (*AppliedRevision, bool, error) {
 	if err := observedState.Validate(); err != nil {
 		return nil, false, err
