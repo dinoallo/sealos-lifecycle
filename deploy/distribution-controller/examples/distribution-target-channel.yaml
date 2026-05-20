@@ -22,5 +22,6 @@ spec:
   localRepoPath: /var/lib/sealos/distribution/default-platform/local-repo
   kubeconfigPath: /host/etc/kubernetes/admin.conf
   hostRoot: /host
-  rolloutBatchSize: 1
+  rolloutPolicyRef:
+    name: one-host-at-a-time
   requeueAfter: 10m

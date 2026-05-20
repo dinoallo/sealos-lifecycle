@@ -27,6 +27,7 @@ rules:
       - distribution.sealos.io
     resources:
       - distributiontargets
+      - distributionrolloutpolicies
     verbs:
       - get
       - list

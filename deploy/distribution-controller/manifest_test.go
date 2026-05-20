@@ -43,6 +43,7 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 		filepath.Join("base", "crd.yaml"),
 		filepath.Join("base", "rbac.yaml"),
 		filepath.Join("base", "deployment.yaml"),
+		filepath.Join("examples", "distribution-rollout-policy.yaml"),
 		filepath.Join("examples", "distribution-target-bom.yaml"),
 		filepath.Join("examples", "distribution-target-channel.yaml"),
 	)
@@ -50,10 +51,12 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 	want := []schema.GroupVersionKind{
 		{Version: "v1", Kind: "Namespace"},
 		{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"},
+		{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"},
 		{Version: "v1", Kind: "ServiceAccount"},
 		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"},
 		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
 		{Group: "apps", Version: "v1", Kind: "Deployment"},
+		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionRolloutPolicy"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 	}
@@ -75,6 +78,7 @@ func TestDistributionControllerDirectApplyFileSet(t *testing.T) {
 	want := []schema.GroupVersionKind{
 		{Version: "v1", Kind: "Namespace"},
 		{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"},
+		{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"},
 		{Version: "v1", Kind: "ServiceAccount"},
 		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"},
 		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
@@ -88,8 +92,7 @@ func TestDistributionControllerDirectApplyFileSet(t *testing.T) {
 func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 	t.Parallel()
 
-	var crd apiextensionsv1.CustomResourceDefinition
-	loadSingleManifestObject(t, filepath.Join("base", "crd.yaml"), &crd)
+	crd := loadCRD(t, "distributiontargets.distribution.sealos.io")
 
 	if got, want := crd.Name, "distributiontargets.distribution.sealos.io"; got != want {
 		t.Fatalf("CRD name = %q, want %q", got, want)
@@ -121,6 +124,7 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 		"cacheRoot",
 		"kubeconfigPath",
 		"hostRoot",
+		"rolloutPolicyRef",
 		"rolloutBatchSize",
 		"requeueAfter",
 	} {
@@ -141,6 +145,31 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 		if _, ok := status.Properties[field]; !ok {
 			t.Fatalf("CRD status schema missing field %q", field)
 		}
+	}
+}
+
+func TestDistributionRolloutPolicyCRDMatchesControllerContract(t *testing.T) {
+	t.Parallel()
+
+	crd := loadCRD(t, "distributionrolloutpolicies.distribution.sealos.io")
+
+	if got, want := crd.Spec.Group, "distribution.sealos.io"; got != want {
+		t.Fatalf("CRD group = %q, want %q", got, want)
+	}
+	if got, want := crd.Spec.Names.Kind, distributioncontroller.KindDistributionRolloutPolicy; got != want {
+		t.Fatalf("CRD kind = %q, want %q", got, want)
+	}
+	if got, want := crd.Spec.Scope, apiextensionsv1.NamespaceScoped; got != want {
+		t.Fatalf("CRD scope = %q, want %q", got, want)
+	}
+	version := crdVersion(t, crd, "v1alpha1")
+	if version.Subresources == nil || version.Subresources.Status == nil {
+		t.Fatal("CRD v1alpha1 status subresource is not enabled")
+	}
+	spec := version.Schema.OpenAPIV3Schema.Properties["spec"]
+	strategy := spec.Properties["strategy"]
+	if _, ok := strategy.Properties["batchSize"]; !ok {
+		t.Fatal("CRD rollout policy strategy schema missing batchSize")
 	}
 }
 
@@ -211,10 +240,24 @@ func TestDistributionControllerRBACContract(t *testing.T) {
 		t.Fatal("Role not found")
 	}
 
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets"}, []string{"get", "list", "watch"})
+	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets", "distributionrolloutpolicies"}, []string{"get", "list", "watch"})
 	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets/status"}, []string{"get", "patch", "update"})
 	assertRule(t, role.Rules, []string{"coordination.k8s.io"}, []string{"leases"}, []string{"create", "get", "list", "update", "watch"})
 	assertRule(t, role.Rules, []string{""}, []string{"events"}, []string{"create", "patch"})
+}
+
+func loadCRD(t *testing.T, name string) apiextensionsv1.CustomResourceDefinition {
+	t.Helper()
+
+	objects := loadManifestObjects(t, filepath.Join("base", "crd.yaml"))
+	for _, object := range objects {
+		crd, ok := object.(*apiextensionsv1.CustomResourceDefinition)
+		if ok && crd.Name == name {
+			return *crd
+		}
+	}
+	t.Fatalf("CRD %q not found", name)
+	return apiextensionsv1.CustomResourceDefinition{}
 }
 
 func loadSingleManifestObject(t *testing.T, relPath string, into runtime.Object) {

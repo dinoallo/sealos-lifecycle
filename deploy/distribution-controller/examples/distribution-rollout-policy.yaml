@@ -12,16 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 apiVersion: distribution.sealos.io/v1alpha1
-kind: DistributionTarget
+kind: DistributionRolloutPolicy
 metadata:
-  name: default-platform
+  name: one-host-at-a-time
   namespace: sealos-system
 spec:
-  clusterName: default
-  bomPath: /var/lib/sealos/distribution/default-platform/bom.yaml
-  localRepoPath: /var/lib/sealos/distribution/default-platform/local-repo
-  kubeconfigPath: /host/etc/kubernetes/admin.conf
-  hostRoot: /host
-  rolloutPolicyRef:
-    name: one-host-at-a-time
-  requeueAfter: 10m
+  strategy:
+    batchSize: 1

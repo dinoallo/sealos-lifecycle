@@ -8,14 +8,16 @@ controller 驱动 reconcile loop。
 [`deploy/distribution-controller/base`](../deploy/distribution-controller/base)
 里的 base manifests 会安装：
 
-- `distribution.sealos.io/v1alpha1` `DistributionTarget` CRD
+- `distribution.sealos.io/v1alpha1` `DistributionTarget` 和
+  `DistributionRolloutPolicy` CRD
 - `sealos-system` namespace
 - `sealos-distribution-controller` service account、role 和 role binding
 - 一个运行 `sealos-agent --controller` 的 deployment
 
 controller 会 watch `sealos-system` 里的 `DistributionTarget` 对象，把每个 target
 映射成一次现有 agent reconcile pass，并写入 `Ready` 和 `Degraded` status
-condition。
+condition。target 可以通过 `spec.rolloutPolicyRef` 引用同 namespace 下的
+`DistributionRolloutPolicy`；policy 更新后会重新 enqueue 引用它的 targets。
 
 service account RBAC 只覆盖被 watch 的 API、status 更新、leader election leases 和
 events。rendered bundle apply 仍然使用 `spec.kubeconfigPath` 或 deployment 默认值选择的
@@ -61,6 +63,7 @@ kubectl -n sealos-system set image \
 kubectl apply -f deploy/distribution-controller/base/namespace.yaml
 kubectl apply -f deploy/distribution-controller/base/crd.yaml
 kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
 kubectl apply -f deploy/distribution-controller/base/rbac.yaml
 kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
 ```
@@ -79,6 +82,12 @@ kubectl apply -k .
 
 ## 创建 Distribution Target
 
+先创建示例 targets 引用的 rollout policy：
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-rollout-policy.yaml
+```
+
 如果集群要 apply 一个明确的 BOM 文件，使用 pinned BOM target：
 
 ```bash
@@ -92,11 +101,15 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-cha
 ```
 
 controller 要求 `spec.bomPath` 和 `spec.distributionChannelPath` 必须二选一，且不能同时设置。
-这两个路径都必须能在 controller pod 内读取。
+这两个路径都必须能在 controller pod 内读取。示例 `DistributionRolloutPolicy` 设置了
+`spec.strategy.batchSize: 1`，会让符合条件的 host-targeted steps 一次滚动一个 host。
+如果 target 没有设置 `spec.rolloutPolicyRef`，仍可使用旧的 inline
+`spec.rolloutBatchSize` fallback。
 
 ## 检查状态
 
 ```bash
+kubectl -n sealos-system get distributionrolloutpolicies
 kubectl -n sealos-system get distributiontargets
 kubectl -n sealos-system describe distributiontarget default-platform
 kubectl -n sealos-system logs deploy/sealos-distribution-controller -c sealos-agent
@@ -107,6 +120,7 @@ desired state digest 和 applied revision path。
 
 ## 当前边界
 
-这只是最小 controller 安装路径。它还没有加入 registry-backed `DistributionChannel`
-lookup、promotion automation、canary pause、带 health gate 的 rollout 或自动 rollback。
-controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。
+这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
+rendered-bundle executor 使用的 host rollout batch size。它还没有加入 registry-backed
+`DistributionChannel` lookup、promotion automation、canary pause、带 health gate 的
+rollout 或自动 rollback。controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。

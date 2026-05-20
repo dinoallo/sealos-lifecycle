@@ -98,10 +98,19 @@ spec:
                 hostRoot:
                   type: string
                   description: Host filesystem root used for host apply steps.
+                rolloutPolicyRef:
+                  type: object
+                  description: Same-namespace DistributionRolloutPolicy used for durable rollout behavior.
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
                 rolloutBatchSize:
                   type: integer
                   minimum: 0
-                  description: Maximum hosts processed per eligible host rollout batch; 0 means all hosts.
+                  description: Inline fallback maximum hosts processed per eligible host rollout batch; ignored when rolloutPolicyRef is set; 0 means all hosts.
                 requeueAfter:
                   type: string
                   format: duration
@@ -143,6 +152,95 @@ spec:
                       type: string
                     appliedRevisionPath:
                       type: string
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: distributionrolloutpolicies.distribution.sealos.io
+spec:
+  group: distribution.sealos.io
+  names:
+    kind: DistributionRolloutPolicy
+    listKind: DistributionRolloutPolicyList
+    plural: distributionrolloutpolicies
+    shortNames:
+      - distrollout
+    singular: distributionrolloutpolicy
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: BatchSize
+          type: integer
+          jsonPath: .spec.strategy.batchSize
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                strategy:
+                  type: object
+                  description: Durable rollout strategy used by referencing DistributionTarget objects.
+                  properties:
+                    batchSize:
+                      type: integer
+                      minimum: 0
+                      description: Maximum hosts processed per eligible host rollout batch; 0 means all hosts.
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
                 conditions:
                   type: array
                   x-kubernetes-list-type: map
