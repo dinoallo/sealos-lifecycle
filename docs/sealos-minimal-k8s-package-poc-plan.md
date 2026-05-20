@@ -317,10 +317,11 @@ sealos sync health-proof \
 
 The generated `DistributionHealthProof` is conservative: safe smoke reports
 without mutating apply evidence, reports whose BOM file, rendered BOM
-line/revision, or rendered BOM digest differ from the target BOM, missing
-expected acceptance stages, failed stages, blocked preflight, or missing clean
-post-apply state produce `spec.passed: false` and should not satisfy
-beta/stable promotion policy.
+line/revision, or rendered BOM digest differ from the target BOM, reports
+missing rendered desired-state/local-repo revision digests, missing expected
+acceptance stages, failed stages, blocked preflight, or missing clean post-apply
+state produce `spec.passed: false` and should not satisfy beta/stable promotion
+policy.
 
 Host mutation is deliberately opt-in:
 

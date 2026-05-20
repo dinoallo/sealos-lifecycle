@@ -388,8 +388,9 @@ sealos sync health-proof \
 The generated proof targets the line and revision from the BOM passed with
 `--file`. It is conservative: the proof passes only when the report passed with
 exit code `0`, the report BOM file, rendered BOM line/revision, and rendered
-BOM digest match the target BOM, source and runtime preflight were
-non-blocking, mutating apply was exercised, post-apply state is `Clean`,
+BOM digest match the target BOM, rendered `desiredStateDigest` and
+`localRepoRevision` are present and valid digests, source and runtime preflight
+were non-blocking, mutating apply was exercised, post-apply state is `Clean`,
 post-revert state is `Clean` when `revertCheck: true`, and the expected
 smoke/apply/revert acceptance stages are present, passing, and mark mutating
 steps as mutating. Safe smoke reports that do not run a mutating apply still

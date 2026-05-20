@@ -371,12 +371,13 @@ sealos sync health-proof \
 
 生成出来的 proof 会使用 `--file` 指向的 BOM 里的 line 和 revision。它是保守
 判定：只有 report 本身通过且 exit code 为 `0`、report 里的 BOM file、已
-render 的 BOM line/revision 和 BOM digest 都匹配目标 BOM、source/runtime
-preflight 没有 blocking、确实跑过 mutating apply、post-apply state 是
-`Clean`、`revertCheck: true` 时 post-revert state 也是 `Clean`，并且没有失败
-stage，并且预期的 smoke/apply/revert acceptance stages 都存在、通过且把会修改
-环境的步骤标记为 mutating，proof 才会是 `spec.passed: true`。只跑 safe
-smoke、没有 mutating apply 的 report 仍然可以生成 evidence，但会得到
+render 的 BOM line/revision 和 BOM digest 都匹配目标 BOM、已 render 的
+`desiredStateDigest` 和 `localRepoRevision` 存在且是合法 digest、
+source/runtime preflight 没有 blocking、确实跑过 mutating apply、post-apply
+state 是 `Clean`、`revertCheck: true` 时 post-revert state 也是 `Clean`，并且
+没有失败 stage，并且预期的 smoke/apply/revert acceptance stages 都存在、通过且
+把会修改环境的步骤标记为 mutating，proof 才会是 `spec.passed: true`。只跑
+safe smoke、没有 mutating apply 的 report 仍然可以生成 evidence，但会得到
 `spec.passed: false`，不应该满足 beta/stable promotion policy。
 
 最小 health proof 形态如下：

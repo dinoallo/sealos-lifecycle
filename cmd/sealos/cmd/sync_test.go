@@ -634,6 +634,12 @@ func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
 	if !syncHealthProofTestSignalPassed(out, "bom-digest") {
 		t.Fatal("bom-digest signal did not pass")
 	}
+	if !syncHealthProofTestSignalPassed(out, "desired-state-digest") {
+		t.Fatal("desired-state-digest signal did not pass")
+	}
+	if !syncHealthProofTestSignalPassed(out, "local-repo-revision") {
+		t.Fatal("local-repo-revision signal did not pass")
+	}
 	if !syncHealthProofTestSignalPassed(out, "mutating-apply") {
 		t.Fatal("mutating-apply signal did not pass")
 	}
@@ -967,6 +973,97 @@ func TestSyncHealthProofCmdFailsWhenContractStageMissing(t *testing.T) {
 	}
 	if syncHealthProofTestSignalPassed(out, "contract/render") {
 		t.Fatal("contract/render signal passed, want failed")
+	}
+}
+
+func TestSyncHealthProofCmdFailsWhenRenderedStateIdentityMissing(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		mutateOpts func(*syncHealthProofTestReportOptions)
+		signalName string
+	}{
+		{
+			name: "missing desired state digest",
+			mutateOpts: func(opts *syncHealthProofTestReportOptions) {
+				opts.SkipDesiredStateDigest = true
+			},
+			signalName: "desired-state-digest",
+		},
+		{
+			name: "invalid desired state digest",
+			mutateOpts: func(opts *syncHealthProofTestReportOptions) {
+				opts.DesiredStateDigest = "not-a-digest"
+			},
+			signalName: "desired-state-digest",
+		},
+		{
+			name: "missing local repo revision",
+			mutateOpts: func(opts *syncHealthProofTestReportOptions) {
+				opts.SkipLocalRepoRevision = true
+			},
+			signalName: "local-repo-revision",
+		},
+		{
+			name: "invalid local repo revision",
+			mutateOpts: func(opts *syncHealthProofTestReportOptions) {
+				opts.LocalRepoRevision = "not-a-digest"
+			},
+			signalName: "local-repo-revision",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			bomPath := filepath.Join(root, "bom.yaml")
+			targetBOM := testSyncBOM()
+			if err := yamlutil.MarshalFile(bomPath, targetBOM); err != nil {
+				t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+			}
+			bomData, err := os.ReadFile(bomPath)
+			if err != nil {
+				t.Fatalf("ReadFile(targetBOM) error = %v", err)
+			}
+
+			reportOpts := syncHealthProofTestReportOptions{
+				BOMFile:               bomPath,
+				BOMName:               targetBOM.Metadata.Name,
+				BOMRevision:           targetBOM.Spec.Revision,
+				BOMDigest:             digest.Canonical.FromBytes(bomData).String(),
+				Status:                "Passed",
+				ExitCode:              0,
+				MutatingApply:         true,
+				SourcePreflightState:  "Ready",
+				RuntimePreflightState: "Ready",
+				PostApplyState:        "Clean",
+				Stages:                syncHealthProofTestStages(false),
+			}
+			tt.mutateOpts(&reportOpts)
+			reportPath := filepath.Join(root, "acceptance-report.yaml")
+			writeSyncHealthProofTestReport(t, reportPath, reportOpts)
+
+			buf := bytes.NewBuffer(nil)
+			cmd := newSyncCmd()
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs([]string{
+				"health-proof",
+				"--file", bomPath,
+				"--acceptance-report", reportPath,
+			})
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+			}
+			var out bom.DistributionHealthProof
+			if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+				t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+			}
+			if out.Spec.Passed {
+				t.Fatal("spec.passed = true, want false")
+			}
+			if syncHealthProofTestSignalPassed(out, tt.signalName) {
+				t.Fatalf("%s signal passed, want failed", tt.signalName)
+			}
+		})
 	}
 }
 
@@ -9585,20 +9682,24 @@ func testSyncBOM() *bom.BOM {
 }
 
 type syncHealthProofTestReportOptions struct {
-	BOMFile               string
-	BOMName               string
-	BOMRevision           string
-	BOMDigest             string
-	SkipBOMIdentity       bool
-	Status                string
-	ExitCode              int
-	MutatingApply         bool
-	RevertCheck           bool
-	SourcePreflightState  string
-	RuntimePreflightState string
-	PostApplyState        string
-	PostRevertState       string
-	Stages                []syncHealthProofAcceptanceReportStage
+	BOMFile                string
+	BOMName                string
+	BOMRevision            string
+	BOMDigest              string
+	SkipBOMIdentity        bool
+	Status                 string
+	ExitCode               int
+	MutatingApply          bool
+	RevertCheck            bool
+	SourcePreflightState   string
+	RuntimePreflightState  string
+	PostApplyState         string
+	PostRevertState        string
+	DesiredStateDigest     string
+	LocalRepoRevision      string
+	SkipDesiredStateDigest bool
+	SkipLocalRepoRevision  bool
+	Stages                 []syncHealthProofAcceptanceReportStage
 }
 
 func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthProofTestReportOptions) {
@@ -9621,6 +9722,14 @@ func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthPr
 	bomDigest := opts.BOMDigest
 	if bomDigest == "" {
 		bomDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	}
+	desiredStateDigest := opts.DesiredStateDigest
+	if desiredStateDigest == "" && !opts.SkipDesiredStateDigest {
+		desiredStateDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	}
+	localRepoRevision := opts.LocalRepoRevision
+	if localRepoRevision == "" && !opts.SkipLocalRepoRevision {
+		localRepoRevision = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	}
 
 	report := syncHealthProofAcceptanceReport{
@@ -9649,8 +9758,8 @@ func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthPr
 			Kubeconfig:            "/etc/kubernetes/admin.conf",
 			HostRoot:              "/",
 			OutputsFormat:         "yaml",
-			DesiredStateDigest:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			LocalRepoRevision:     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			DesiredStateDigest:    desiredStateDigest,
+			LocalRepoRevision:     localRepoRevision,
 			SourcePreflightState:  opts.SourcePreflightState,
 			RuntimePreflightState: opts.RuntimePreflightState,
 			PostApplyState:        opts.PostApplyState,

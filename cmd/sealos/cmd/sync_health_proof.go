@@ -265,6 +265,8 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOM *
 		syncHealthProofBOMFileSignal(report.Spec.BOMFile, targetBOMPath),
 		syncHealthProofBOMIdentitySignal(report.Spec.BOMName, report.Spec.BOMRevision, targetBOM),
 		syncHealthProofBOMDigestSignal(report.Spec.BOMDigest, targetBOMPath),
+		syncHealthProofDigestValueSignal("desired-state-digest", "desiredStateDigest", report.Spec.DesiredStateDigest),
+		syncHealthProofDigestValueSignal("local-repo-revision", "localRepoRevision", report.Spec.LocalRepoRevision),
 	}
 	signals = append(signals, syncHealthProofContractSignals(report)...)
 	signals = append(signals, bom.DistributionHealthSignal{
@@ -416,6 +418,29 @@ func syncHealthProofBOMFileSignal(reportBOMPath, targetBOMPath string) bom.Distr
 		Name:    "bom-file",
 		Passed:  filepath.Clean(reportBOMPath) == filepath.Clean(targetBOMPath),
 		Message: fmt.Sprintf("report=%s target=%s", filepath.Clean(reportBOMPath), filepath.Clean(targetBOMPath)),
+	}
+}
+
+func syncHealthProofDigestValueSignal(name, field, value string) bom.DistributionHealthSignal {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return bom.DistributionHealthSignal{
+			Name:    name,
+			Passed:  false,
+			Message: field + "=<missing>",
+		}
+	}
+	if _, err := digest.Parse(value); err != nil {
+		return bom.DistributionHealthSignal{
+			Name:    name,
+			Passed:  false,
+			Message: fmt.Sprintf("%s=%s invalid: %v", field, value, err),
+		}
+	}
+	return bom.DistributionHealthSignal{
+		Name:    name,
+		Passed:  true,
+		Message: field + "=" + value,
 	}
 }
 
