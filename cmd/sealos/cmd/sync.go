@@ -226,7 +226,6 @@ func newSyncPromoteCmd() *cobra.Command {
 				Reason:        flags.reason,
 				ApprovedBy:    flags.approvedBy,
 				ApprovedAt:    approvedAt,
-				AppendHistory: true,
 			})
 			if err != nil {
 				return err
@@ -239,7 +238,7 @@ func newSyncPromoteCmd() *cobra.Command {
 				FromRevision:            result.FromRevision,
 				ToRevision:              result.ToRevision,
 				Changed:                 result.Changed,
-				Promotion:               result.Channel.Spec.PromotionHistory[len(result.Channel.Spec.PromotionHistory)-1],
+				Promotion:               result.Promotion,
 			}
 			return writeSyncOutput(cmd, out, flags.output, "promotion result")
 		},

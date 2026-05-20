@@ -122,5 +122,6 @@ desired state digest 和 applied revision path。
 
 这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
 rendered-bundle executor 使用的 host rollout batch size。它还没有加入 registry-backed
-`DistributionChannel` lookup、promotion automation、canary pause、带 health gate 的
-rollout 或自动 rollback。controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。
+`DistributionChannel` lookup、带 health gate 的 channel promotion、canary pause、
+带 health gate 的 rollout 或自动 rollback。controller 仍然委托给现有 BOM 驱动的
+render/apply agent 路径。

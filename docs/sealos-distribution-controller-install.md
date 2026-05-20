@@ -131,6 +131,6 @@ revision, the desired state digest, and the applied revision path.
 
 This is a minimal controller install path. `DistributionRolloutPolicy` currently
 persists the host rollout batch size used by the rendered-bundle executor. It
-does not add registry-backed `DistributionChannel` lookup, promotion automation,
-canary pauses, health-gated rollouts, or automatic rollback. The controller
-still delegates to the existing BOM-driven render/apply agent path.
+does not add registry-backed `DistributionChannel` lookup, health-gated channel
+promotion, canary pauses, health-gated rollouts, or automatic rollback. The
+controller still delegates to the existing BOM-driven render/apply agent path.

@@ -212,7 +212,6 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 		Reason:        "beta cohort passed",
 		ApprovedBy:    "release-team",
 		ApprovedAt:    approvedAt,
-		AppendHistory: true,
 	})
 	if err != nil {
 		t.Fatalf("PromoteDistributionChannelFile() error = %v", err)
@@ -237,6 +236,9 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 		t.Fatalf("len(promotionHistory) = %d, want %d", got, want)
 	}
 	entry := result.Channel.Spec.PromotionHistory[0]
+	if got, want := result.Promotion, entry; got != want {
+		t.Fatalf("Promotion = %#v, want %#v", got, want)
+	}
 	if got, want := entry.FromRevision, "rev-20240423"; got != want {
 		t.Fatalf("promotionHistory[0].fromRevision = %q, want %q", got, want)
 	}

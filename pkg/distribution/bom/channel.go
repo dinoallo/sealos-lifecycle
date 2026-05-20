@@ -63,7 +63,6 @@ type PromoteDistributionChannelOptions struct {
 	Reason        string
 	ApprovedBy    string
 	ApprovedAt    time.Time
-	AppendHistory bool
 }
 
 type PromoteDistributionChannelResult struct {
@@ -74,6 +73,7 @@ type PromoteDistributionChannelResult struct {
 	FromRevision string
 	ToRevision   string
 	Changed      bool
+	Promotion    DistributionPromotionRef
 }
 
 func NewDistributionChannel(name, line string, channel ReleaseChannel, targetRevision, bomPath string) *DistributionChannel {
@@ -227,21 +227,19 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
 	channel.Spec.BOMPath = targetBOMPathForChannel
 
-	if opts.AppendHistory {
-		approvedAt := opts.ApprovedAt
-		if approvedAt.IsZero() {
-			approvedAt = time.Now().UTC()
-		}
-		channel.Spec.PromotionHistory = append(channel.Spec.PromotionHistory, DistributionPromotionRef{
-			FromRevision: strings.TrimSpace(fromRevision),
-			ToRevision:   targetBOM.Spec.Revision,
-			BOMPath:      targetBOMPathForChannel,
-			Reason:       reason,
-			ApprovedBy:   approvedBy,
-			ApprovedAt:   approvedAt.UTC().Format(time.RFC3339),
-		})
-		changed = true
+	approvedAt := opts.ApprovedAt
+	if approvedAt.IsZero() {
+		approvedAt = time.Now().UTC()
 	}
+	promotion := DistributionPromotionRef{
+		FromRevision: strings.TrimSpace(fromRevision),
+		ToRevision:   targetBOM.Spec.Revision,
+		BOMPath:      targetBOMPathForChannel,
+		Reason:       reason,
+		ApprovedBy:   approvedBy,
+		ApprovedAt:   approvedAt.UTC().Format(time.RFC3339),
+	}
+	channel.Spec.PromotionHistory = append(channel.Spec.PromotionHistory, promotion)
 
 	if err := channel.Validate(); err != nil {
 		return nil, fmt.Errorf("validate promoted distribution channel %q: %w", channelPath, err)
@@ -258,6 +256,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		FromRevision: fromRevision,
 		ToRevision:   targetBOM.Spec.Revision,
 		Changed:      changed,
+		Promotion:    promotion,
 	}, nil
 }
 
