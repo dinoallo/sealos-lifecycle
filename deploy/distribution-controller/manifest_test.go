@@ -133,6 +133,10 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 	if got, want := deployment.Spec.Template.Spec.ServiceAccountName, "sealos-distribution-controller"; got != want {
 		t.Fatalf("service account = %q, want %q", got, want)
 	}
+	assertRequiredNodeAffinity(t, deployment.Spec.Template.Spec.Affinity, "node-role.kubernetes.io/control-plane")
+	assertRequiredNodeAffinity(t, deployment.Spec.Template.Spec.Affinity, "node-role.kubernetes.io/master")
+	assertToleration(t, deployment.Spec.Template.Spec.Tolerations, "node-role.kubernetes.io/control-plane", corev1.TaintEffectNoSchedule)
+	assertToleration(t, deployment.Spec.Template.Spec.Tolerations, "node-role.kubernetes.io/master", corev1.TaintEffectNoSchedule)
 	if len(deployment.Spec.Template.Spec.Containers) != 1 {
 		t.Fatalf("container count = %d, want 1", len(deployment.Spec.Template.Spec.Containers))
 	}
@@ -327,6 +331,35 @@ func assertRule(t *testing.T, rules []rbacv1.PolicyRule, apiGroups, resources, v
 		}
 	}
 	t.Fatalf("RBAC rule not found for apiGroups=%v resources=%v verbs=%v", apiGroups, resources, verbs)
+}
+
+func assertToleration(t *testing.T, tolerations []corev1.Toleration, key string, effect corev1.TaintEffect) {
+	t.Helper()
+
+	for _, toleration := range tolerations {
+		if toleration.Key == key && toleration.Operator == corev1.TolerationOpExists && toleration.Effect == effect {
+			return
+		}
+	}
+	t.Fatalf("toleration not found for key=%q effect=%q", key, effect)
+}
+
+func assertRequiredNodeAffinity(t *testing.T, affinity *corev1.Affinity, key string) {
+	t.Helper()
+
+	if affinity == nil ||
+		affinity.NodeAffinity == nil ||
+		affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Fatalf("required node affinity missing for key=%q", key)
+	}
+	for _, term := range affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, expression := range term.MatchExpressions {
+			if expression.Key == key && expression.Operator == corev1.NodeSelectorOpExists {
+				return
+			}
+		}
+	}
+	t.Fatalf("required node affinity missing for key=%q", key)
 }
 
 func sameStringSet(got, want []string) bool {

@@ -43,7 +43,10 @@ The base deployment mounts:
 Those mounts are intentional. The current agent apply path can mutate host
 files and can call host tools while applying rendered bundles. The sample
 deployment therefore runs privileged and points `--kubeconfig` at
-`/host/etc/kubernetes/admin.conf`.
+`/host/etc/kubernetes/admin.conf`. It also requires scheduling on nodes labeled
+`node-role.kubernetes.io/control-plane` or `node-role.kubernetes.io/master` and
+tolerates the matching `NoSchedule` taints so that the host admin kubeconfig is
+present.
 
 ## Install The Controller
 

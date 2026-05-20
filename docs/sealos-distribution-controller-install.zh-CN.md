@@ -39,7 +39,9 @@ base deployment 会挂载：
 
 这些挂载是有意设计的。当前 agent apply 路径可能会修改 host 文件，也可能会在 apply
 rendered bundle 时调用 host tools。因此示例 deployment 使用 privileged 模式，并把
-`--kubeconfig` 指向 `/host/etc/kubernetes/admin.conf`。
+`--kubeconfig` 指向 `/host/etc/kubernetes/admin.conf`。它还要求调度到带有
+`node-role.kubernetes.io/control-plane` 或 `node-role.kubernetes.io/master` label 的节点，
+并容忍对应的 `NoSchedule` taints，确保 host admin kubeconfig 存在。
 
 ## 安装 Controller
 
