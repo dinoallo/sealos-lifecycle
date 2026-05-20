@@ -124,7 +124,11 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	}
 	executor.applyDefaults()
 	if executor.topology != nil && executor.topology.hasRemoteHosts() {
-		executor.remoteExec, err = newApplyRemoteExecutor(executor.topology)
+		remoteTopology, err := remoteExecutionTopologyForApply(opts.ClusterName, executor.topology)
+		if err != nil {
+			return nil, err
+		}
+		executor.remoteExec, err = newApplyRemoteExecutor(remoteTopology)
 		if err != nil {
 			return nil, fmt.Errorf("create remote execution client: %w", err)
 		}

@@ -107,9 +107,26 @@ func defaultApplyExecutionTopology(clusterName string) (*clusterExecutionTopolog
 
 func defaultApplyRemoteExecutor(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
 	if topology == nil || topology.cluster == nil {
-		return nil, nil
+		return nil, fmt.Errorf("remote execution requires Clusterfile inventory for SSH configuration")
 	}
 	return sealosexec.New(ssh.NewCacheClientFromCluster(topology.cluster, true))
+}
+
+func remoteExecutionTopologyForApply(clusterName string, targetTopology *clusterExecutionTopology) (*clusterExecutionTopology, error) {
+	if targetTopology != nil && targetTopology.cluster != nil {
+		return targetTopology, nil
+	}
+	topology, err := loadApplyExecutionTopology(clusterName)
+	if err != nil {
+		return nil, err
+	}
+	if topology != nil && topology.cluster != nil {
+		return topology, nil
+	}
+	if targetTopology != nil {
+		return targetTopology, nil
+	}
+	return topology, nil
 }
 
 func fallbackLocalExecutionTopology(clusterName string) *clusterExecutionTopology {

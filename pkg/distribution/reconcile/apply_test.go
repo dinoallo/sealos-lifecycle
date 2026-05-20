@@ -888,7 +888,7 @@ exit 0
 	}
 }
 
-func TestApplyUsesBundleExecutionTopologySnapshot(t *testing.T) {
+func TestApplyUsesBundleExecutionTopologySnapshotWithClusterfileRemoteExecutor(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	constants.DefaultRuntimeRootDir = t.TempDir()
 	t.Cleanup(func() {
@@ -902,16 +902,31 @@ func TestApplyUsesBundleExecutionTopologySnapshot(t *testing.T) {
 		newApplyRemoteExecutor = previousNewRemoteExecutor
 	})
 
-	loadApplyExecutionTopology = func(string) (*clusterExecutionTopology, error) {
-		t.Fatal("loadApplyExecutionTopology should not be called when bundle has executionTopology")
-		return nil, nil
+	loadTopologyCalled := false
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		loadTopologyCalled = true
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.99:22"},
+			firstMaster: "10.0.0.99:22",
+			cluster: &v1beta1.Cluster{
+				Spec: v1beta1.ClusterSpec{
+					Hosts: []v1beta1.Host{
+						{IPS: []string{"10.0.0.99:22"}, Roles: []string{v1beta1.NODE}},
+					},
+				},
+			},
+		}, nil
 	}
 	fakeRemote := &fakeApplyRemoteExecutor{}
 	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
-		if got, want := strings.Join(topology.nodeExecutionHosts(), ","), "10.0.0.11:22"; got != want {
+		if topology.cluster == nil {
+			t.Fatal("remote executor topology has nil Clusterfile inventory")
+		}
+		if got, want := strings.Join(topology.nodeExecutionHosts(), ","), "10.0.0.99:22"; got != want {
 			t.Fatalf("topology nodes = %q, want %q", got, want)
 		}
-		if got, want := strings.Join(topology.rolesForHost("10.0.0.11:22"), ","), "master"; got != want {
+		if got, want := strings.Join(topology.rolesForHost("10.0.0.99:22"), ","), "node"; got != want {
 			t.Fatalf("topology roles = %q, want %q", got, want)
 		}
 		return fakeRemote, nil
@@ -977,8 +992,14 @@ func TestApplyUsesBundleExecutionTopologySnapshot(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
+	if !loadTopologyCalled {
+		t.Fatal("loadApplyExecutionTopology was not called for remote executor credentials")
+	}
 	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); !strings.Contains(got, "healthcheck.sh") {
 		t.Fatalf("remote command stream missing healthcheck hook\ncommands:\n%s", got)
+	}
+	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.99:22"), "\n"); got != "" {
+		t.Fatalf("remote commands used Clusterfile host instead of bundle snapshot host:\n%s", got)
 	}
 }
 
