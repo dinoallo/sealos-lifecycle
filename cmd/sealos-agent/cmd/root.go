@@ -30,6 +30,7 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -104,7 +105,9 @@ func newRootCmd() *cobra.Command {
 				constants.DefaultRuntimeRootDir = strings.TrimSpace(flags.runtimeRoot)
 			}
 			if flags.controller {
-				return runController(cmd.Context(), cmd.ErrOrStderr(), controllerOptions{
+				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return runController(ctx, cmd.ErrOrStderr(), controllerOptions{
 					defaults: distributioncontroller.Defaults{
 						ClusterName:    flags.clusterName,
 						KubeconfigPath: flags.kubeconfigPath,
@@ -230,7 +233,11 @@ func runController(ctx context.Context, errOut io.Writer, opts controllerOptions
 	newManager := opts.newManager
 	if newManager == nil {
 		newManager = func(managerOptions ctrl.Options) (controllerManager, error) {
-			return ctrl.NewManager(ctrl.GetConfigOrDie(), managerOptions)
+			cfg, err := ctrlconfig.GetConfig()
+			if err != nil {
+				return nil, err
+			}
+			return ctrl.NewManager(cfg, managerOptions)
 		}
 	}
 	mgr, err := newManager(managerOptions)
