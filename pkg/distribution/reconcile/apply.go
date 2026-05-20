@@ -716,6 +716,9 @@ func (e *bundleExecutor) applyLocalResources(bundle *hydrate.Bundle) error {
 	if e.localResourcesApplied || bundle == nil || len(bundle.Spec.LocalResources) == 0 {
 		return nil
 	}
+	if err := e.ensureLocalKubeconfig(); err != nil {
+		return err
+	}
 	if err := e.waitForFile(e.kubeconfigPath, e.waitTimeout); err != nil {
 		return err
 	}
@@ -859,6 +862,9 @@ func (e *bundleExecutor) applyManifestSteps(steps []hydrate.RenderedStep) error 
 	if len(steps) == 0 {
 		return nil
 	}
+	if err := e.ensureLocalKubeconfig(); err != nil {
+		return err
+	}
 	if err := e.waitForFile(e.kubeconfigPath, e.waitTimeout); err != nil {
 		return err
 	}
@@ -872,6 +878,38 @@ func (e *bundleExecutor) applyManifestSteps(steps []hydrate.RenderedStep) error 
 		if err := e.applyManifest(step); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (e *bundleExecutor) ensureLocalKubeconfig() error {
+	if strings.TrimSpace(e.kubeconfigPath) == "" {
+		return fmt.Errorf("kubeconfig path cannot be empty")
+	}
+	if _, err := os.Stat(e.kubeconfigPath); err == nil {
+		return nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if e.topology == nil || e.topology.hasLocalExecutionHost() {
+		return nil
+	}
+	firstMasterHosts, err := e.resolveTargetHosts(packageformat.TargetFirstMaster)
+	if err != nil {
+		return err
+	}
+	if len(firstMasterHosts) != 1 || isLocalExecutionHost(firstMasterHosts[0]) {
+		return nil
+	}
+	if e.remoteExec == nil {
+		return fmt.Errorf("remote execution client is not configured for host %q", firstMasterHosts[0])
+	}
+	if err := os.MkdirAll(filepath.Dir(e.kubeconfigPath), 0o700); err != nil {
+		return err
+	}
+	e.logf("fetching kubeconfig from first master %q to %q", firstMasterHosts[0], e.kubeconfigPath)
+	if err := e.remoteExec.Fetch(firstMasterHosts[0], "/etc/kubernetes/admin.conf", e.kubeconfigPath); err != nil {
+		return fmt.Errorf("fetch kubeconfig from first master %q: %w", firstMasterHosts[0], err)
 	}
 	return nil
 }

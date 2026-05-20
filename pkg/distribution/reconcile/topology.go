@@ -36,6 +36,7 @@ const localExecutionHost = "localhost"
 
 type applyRemoteExecutor interface {
 	Copy(host, src, dst string) error
+	Fetch(host, src, dst string) error
 	CmdAsyncWithContext(ctx context.Context, host string, cmds ...string) error
 	CmdToString(host, cmd, sep string) (string, error)
 }

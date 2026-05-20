@@ -1460,6 +1460,189 @@ func TestApplyGeneratesPerHostKubeadmJoinConfigsForMultiNodeBootstrap(t *testing
 	}
 }
 
+func TestApplyFetchesKubeconfigFromRemoteFirstMasterForClusterSteps(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	fakeRemote := &fakeApplyRemoteExecutor{
+		fetchContents: map[string][]byte{
+			"10.0.0.10:22:/etc/kubernetes/admin.conf": []byte("apiVersion: v1\nkind: Config\n"),
+		},
+		outputs: []fakeRemoteCommandOutput{{
+			host:     "10.0.0.10:22",
+			contains: "kubeadm token create --print-join-command",
+			output:   "kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef --discovery-token-ca-cert-hash sha256:cafebabe --certificate-key 11223344556677889900aabbccddeeff\n",
+		}},
+	}
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.10:22", "10.0.0.11:22"},
+			firstMaster: "10.0.0.10:22",
+			cluster: &v1beta1.Cluster{
+				Spec: v1beta1.ClusterSpec{
+					Hosts: []v1beta1.Host{
+						{IPS: []string{"10.0.0.10:22"}, Roles: []string{v1beta1.MASTER}},
+						{IPS: []string{"10.0.0.11:22"}, Roles: []string{v1beta1.NODE}},
+					},
+				},
+			},
+		}, nil
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	tmpDir := t.TempDir()
+	kubectlLog := filepath.Join(tmpDir, "kubectl.log")
+	writeExecutable(t, filepath.Join(tmpDir, "bin", "kubectl"), `#!/bin/sh
+printf '%s\n' "$*" >>"`+kubectlLog+`"
+if [ "$1" = "--kubeconfig" ]; then
+  shift 2
+fi
+if [ "$1" = "-n" ]; then
+  shift 2
+fi
+case "$1" in
+  get)
+    if [ "$2" = "--raw=/readyz" ]; then
+      exit 0
+    fi
+    if [ "$2" = "cm" ] && [ "$3" = "kubeadm-config" ]; then
+      printf '%s' 'apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+clusterName: demo
+'
+      exit 0
+    fi
+    if [ "$2" = "nodes" ]; then
+      printf 'node-a node-b'
+      exit 0
+    fi
+    ;;
+  apply)
+    exit 0
+    ;;
+esac
+exit 0
+`)
+	t.Setenv("PATH", filepath.Join(tmpDir, "bin")+":"+os.Getenv("PATH"))
+
+	bundleDir := filepath.Join(t.TempDir(), "bundle")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubeadm"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubectl"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml"), "apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\nclusterName: demo\n", 0o644)
+	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap", "namespace.yaml"), "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: demo\n", 0o644)
+
+	bundle := &hydrate.Bundle{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindHydratedBundle,
+		Spec: hydrate.BundleSpec{
+			BOMName:  "remote-first-master",
+			Revision: "rev-1",
+			Channel:  bom.ChannelAlpha,
+			Components: []hydrate.RenderedComponent{{
+				Name:        "kubernetes",
+				PackageName: "kubernetes-rootfs",
+				Version:     "v1.30.3",
+				Class:       packageformat.ClassRootfs,
+				RootPath:    "components/kubernetes/files",
+				Steps: []hydrate.RenderedStep{
+					{
+						Name:        "kubernetes-rootfs",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/kubernetes/files/rootfs",
+						SourcePath:  "rootfs/",
+						ContentType: packageformat.ContentRootfs,
+					},
+					{
+						Name:        "kubeadm-defaults",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/kubernetes/files/files/etc/kubernetes/kubeadm.yaml",
+						SourcePath:  "files/etc/kubernetes/kubeadm.yaml",
+						ContentType: packageformat.ContentFile,
+					},
+					{
+						Name:        "bootstrap-manifests",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/kubernetes/files/manifests/bootstrap",
+						SourcePath:  "manifests/bootstrap",
+						ContentType: packageformat.ContentManifest,
+					},
+					{
+						Name:           "bootstrap",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/kubernetes/files/hooks/bootstrap.sh",
+						SourcePath:     "hooks/bootstrap.sh",
+						HookPhase:      packageformat.PhaseBootstrap,
+						Target:         packageformat.TargetAllNodes,
+						TimeoutSeconds: 5,
+					},
+					{
+						Name:           "healthcheck",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/kubernetes/files/hooks/healthcheck.sh",
+						SourcePath:     "hooks/healthcheck.sh",
+						HookPhase:      packageformat.PhaseHealth,
+						Target:         packageformat.TargetCluster,
+						TimeoutSeconds: 5,
+					},
+				},
+			}},
+		},
+	}
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	persistRenderedStateForBundle(t, "cluster-a", bundleDir, bundle)
+
+	kubeconfigPath := filepath.Join(t.TempDir(), "admin.conf")
+	result, err := Apply(ApplyOptions{
+		ClusterName:    "cluster-a",
+		BundlePath:     bundleDir,
+		KubeconfigPath: kubeconfigPath,
+	})
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result == nil || result.AppliedRevision == nil {
+		t.Fatal("Apply() returned nil result or applied revision")
+	}
+
+	if got, want := len(fakeRemote.fetchOps), 1; got != want {
+		t.Fatalf("len(fetchOps) = %d, want %d", got, want)
+	}
+	if got, want := fakeRemote.fetchOps[0].host, "10.0.0.10:22"; got != want {
+		t.Fatalf("fetch host = %q, want %q", got, want)
+	}
+	if got, want := fakeRemote.fetchOps[0].src, "/etc/kubernetes/admin.conf"; got != want {
+		t.Fatalf("fetch src = %q, want %q", got, want)
+	}
+	if data, err := os.ReadFile(kubeconfigPath); err != nil || !strings.Contains(string(data), "kind: Config") {
+		t.Fatalf("fetched kubeconfig = %q, err = %v", string(data), err)
+	}
+	kubectlCalls, err := os.ReadFile(kubectlLog)
+	if err != nil {
+		t.Fatalf("ReadFile(kubectl log) error = %v", err)
+	}
+	if !strings.Contains(string(kubectlCalls), "--kubeconfig "+kubeconfigPath+" apply -f") {
+		t.Fatalf("kubectl log missing apply with fetched kubeconfig:\n%s", string(kubectlCalls))
+	}
+}
+
 func TestKubeadmBootstrapImagesIncludePauseImage(t *testing.T) {
 	fakeRemote := &fakeApplyRemoteExecutor{
 		outputs: []fakeRemoteCommandOutput{
@@ -1611,9 +1794,11 @@ func writeClusterInventory(t *testing.T, clusterName string, hosts []v1beta1.Hos
 }
 
 type fakeApplyRemoteExecutor struct {
-	copyOps []fakeRemoteCopy
-	cmdOps  []fakeRemoteCommand
-	outputs []fakeRemoteCommandOutput
+	copyOps       []fakeRemoteCopy
+	fetchOps      []fakeRemoteFetch
+	cmdOps        []fakeRemoteCommand
+	outputs       []fakeRemoteCommandOutput
+	fetchContents map[string][]byte
 }
 
 type fakeRemoteCopy struct {
@@ -1621,6 +1806,12 @@ type fakeRemoteCopy struct {
 	src  string
 	dst  string
 	data []byte
+}
+
+type fakeRemoteFetch struct {
+	host string
+	src  string
+	dst  string
 }
 
 type fakeRemoteCommand struct {
@@ -1644,6 +1835,18 @@ func (f *fakeApplyRemoteExecutor) Copy(host, src, dst string) error {
 	}
 	f.copyOps = append(f.copyOps, fakeRemoteCopy{host: host, src: src, dst: dst, data: data})
 	return nil
+}
+
+func (f *fakeApplyRemoteExecutor) Fetch(host, src, dst string) error {
+	f.fetchOps = append(f.fetchOps, fakeRemoteFetch{host: host, src: src, dst: dst})
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	content := f.fetchContents[host+":"+src]
+	if content == nil {
+		content = []byte("fetched")
+	}
+	return os.WriteFile(dst, content, 0o644)
 }
 
 func (f *fakeApplyRemoteExecutor) CmdAsyncWithContext(_ context.Context, host string, cmds ...string) error {
