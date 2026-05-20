@@ -524,6 +524,7 @@ func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
 	}
 	reportPath := filepath.Join(root, "reports", "acceptance-report.yaml")
 	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
 		Status:                "Passed",
 		ExitCode:              0,
 		MutatingApply:         true,
@@ -577,6 +578,9 @@ func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
 	if !syncHealthProofTestSignalPassed(out, "runtime-preflight") {
 		t.Fatal("runtime-preflight signal did not pass; Warning should be accepted as non-blocking")
 	}
+	if !syncHealthProofTestSignalPassed(out, "bom-file") {
+		t.Fatal("bom-file signal did not pass")
+	}
 	if !syncHealthProofTestSignalPassed(out, "mutating-apply") {
 		t.Fatal("mutating-apply signal did not pass")
 	}
@@ -607,6 +611,7 @@ func TestSyncHealthProofCmdReportsFailedAcceptanceSignal(t *testing.T) {
 	}
 	reportPath := filepath.Join(root, "acceptance-report.yaml")
 	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
 		Status:                "Failed",
 		ExitCode:              1,
 		SourcePreflightState:  "Ready",
@@ -655,6 +660,7 @@ func TestSyncHealthProofCmdRequiresMutatingApplyEvidence(t *testing.T) {
 	}
 	reportPath := filepath.Join(root, "acceptance-report.yaml")
 	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
 		Status:                "Passed",
 		ExitCode:              0,
 		SourcePreflightState:  "Ready",
@@ -687,6 +693,49 @@ func TestSyncHealthProofCmdRequiresMutatingApplyEvidence(t *testing.T) {
 	}
 }
 
+func TestSyncHealthProofCmdFailsWhenReportBOMFileDoesNotMatch(t *testing.T) {
+	root := t.TempDir()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               filepath.Join(root, "other-bom.yaml"),
+		Status:                "Passed",
+		ExitCode:              0,
+		MutatingApply:         true,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Ready",
+		PostApplyState:        "Clean",
+		Stages:                syncHealthProofTestStages(false),
+	})
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if out.Spec.Passed {
+		t.Fatal("spec.passed = true, want false")
+	}
+	if syncHealthProofTestSignalPassed(out, "bom-file") {
+		t.Fatal("bom-file signal passed, want failed")
+	}
+}
+
 func TestSyncHealthProofCmdFailsWhenContractStageMissing(t *testing.T) {
 	root := t.TempDir()
 	bomPath := filepath.Join(root, "bom.yaml")
@@ -695,6 +744,7 @@ func TestSyncHealthProofCmdFailsWhenContractStageMissing(t *testing.T) {
 	}
 	reportPath := filepath.Join(root, "acceptance-report.yaml")
 	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
 		Status:                "Passed",
 		ExitCode:              0,
 		MutatingApply:         true,
@@ -737,6 +787,7 @@ func TestSyncHealthProofCmdFailsWhenPostApplyStateMissing(t *testing.T) {
 	}
 	reportPath := filepath.Join(root, "acceptance-report.yaml")
 	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
 		Status:                "Passed",
 		ExitCode:              0,
 		MutatingApply:         true,
@@ -778,6 +829,7 @@ func TestSyncHealthProofCmdRejectsInvalidCollectedAt(t *testing.T) {
 	}
 	reportPath := filepath.Join(root, "acceptance-report.yaml")
 	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
 		Status:                "Passed",
 		ExitCode:              0,
 		SourcePreflightState:  "Ready",
@@ -9264,6 +9316,7 @@ func testSyncBOM() *bom.BOM {
 }
 
 type syncHealthProofTestReportOptions struct {
+	BOMFile               string
 	Status                string
 	ExitCode              int
 	MutatingApply         bool
@@ -9277,6 +9330,11 @@ type syncHealthProofTestReportOptions struct {
 
 func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthProofTestReportOptions) {
 	t.Helper()
+
+	bomFile := opts.BOMFile
+	if bomFile == "" {
+		bomFile = "/work/bom.yaml"
+	}
 
 	report := syncHealthProofAcceptanceReport{
 		APIVersion: distribution.APIVersion,
@@ -9293,7 +9351,7 @@ func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthPr
 			MutatingApply:         opts.MutatingApply,
 			RevertCheck:           opts.RevertCheck,
 			PackageMode:           "local",
-			BOMFile:               "/work/bom.yaml",
+			BOMFile:               bomFile,
 			Workdir:               "/work",
 			RuntimeRoot:           "/work/runtime",
 			LocalRepo:             "/work/local-repo",

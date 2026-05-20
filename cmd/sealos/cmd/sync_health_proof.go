@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -95,6 +96,7 @@ func newSyncHealthProofCmd() *cobra.Command {
 				Name:        flags.name,
 				Summary:     flags.summary,
 				CollectedAt: collectedAt,
+				BOMPath:     flags.bomFile,
 			})
 			if err != nil {
 				return err
@@ -174,6 +176,7 @@ type syncHealthProofOptions struct {
 	Name        string
 	Summary     string
 	CollectedAt string
+	BOMPath     string
 }
 
 func buildSyncHealthProof(targetBOM *bom.BOM, report *syncHealthProofAcceptanceReport, opts syncHealthProofOptions) (*bom.DistributionHealthProof, error) {
@@ -187,7 +190,7 @@ func buildSyncHealthProof(targetBOM *bom.BOM, report *syncHealthProofAcceptanceR
 	if proofName == "" {
 		proofName = defaultSyncHealthProofName(targetBOM.Metadata.Name, targetBOM.Spec.Revision)
 	}
-	signals := syncHealthProofSignals(report)
+	signals := syncHealthProofSignals(report, opts.BOMPath)
 	proof := bom.NewDistributionHealthProof(proofName, targetBOM.Metadata.Name, targetBOM.Spec.Revision, syncHealthProofSignalsPassed(signals))
 	proof.Spec.Summary = syncHealthProofSummary(report, opts.Summary)
 	proof.Spec.CollectedAt = syncHealthProofCollectedAt(report, opts.CollectedAt)
@@ -248,13 +251,14 @@ func syncHealthProofCollectedAt(report *syncHealthProofAcceptanceReport, overrid
 	return strings.TrimSpace(report.Spec.FinishedAt)
 }
 
-func syncHealthProofSignals(report *syncHealthProofAcceptanceReport) []bom.DistributionHealthSignal {
+func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOMPath string) []bom.DistributionHealthSignal {
 	signals := []bom.DistributionHealthSignal{
 		{
 			Name:    "acceptance-report",
 			Passed:  strings.EqualFold(strings.TrimSpace(report.Spec.Status), "Passed") && report.Spec.ExitCode == 0,
 			Message: fmt.Sprintf("status=%s exitCode=%d", strings.TrimSpace(report.Spec.Status), report.Spec.ExitCode),
 		},
+		syncHealthProofBOMFileSignal(report.Spec.BOMFile, targetBOMPath),
 	}
 	signals = append(signals, syncHealthProofContractSignals(report)...)
 	signals = append(signals, bom.DistributionHealthSignal{
@@ -315,6 +319,39 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport) []bom.Distr
 		})
 	}
 	return signals
+}
+
+func syncHealthProofBOMFileSignal(reportBOMPath, targetBOMPath string) bom.DistributionHealthSignal {
+	reportBOMPath = strings.TrimSpace(reportBOMPath)
+	targetBOMPath = strings.TrimSpace(targetBOMPath)
+	if reportBOMPath == "" {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-file",
+			Passed:  false,
+			Message: "reportBOMFile=<missing>",
+		}
+	}
+	if targetBOMPath == "" {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-file",
+			Passed:  false,
+			Message: "targetBOMFile=<missing>",
+		}
+	}
+	reportAbs, reportErr := filepath.Abs(reportBOMPath)
+	targetAbs, targetErr := filepath.Abs(targetBOMPath)
+	if reportErr == nil && targetErr == nil {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-file",
+			Passed:  filepath.Clean(reportAbs) == filepath.Clean(targetAbs),
+			Message: fmt.Sprintf("report=%s target=%s", filepath.Clean(reportAbs), filepath.Clean(targetAbs)),
+		}
+	}
+	return bom.DistributionHealthSignal{
+		Name:    "bom-file",
+		Passed:  filepath.Clean(reportBOMPath) == filepath.Clean(targetBOMPath),
+		Message: fmt.Sprintf("report=%s target=%s", filepath.Clean(reportBOMPath), filepath.Clean(targetBOMPath)),
+	}
 }
 
 func syncHealthProofContractSignals(report *syncHealthProofAcceptanceReport) []bom.DistributionHealthSignal {
