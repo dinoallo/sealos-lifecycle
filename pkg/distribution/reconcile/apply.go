@@ -187,15 +187,9 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	if _, err := loadRenderedRevision(opts.ClusterName, desiredStateDigest); err != nil {
 		return nil, err
 	}
-	topology, hasSnapshot, err := applyExecutionTopologyFromSnapshot(opts.ClusterName, bundle.Spec.ExecutionTopology)
+	topology, err := applyTopologyForBundle(opts.ClusterName, bundle)
 	if err != nil {
 		return nil, err
-	}
-	if !hasSnapshot {
-		topology, err = loadApplyExecutionTopology(opts.ClusterName)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if err := validatePreparedHostBundle(bundlePath, bundle); err != nil {
 		return nil, err
@@ -213,15 +207,8 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 		topology:           topology,
 	}
 	executor.applyDefaults()
-	if executor.topology != nil && executor.topology.hasRemoteHosts() {
-		remoteTopology, err := remoteExecutionTopologyForApply(opts.ClusterName, executor.topology)
-		if err != nil {
-			return nil, err
-		}
-		executor.remoteExec, err = newApplyRemoteExecutor(remoteTopology)
-		if err != nil {
-			return nil, fmt.Errorf("create remote execution client: %w", err)
-		}
+	if err := executor.configureRemoteExecutor(); err != nil {
+		return nil, err
 	}
 
 	if err := executor.applyBundle(bundle); err != nil {
@@ -285,6 +272,20 @@ func LoadBundle(bundlePath string) (*hydrate.Bundle, error) {
 	return &bundle, nil
 }
 
+func applyTopologyForBundle(clusterName string, bundle *hydrate.Bundle) (*clusterExecutionTopology, error) {
+	if bundle == nil {
+		return nil, fmt.Errorf("bundle cannot be nil")
+	}
+	topology, hasSnapshot, err := applyExecutionTopologyFromSnapshot(clusterName, bundle.Spec.ExecutionTopology)
+	if err != nil {
+		return nil, err
+	}
+	if hasSnapshot {
+		return topology, nil
+	}
+	return loadApplyExecutionTopology(clusterName)
+}
+
 func loadRenderedRevision(clusterName string, desiredStateDigest digest.Digest) (*state.AppliedRevision, error) {
 	doc, err := state.LoadAppliedRevision(clusterName)
 	if err != nil {
@@ -325,6 +326,23 @@ func (e *bundleExecutor) applyDefaults() {
 	}
 }
 
+func (e *bundleExecutor) configureRemoteExecutor() error {
+	e.remoteExec = nil
+	if e.topology == nil || !e.topology.hasRemoteHosts() {
+		return nil
+	}
+	remoteTopology, err := remoteExecutionTopologyForApply(e.clusterName, e.topology)
+	if err != nil {
+		return err
+	}
+	remoteExec, err := newApplyRemoteExecutor(remoteTopology)
+	if err != nil {
+		return fmt.Errorf("create remote execution client: %w", err)
+	}
+	e.remoteExec = remoteExec
+	return nil
+}
+
 func (e *bundleExecutor) applyBundle(bundle *hydrate.Bundle) error {
 	if bundle == nil {
 		return fmt.Errorf("bundle cannot be nil")
@@ -362,18 +380,27 @@ func (e *bundleExecutor) rollbackToLastSuccessfulRevision() error {
 	if err != nil {
 		return fmt.Errorf("load rollback bundle %q: %w", rollbackBundlePath, err)
 	}
+	rollbackTopology, err := applyTopologyForBundle(e.clusterName, rollbackBundle)
+	if err != nil {
+		return fmt.Errorf("resolve rollback bundle topology: %w", err)
+	}
 
 	e.logf("rolling back to last successful revision %q (%s)", lastSuccessful.BOM.Revision, lastSuccessful.DesiredStateDigest)
 	rollbackExecutor := *e
 	rollbackExecutor.bundle = rollbackBundle
 	rollbackExecutor.bundlePath = rollbackBundlePath
 	rollbackExecutor.desiredStateDigest = lastSuccessful.DesiredStateDigest
+	rollbackExecutor.topology = rollbackTopology
 	rollbackExecutor.stagedBundleRoots = make(map[string]string)
 	rollbackExecutor.localResourcesApplied = false
 	rollbackExecutor.untaintAttempted = false
 	rollbackExecutor.rollout = RolloutStrategy{
 		BatchSize:  e.rollout.BatchSize,
 		HealthGate: e.rollout.HealthGate,
+	}
+	rollbackExecutor.applyDefaults()
+	if err := rollbackExecutor.configureRemoteExecutor(); err != nil {
+		return err
 	}
 	if err := rollbackExecutor.applyBundle(rollbackBundle); err != nil {
 		return fmt.Errorf("rollback to last successful revision failed: %w", err)

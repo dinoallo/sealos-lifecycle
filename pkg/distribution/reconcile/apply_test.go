@@ -2442,6 +2442,105 @@ exit 0
 	}
 }
 
+func TestApplyRolloutRollbackUsesLastSuccessfulBundleTopology(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	clusterName := "rollout-rollback-topology-cluster"
+	currentHost := "10.0.0.20:22"
+	previousHost := "10.0.0.10:22"
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{currentHost},
+			firstMaster: currentHost,
+			cluster: &v1beta1.Cluster{
+				Spec: v1beta1.ClusterSpec{
+					Hosts: []v1beta1.Host{
+						{IPS: []string{currentHost}, Roles: []string{v1beta1.MASTER}},
+					},
+				},
+			},
+		}, nil
+	}
+	fakeRemote := &fakeApplyRemoteExecutor{
+		errors: []fakeRemoteCommandError{
+			{host: currentHost, contains: "fail-new.sh", err: os.ErrPermission},
+		},
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	tmpDir := t.TempDir()
+	previousBundleDir := filepath.Join(tmpDir, "previous-bundle")
+	previousBundle := rollbackTopologyRuntimeBundle("rollback-topology-runtime", "rev-1", previousHost, "restore-old.sh")
+	writeRollbackTopologyRuntimeBundle(t, previousBundleDir, previousBundle, "restore-old.sh")
+	previousDigest, err := hydrate.DigestBundle(previousBundleDir)
+	if err != nil {
+		t.Fatalf("DigestBundle(previous) error = %v", err)
+	}
+	previousRevisionPath, err := RevisionBundlePath(clusterName, previousDigest.String())
+	if err != nil {
+		t.Fatalf("RevisionBundlePath(previous) error = %v", err)
+	}
+	if err := copyDir(previousBundleDir, previousRevisionPath); err != nil {
+		t.Fatalf("copy previous revision bundle error = %v", err)
+	}
+	if err := mirrorBundle(previousRevisionPath, CurrentBundlePath(clusterName)); err != nil {
+		t.Fatalf("mirror previous bundle error = %v", err)
+	}
+	if _, err := state.PersistSuccessfulApply(
+		clusterName,
+		state.BOMReference{
+			Name:     previousBundle.Spec.BOMName,
+			Revision: previousBundle.Spec.Revision,
+			Channel:  previousBundle.Spec.Channel,
+			Digest:   "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		},
+		previousDigest.String(),
+		"",
+		"local-rev-1",
+	); err != nil {
+		t.Fatalf("PersistSuccessfulApply(previous) error = %v", err)
+	}
+
+	nextBundleDir := filepath.Join(tmpDir, "next-bundle")
+	nextBundle := rollbackTopologyRuntimeBundle("rollback-topology-runtime", "rev-2", currentHost, "fail-new.sh")
+	writeRollbackTopologyRuntimeBundle(t, nextBundleDir, nextBundle, "fail-new.sh")
+	if err := mirrorBundle(nextBundleDir, CurrentBundlePath(clusterName)); err != nil {
+		t.Fatalf("mirror next bundle error = %v", err)
+	}
+	persistRenderedStateForBundle(t, clusterName, nextBundleDir, nextBundle)
+
+	_, err = Apply(ApplyOptions{
+		ClusterName: clusterName,
+		BundlePath:  nextBundleDir,
+		Rollout: RolloutStrategy{
+			FailureAction: RolloutFailureActionRollback,
+		},
+	})
+	if !IsRolloutRolledBack(err) {
+		t.Fatalf("Apply() error = %v, want rollback error", err)
+	}
+	if got := strings.Join(fakeRemote.commandsForHost(previousHost), "\n"); !strings.Contains(got, "restore-old.sh") {
+		t.Fatalf("rollback did not use previous bundle host %q\ncommands:\n%s", previousHost, strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+	if got := strings.Join(fakeRemote.commandsForHost(currentHost), "\n"); strings.Contains(got, "restore-old.sh") {
+		t.Fatalf("rollback reused failed revision host %q\ncommands:\n%s", currentHost, strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+}
+
 func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, bundle *hydrate.Bundle) {
 	t.Helper()
 
@@ -2519,6 +2618,36 @@ func writeLocalRuntimeBundle(t *testing.T, bundleDir string, bundle *hydrate.Bun
 	}
 }
 
+func rollbackTopologyRuntimeBundle(name, revision, host, hookName string) *hydrate.Bundle {
+	return rolloutRuntimeBundle(name, revision, []string{host}, []hydrate.RenderedStep{
+		{
+			Name:        "runtime-rootfs",
+			Kind:        hydrate.StepContent,
+			BundlePath:  "components/runtime/files/rootfs",
+			SourcePath:  "rootfs/",
+			ContentType: packageformat.ContentRootfs,
+		},
+		{
+			Name:           strings.TrimSuffix(hookName, ".sh"),
+			Kind:           hydrate.StepHook,
+			BundlePath:     "components/runtime/files/hooks/" + hookName,
+			SourcePath:     "hooks/" + hookName,
+			HookPhase:      packageformat.PhaseConfigure,
+			Target:         packageformat.TargetAllNodes,
+			TimeoutSeconds: 5,
+		},
+	})
+}
+
+func writeRollbackTopologyRuntimeBundle(t *testing.T, bundleDir string, bundle *hydrate.Bundle, hookName string) {
+	t.Helper()
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", hookName), "#!/bin/sh\nexit 0\n")
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+}
+
 func writeClusterInventory(t *testing.T, clusterName string, hosts []v1beta1.Host) {
 	t.Helper()
 	cluster := &v1beta1.Cluster{
@@ -2539,6 +2668,7 @@ type fakeApplyRemoteExecutor struct {
 	fetchOps      []fakeRemoteFetch
 	cmdOps        []fakeRemoteCommand
 	outputs       []fakeRemoteCommandOutput
+	errors        []fakeRemoteCommandError
 	fetchContents map[string][]byte
 }
 
@@ -2564,6 +2694,12 @@ type fakeRemoteCommandOutput struct {
 	host     string
 	contains string
 	output   string
+}
+
+type fakeRemoteCommandError struct {
+	host     string
+	contains string
+	err      error
 }
 
 func (f *fakeApplyRemoteExecutor) Copy(host, src, dst string) error {
@@ -2593,18 +2729,33 @@ func (f *fakeApplyRemoteExecutor) Fetch(host, src, dst string) error {
 func (f *fakeApplyRemoteExecutor) CmdAsyncWithContext(_ context.Context, host string, cmds ...string) error {
 	for _, cmd := range cmds {
 		f.cmdOps = append(f.cmdOps, fakeRemoteCommand{host: host, cmd: cmd})
+		if err := f.errForCommand(host, cmd); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (f *fakeApplyRemoteExecutor) CmdToString(host, cmd, _ string) (string, error) {
 	f.cmdOps = append(f.cmdOps, fakeRemoteCommand{host: host, cmd: cmd})
+	if err := f.errForCommand(host, cmd); err != nil {
+		return "", err
+	}
 	for _, candidate := range f.outputs {
 		if candidate.host == host && strings.Contains(cmd, candidate.contains) {
 			return candidate.output, nil
 		}
 	}
 	return "", nil
+}
+
+func (f *fakeApplyRemoteExecutor) errForCommand(host, cmd string) error {
+	for _, candidate := range f.errors {
+		if candidate.host == host && strings.Contains(cmd, candidate.contains) {
+			return candidate.err
+		}
+	}
+	return nil
 }
 
 func (f *fakeApplyRemoteExecutor) commandsForHost(host string) []string {
