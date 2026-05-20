@@ -318,6 +318,8 @@ Day 0 完成后，集群的后续行为应该取决于它是 pin 模式还是 ch
 
 - `sealos-agent` 可以在每次进程级 reconcile pass 里重新解析本地
   `DistributionChannel` 文件
+- `sealos-agent --controller` 也可以从被 watch 的 `DistributionTarget`
+  对象里重新解析它
 - 只有当 `DistributionChannel` 指向的新 revision 发生变化时，它才会前进
 - 但它仍然应该把自己最终实际 apply 的 BOM revision 记下来
 
@@ -325,6 +327,36 @@ Day 0 完成后，集群的后续行为应该取决于它是 pin 模式还是 ch
 
 - 意图：跟 `default-platform/stable`
 - 结果：当前落在 `rev-007`
+
+### 最小 controller target
+
+当前 controller 化路径刻意保持很小。它 watch `DistributionTarget` 对象，
+并把每个对象映射成一次现有 agent reconcile pass：
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: DistributionTarget
+metadata:
+  name: default-platform
+  namespace: sealos-system
+spec:
+  clusterName: default
+  distributionChannelPath: /var/lib/sealos/distribution/default-platform-stable.yaml
+  localRepoPath: /var/lib/sealos/distribution/local-repo
+  kubeconfigPath: /etc/kubernetes/admin.conf
+  hostRoot: /
+  requeueAfter: 1m
+```
+
+用 controller mode 启动 agent：
+
+```bash
+sealos-agent --controller --controller-namespace sealos-system
+```
+
+这个模式目前只提供 watched API 和 status condition。CRD YAML、RBAC、
+安装 manifests、registry-backed channel lookup 和 promotion automation 仍然
+不在已实现范围内。
 
 ## Applied revision state
 

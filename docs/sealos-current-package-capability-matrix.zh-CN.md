@@ -58,7 +58,8 @@
 | 在一条统一流程里把 package 内容同时部署到 Kubernetes 和 host | Ready with boundary | [apply.go](../pkg/distribution/reconcile/apply.go) | 当前部署单元是 rendered bundle，不是“直接安装一个 package”。 |
 | 跨多个 cluster host 编排一个 rendered bundle | Ready with boundary | [topology.go](../pkg/distribution/reconcile/topology.go), [apply.go](../pkg/distribution/reconcile/apply.go), [kubeadm_bootstrap.go](../pkg/distribution/reconcile/kubeadm_bootstrap.go) | CLI 驱动的 `sync apply` 路径会解析 `allNodes`、`firstMaster`、`cluster`，按 remote host staging bundle payload，生成 kubeadm join config，并在 cluster-scoped step 需要时从 remote first master 拉取 kubeconfig。package 自己的 hook/script 仍然需要具备 multi-node-safe 行为。 |
 | 解析本地文件形式的 `DistributionChannel` target | Ready with boundary | [channel.go](../pkg/distribution/bom/channel.go), [sync.go](../cmd/sealos/cmd/sync.go), [runner.go](../pkg/distribution/agent/runner.go) | `--distribution-channel` 会加载一份本地 channel 文档，校验它的 `line` 和 `targetRevision` 是否匹配 `spec.bomPath` 指向的 BOM，然后 render 解析出来的 BOM。还没有 registry/API 驱动的 `line + channel` lookup。 |
-| 运行进程级 distribution reconcile agent | Ready with boundary | [main.go](../cmd/sealos-agent/main.go), [root.go](../cmd/sealos-agent/cmd/root.go), [runner.go](../pkg/distribution/agent/runner.go) | `sealos-agent` 可以围绕 BOM 或本地 `DistributionChannel` 跑一次或按 interval 循环，但它还不是带 leader election、CRD 或 promotion health automation 的 Kubernetes controller。 |
+| 运行进程级 distribution reconcile agent | Ready with boundary | [main.go](../cmd/sealos-agent/main.go), [root.go](../cmd/sealos-agent/cmd/root.go), [runner.go](../pkg/distribution/agent/runner.go) | `sealos-agent` 可以围绕 BOM 或本地 `DistributionChannel` 跑一次或按 interval 循环；这仍然适合直接在 host 上执行和调试。 |
+| 运行最小 Kubernetes controller reconcile loop | Ready with boundary | [pkg/distribution/controller](../pkg/distribution/controller), [root.go](../cmd/sealos-agent/cmd/root.go) 里的 `--controller` | `sealos-agent --controller` 会 watch `DistributionTarget` 对象，并把每次 reconcile 委托给现有 agent runner，同时写 status condition，也支持可选 leader election。仓库还没有 CRD manifests/RBAC、registry-backed channel lookup、promotion health automation 或持久 rollout policy object。 |
 | 对 host-targeted rendered-bundle rollout 做分批 | Ready with boundary | [sync.go](../cmd/sealos/cmd/sync.go) 和 [root.go](../cmd/sealos-agent/cmd/root.go) 里的 `--rollout-batch-size`，以及 [apply.go](../pkg/distribution/reconcile/apply.go) 里的 batching | batching 只作用于 rendered-bundle executor 里的 host-targeted all-node steps。它还不是带 canary pause、health gate 或自动 rollback 的持久 rollout policy object。 |
 | 从多节点中的指定 host commit 一个 local input 绑定出来的 host file | Ready with boundary | [sync.go](../cmd/sealos/cmd/sync.go), [commit.go](../pkg/distribution/commit/commit.go) | 当前 multi-node commit 支持面故意很窄：只覆盖 local-input regular file；如果选中 host 有 host-scoped input，就回写 scoped input；如果没有 scoped provenance 且多节点内容已经分叉，就拒绝把单个节点的值覆盖到默认 input。 |
 | 跟踪 host file、Kubernetes object 和部分 generated projection | Ready with boundary | [inventory.go](../pkg/distribution/hydrate/inventory.go), [compare.go](../pkg/distribution/compare/compare.go) | generated projection 覆盖面刻意很窄。 |
@@ -74,7 +75,7 @@
 | --- | --- | --- |
 | 不经过 BOM/bundle，直接“安装这个 package” | Not implemented | 当前部署路径是 `package -> BOM -> render -> bundle -> apply`，不是 package-direct install。 |
 | controller 驱动的多节点 rollout policy | Not implemented | rendered-bundle apply 已经有 host batching，但还没有后台 controller、持久 rollout policy object、package 级安全模型、health gate 或自动 rollback 模型来覆盖所有多节点工作流。 |
-| Kubernetes controller 驱动的持续 reconcile loop | Not implemented | `sealos-agent` 已经提供进程级 once/interval loop，但还没有 watched API、leader election、CRD 或 controller status reconciliation。 |
+| 可安装的 controller manifests 和 RBAC | Not implemented | 代码里已经有最小 `DistributionTarget` watched controller 路径，但仓库还没有提供 CRD YAML、RBAC、Deployment manifest 或集群内安装流程。 |
 | live `DistributionChannel` release lookup 和 promotion service | Not implemented | 本地文件形式的 `DistributionChannel` resolution 已经有了，但还没有 registry/API 驱动的 `distribution line + channel` lookup、channel advancement history 或 promotion service。 |
 | 完全泛化的 generated-output drift 管理 | Not implemented | 当前 MVP 只跟踪一组已知 generated target。 |
 | package/BOM 侧提供 local patch policy source | Not implemented | 当前 policy source 只支持 `localRepo` 和 `builtInDefault`。 |
@@ -90,6 +91,7 @@
 - CLI 驱动的多节点 bundle 编排：好了，但边界很窄
 - 本地文件形式的 `DistributionChannel` 选择：好了，但边界很窄
 - `sealos-agent` 进程级 reconcile：好了，但边界很窄
+- `sealos-agent --controller` 最小 watched reconcile：好了，但边界很窄
 - host rollout batching：好了，但边界很窄
 - Kubernetes controller 驱动的 rollout 和发布系统化：还没好
 
@@ -100,6 +102,7 @@
 - BOM 驱动的 render/apply
 - 本地 `DistributionChannel` target 选择
 - 进程级 agent reconcile
+- 最小 `DistributionTarget` controller reconcile
 - rendered bundle 的分批 host apply waves
 - 当前 CLI 驱动路径上的 drift / ownership 实验
 
@@ -107,7 +110,7 @@
 
 - 多集群 release management
 - Kubernetes controller 驱动的多节点 topology-aware deployment
-- Kubernetes controller-based reconciliation 和 promotion automation
+- 可安装 controller manifests、RBAC 和 promotion automation
 
 ## 相关文档
 

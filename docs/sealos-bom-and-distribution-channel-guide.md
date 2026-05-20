@@ -328,6 +328,8 @@ If a cluster follows a `DistributionChannel`:
 
 - `sealos-agent` can re-resolve a local `DistributionChannel` file on each
   process-level reconcile pass
+- `sealos-agent --controller` can also re-resolve it from a watched
+  `DistributionTarget` object
 - it moves only when the `DistributionChannel` target revision advances
 - it should still persist the exact resolved BOM revision it last applied
 
@@ -335,6 +337,37 @@ This keeps operational intent and concrete state separate:
 
 - intent: "follow `default-platform/stable`"
 - concrete result: "currently on `rev-007`"
+
+### Minimal Controller Target
+
+The current controllerized path is intentionally small. It watches
+`DistributionTarget` objects and maps each object to one existing agent
+reconcile pass:
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: DistributionTarget
+metadata:
+  name: default-platform
+  namespace: sealos-system
+spec:
+  clusterName: default
+  distributionChannelPath: /var/lib/sealos/distribution/default-platform-stable.yaml
+  localRepoPath: /var/lib/sealos/distribution/local-repo
+  kubeconfigPath: /etc/kubernetes/admin.conf
+  hostRoot: /
+  requeueAfter: 1m
+```
+
+Run the agent in controller mode with:
+
+```bash
+sealos-agent --controller --controller-namespace sealos-system
+```
+
+This mode currently supplies the watched API and status conditions only. CRD
+YAML, RBAC, install manifests, registry-backed channel lookup, and promotion
+automation are still outside the implemented surface.
 
 ## Applied Revision State
 
