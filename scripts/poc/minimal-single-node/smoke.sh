@@ -451,6 +451,22 @@ extract_yaml_value() {
   ' "${file}"
 }
 
+extract_yaml_value_any_indent() {
+  local file="$1"
+  local key="$2"
+  [[ -f "${file}" ]] || return
+  awk -v key="${key}" '
+    $0 ~ "^[[:space:]]*" key ":" {
+      line = $0
+      sub("^[[:space:]]*[^:]*:[[:space:]]*", "", line)
+      gsub(/^"/, "", line)
+      gsub(/"$/, "", line)
+      print line
+      exit
+    }
+  ' "${file}"
+}
+
 report_path() {
   if [[ -n "${REPORT_FILE}" ]]; then
     printf '%s\n' "${REPORT_FILE}"
@@ -494,6 +510,9 @@ write_acceptance_report() {
     printf '  revertCheck: %s\n' "$(bool_yaml "${REVERT_CHECK}")"
     printf '  packageMode: %s\n' "$(yaml_string "${PACKAGE_MODE}")"
     printf '  bomFile: %s\n' "$(yaml_string "${BOM_FILE}")"
+    printf '  bomName: %s\n' "$(yaml_string "$(extract_yaml_value "${render_out}" "bomName")")"
+    printf '  bomRevision: %s\n' "$(yaml_string "$(extract_yaml_value "${render_out}" "revision")")"
+    printf '  bomDigest: %s\n' "$(yaml_string "$(extract_yaml_value_any_indent "${render_out}" "bomDigest")")"
     printf '  workdir: %s\n' "$(yaml_string "${WORKDIR}")"
     printf '  runtimeRoot: %s\n' "$(yaml_string "${RUNTIME_ROOT}")"
     printf '  localRepo: %s\n' "$(yaml_string "${LOCAL_REPO}")"

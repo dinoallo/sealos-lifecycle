@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
@@ -32,6 +33,9 @@ type syncHealthProofAcceptanceReportSpec struct {
 	RevertCheck           bool                                   `json:"revertCheck" yaml:"revertCheck"`
 	PackageMode           string                                 `json:"packageMode" yaml:"packageMode"`
 	BOMFile               string                                 `json:"bomFile" yaml:"bomFile"`
+	BOMName               string                                 `json:"bomName" yaml:"bomName"`
+	BOMRevision           string                                 `json:"bomRevision" yaml:"bomRevision"`
+	BOMDigest             string                                 `json:"bomDigest" yaml:"bomDigest"`
 	Workdir               string                                 `json:"workdir" yaml:"workdir"`
 	RuntimeRoot           string                                 `json:"runtimeRoot" yaml:"runtimeRoot"`
 	LocalRepo             string                                 `json:"localRepo" yaml:"localRepo"`
@@ -190,7 +194,7 @@ func buildSyncHealthProof(targetBOM *bom.BOM, report *syncHealthProofAcceptanceR
 	if proofName == "" {
 		proofName = defaultSyncHealthProofName(targetBOM.Metadata.Name, targetBOM.Spec.Revision)
 	}
-	signals := syncHealthProofSignals(report, opts.BOMPath)
+	signals := syncHealthProofSignals(report, targetBOM, opts.BOMPath)
 	proof := bom.NewDistributionHealthProof(proofName, targetBOM.Metadata.Name, targetBOM.Spec.Revision, syncHealthProofSignalsPassed(signals))
 	proof.Spec.Summary = syncHealthProofSummary(report, opts.Summary)
 	proof.Spec.CollectedAt = syncHealthProofCollectedAt(report, opts.CollectedAt)
@@ -251,7 +255,7 @@ func syncHealthProofCollectedAt(report *syncHealthProofAcceptanceReport, overrid
 	return strings.TrimSpace(report.Spec.FinishedAt)
 }
 
-func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOMPath string) []bom.DistributionHealthSignal {
+func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOM *bom.BOM, targetBOMPath string) []bom.DistributionHealthSignal {
 	signals := []bom.DistributionHealthSignal{
 		{
 			Name:    "acceptance-report",
@@ -259,6 +263,8 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOMPa
 			Message: fmt.Sprintf("status=%s exitCode=%d", strings.TrimSpace(report.Spec.Status), report.Spec.ExitCode),
 		},
 		syncHealthProofBOMFileSignal(report.Spec.BOMFile, targetBOMPath),
+		syncHealthProofBOMIdentitySignal(report.Spec.BOMName, report.Spec.BOMRevision, targetBOM),
+		syncHealthProofBOMDigestSignal(report.Spec.BOMDigest, targetBOMPath),
 	}
 	signals = append(signals, syncHealthProofContractSignals(report)...)
 	signals = append(signals, bom.DistributionHealthSignal{
@@ -319,6 +325,65 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOMPa
 		})
 	}
 	return signals
+}
+
+func syncHealthProofBOMIdentitySignal(reportBOMName, reportBOMRevision string, targetBOM *bom.BOM) bom.DistributionHealthSignal {
+	reportBOMName = strings.TrimSpace(reportBOMName)
+	reportBOMRevision = strings.TrimSpace(reportBOMRevision)
+	if reportBOMName == "" || reportBOMRevision == "" {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-identity",
+			Passed:  false,
+			Message: fmt.Sprintf("reportBOMName=%s reportBOMRevision=%s", syncHealthProofStateMessage(reportBOMName), syncHealthProofStateMessage(reportBOMRevision)),
+		}
+	}
+	if targetBOM == nil {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-identity",
+			Passed:  false,
+			Message: "targetBOM=<missing>",
+		}
+	}
+	targetBOMName := strings.TrimSpace(targetBOM.Metadata.Name)
+	targetBOMRevision := strings.TrimSpace(targetBOM.Spec.Revision)
+	return bom.DistributionHealthSignal{
+		Name:    "bom-identity",
+		Passed:  reportBOMName == targetBOMName && reportBOMRevision == targetBOMRevision,
+		Message: fmt.Sprintf("report=%s/%s target=%s/%s", reportBOMName, reportBOMRevision, targetBOMName, targetBOMRevision),
+	}
+}
+
+func syncHealthProofBOMDigestSignal(reportBOMDigest, targetBOMPath string) bom.DistributionHealthSignal {
+	reportBOMDigest = strings.TrimSpace(reportBOMDigest)
+	if reportBOMDigest == "" {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-digest",
+			Passed:  false,
+			Message: "reportBOMDigest=<missing>",
+		}
+	}
+	targetBOMPath = strings.TrimSpace(targetBOMPath)
+	if targetBOMPath == "" {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-digest",
+			Passed:  false,
+			Message: "targetBOMFile=<missing>",
+		}
+	}
+	data, err := os.ReadFile(targetBOMPath)
+	if err != nil {
+		return bom.DistributionHealthSignal{
+			Name:    "bom-digest",
+			Passed:  false,
+			Message: fmt.Sprintf("read targetBOMFile: %v", err),
+		}
+	}
+	targetBOMDigest := digest.Canonical.FromBytes(data).String()
+	return bom.DistributionHealthSignal{
+		Name:    "bom-digest",
+		Passed:  reportBOMDigest == targetBOMDigest,
+		Message: fmt.Sprintf("report=%s target=%s", reportBOMDigest, targetBOMDigest),
+	}
 }
 
 func syncHealthProofBOMFileSignal(reportBOMPath, targetBOMPath string) bom.DistributionHealthSignal {
