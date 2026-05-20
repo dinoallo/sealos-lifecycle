@@ -141,5 +141,6 @@ rendered-bundle executor 使用的 host rollout batch size、第一批 canary si
 post-canary pause、可选的逐批 health gate，以及 stop-or-rollback failure action。这些设置只作用于符合条件的
 all-node runtime-rootfs host batches。pause gate 和 rollback result 都是 operator action hold，
 不是按 host 保存的 rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
-它还没有加入 registry-backed `DistributionChannel` lookup、带 health gate 的 channel promotion，也不是覆盖所有
-multi-node workflow 的 package 级安全模型。controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。
+它还没有加入 registry-backed `DistributionChannel` lookup、controller 驱动的 promotion
+automation，也不是覆盖所有 multi-node workflow 的 package 级安全模型。本地 channel 文件可以另外通过
+`sealos sync promote` 推进；controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。

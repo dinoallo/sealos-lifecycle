@@ -269,8 +269,9 @@ lookup for "latest stable on this distribution line" yet.
 
 The same local-file boundary also has a small promotion primitive:
 `sealos sync promote`. It advances one local `DistributionChannel` file to a
-target BOM file after optionally checking a local health proof and recording an
-approver, reason, timestamp, and promotion history entry. That gives
+target BOM file after checking target-channel policy, requiring local health
+proof for beta/stable targets, and recording an approver, reason, timestamp,
+and promotion history entry. That gives
 file-backed channel followers a reviewable channel advancement path without
 implying registry/API-backed release lookup.
 

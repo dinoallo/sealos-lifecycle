@@ -154,6 +154,7 @@ failure action used by the rendered-bundle executor. These settings only apply
 to eligible all-node runtime-rootfs host batches. The pause gate and rollback
 result are operator action holds, not per-host rollout cursors; continuing
 re-enters the eligible apply path with an updated target or policy. It does not
-add registry-backed `DistributionChannel` lookup, health-gated channel
-promotion, or a package-level safety model for every multi-node workflow. The
+add registry-backed `DistributionChannel` lookup, controller-driven promotion
+automation, or a package-level safety model for every multi-node workflow.
+Local channel files can be advanced separately with `sealos sync promote`; the
 controller still delegates to the existing BOM-driven render/apply agent path.
