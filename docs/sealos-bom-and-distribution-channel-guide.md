@@ -418,10 +418,10 @@ spec:
       passed: true
 ```
 
-The generated `spec.bomPath` is relative to the channel file when possible.
-Existing render, validate, agent, and controller paths continue to consume the
-same channel file through `--distribution-channel` or
-`distributionChannelPath`.
+When `sealos sync promote` accepts the proof, the promoted channel writes the
+target BOM path relative to the channel file when possible. Existing render,
+validate, agent, and controller paths continue to consume the same channel file
+through `--distribution-channel` or `distributionChannelPath`.
 
 `sealos sync promote` also returns a `policyDecision` object in its structured
 output. The decision records the evaluated transition, target channel rule,

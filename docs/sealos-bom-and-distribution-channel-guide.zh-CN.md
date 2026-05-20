@@ -401,9 +401,10 @@ spec:
       passed: true
 ```
 
-生成的 `spec.bomPath` 会尽量写成相对于 channel 文件的路径。现有 render、
-validate、agent 和 controller 路径继续通过 `--distribution-channel` 或
-`distributionChannelPath` 消费同一份 channel 文件。
+当 `sealos sync promote` 接受这份 proof 后，被推进的 channel 会尽量把目标
+BOM path 写成相对于 channel 文件的路径。现有 render、validate、agent 和
+controller 路径继续通过 `--distribution-channel` 或 `distributionChannelPath`
+消费同一份 channel 文件。
 
 `sealos sync promote` 的结构化输出也会返回 `policyDecision`。这个 decision
 记录已评估的 transition、目标 channel rule、health-proof requirement，以及
