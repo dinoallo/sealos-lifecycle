@@ -228,7 +228,7 @@ require_safe_contract() {
 require_apply_contract() {
   require_equals "mutatingApply" "true"
   require_equals "revertCheck" "false"
-  require_value "postApplyState"
+  require_equals "postApplyState" "Clean"
   require_stage_status "apply" "Passed"
   require_stage_status "status" "Passed"
   require_stage_status "diff" "Passed"
@@ -245,7 +245,7 @@ require_apply_contract() {
 require_revert_contract() {
   require_equals "mutatingApply" "true"
   require_equals "revertCheck" "true"
-  require_value "postApplyState"
+  require_equals "postApplyState" "Clean"
   require_equals "postRevertState" "Clean"
   require_stage_status "apply" "Passed"
   require_stage_status "status" "Passed"

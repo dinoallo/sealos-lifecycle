@@ -561,7 +561,7 @@ write_acceptance_report() {
 write_acceptance_report_on_exit() {
   local code=$?
   FINAL_EXIT_CODE="${code}"
-  if (( REPORT_WRITTEN == 0 )); then
+  if (( REPORT_WRITTEN == 0 || code != 0 )); then
     write_acceptance_report || true
   fi
   exit "${code}"
