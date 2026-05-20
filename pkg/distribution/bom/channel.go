@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/yaml"
 
@@ -27,10 +28,20 @@ import (
 )
 
 type DistributionChannelSpec struct {
-	Line           string         `json:"line" yaml:"line"`
-	Channel        ReleaseChannel `json:"channel" yaml:"channel"`
-	TargetRevision string         `json:"targetRevision" yaml:"targetRevision"`
-	BOMPath        string         `json:"bomPath" yaml:"bomPath"`
+	Line             string                     `json:"line" yaml:"line"`
+	Channel          ReleaseChannel             `json:"channel" yaml:"channel"`
+	TargetRevision   string                     `json:"targetRevision" yaml:"targetRevision"`
+	BOMPath          string                     `json:"bomPath" yaml:"bomPath"`
+	PromotionHistory []DistributionPromotionRef `json:"promotionHistory,omitempty" yaml:"promotionHistory,omitempty"`
+}
+
+type DistributionPromotionRef struct {
+	FromRevision string `json:"fromRevision,omitempty" yaml:"fromRevision,omitempty"`
+	ToRevision   string `json:"toRevision" yaml:"toRevision"`
+	BOMPath      string `json:"bomPath" yaml:"bomPath"`
+	Reason       string `json:"reason" yaml:"reason"`
+	ApprovedBy   string `json:"approvedBy" yaml:"approvedBy"`
+	ApprovedAt   string `json:"approvedAt" yaml:"approvedAt"`
 }
 
 type DistributionChannel struct {
@@ -44,6 +55,25 @@ type ResolvedDistributionChannel struct {
 	Channel *DistributionChannel
 	BOM     *BOM
 	BOMPath string
+}
+
+type PromoteDistributionChannelOptions struct {
+	ChannelPath   string
+	TargetBOMPath string
+	Reason        string
+	ApprovedBy    string
+	ApprovedAt    time.Time
+	AppendHistory bool
+}
+
+type PromoteDistributionChannelResult struct {
+	Channel      *DistributionChannel
+	BOM          *BOM
+	ChannelPath  string
+	BOMPath      string
+	FromRevision string
+	ToRevision   string
+	Changed      bool
 }
 
 func NewDistributionChannel(name, line string, channel ReleaseChannel, targetRevision, bomPath string) *DistributionChannel {
@@ -89,6 +119,33 @@ func (c DistributionChannel) Validate() error {
 	if strings.TrimSpace(c.Spec.BOMPath) == "" {
 		return fmt.Errorf("spec.bomPath cannot be empty")
 	}
+	for i, promotion := range c.Spec.PromotionHistory {
+		if err := promotion.Validate(); err != nil {
+			return fmt.Errorf("spec.promotionHistory[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (p DistributionPromotionRef) Validate() error {
+	if strings.TrimSpace(p.ToRevision) == "" {
+		return fmt.Errorf("toRevision cannot be empty")
+	}
+	if strings.TrimSpace(p.BOMPath) == "" {
+		return fmt.Errorf("bomPath cannot be empty")
+	}
+	if strings.TrimSpace(p.Reason) == "" {
+		return fmt.Errorf("reason cannot be empty")
+	}
+	if strings.TrimSpace(p.ApprovedBy) == "" {
+		return fmt.Errorf("approvedBy cannot be empty")
+	}
+	if strings.TrimSpace(p.ApprovedAt) == "" {
+		return fmt.Errorf("approvedAt cannot be empty")
+	}
+	if _, err := time.Parse(time.RFC3339, p.ApprovedAt); err != nil {
+		return fmt.Errorf("approvedAt must be RFC3339: %w", err)
+	}
 	return nil
 }
 
@@ -132,4 +189,90 @@ func ResolveDistributionChannelFile(path string) (*ResolvedDistributionChannel, 
 		BOM:     doc,
 		BOMPath: bomPath,
 	}, nil
+}
+
+func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*PromoteDistributionChannelResult, error) {
+	channelPath := strings.TrimSpace(opts.ChannelPath)
+	if channelPath == "" {
+		return nil, fmt.Errorf("channel path cannot be empty")
+	}
+	targetBOMPath := strings.TrimSpace(opts.TargetBOMPath)
+	if targetBOMPath == "" {
+		return nil, fmt.Errorf("target BOM path cannot be empty")
+	}
+	reason := strings.TrimSpace(opts.Reason)
+	if reason == "" {
+		return nil, fmt.Errorf("promotion reason cannot be empty")
+	}
+	approvedBy := strings.TrimSpace(opts.ApprovedBy)
+	if approvedBy == "" {
+		return nil, fmt.Errorf("promotion approvedBy cannot be empty")
+	}
+
+	channel, err := LoadDistributionChannelFile(channelPath)
+	if err != nil {
+		return nil, err
+	}
+	targetBOM, err := LoadFile(targetBOMPath)
+	if err != nil {
+		return nil, err
+	}
+	if targetBOM.Metadata.Name != channel.Spec.Line {
+		return nil, fmt.Errorf("distribution channel %q line %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Spec.Line, targetBOM.Metadata.Name)
+	}
+
+	fromRevision := channel.Spec.TargetRevision
+	targetBOMPathForChannel := distributionChannelRelativeBOMPath(channelPath, targetBOMPath)
+	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
+	channel.Spec.TargetRevision = targetBOM.Spec.Revision
+	channel.Spec.BOMPath = targetBOMPathForChannel
+
+	if opts.AppendHistory {
+		approvedAt := opts.ApprovedAt
+		if approvedAt.IsZero() {
+			approvedAt = time.Now().UTC()
+		}
+		channel.Spec.PromotionHistory = append(channel.Spec.PromotionHistory, DistributionPromotionRef{
+			FromRevision: strings.TrimSpace(fromRevision),
+			ToRevision:   targetBOM.Spec.Revision,
+			BOMPath:      targetBOMPathForChannel,
+			Reason:       reason,
+			ApprovedBy:   approvedBy,
+			ApprovedAt:   approvedAt.UTC().Format(time.RFC3339),
+		})
+		changed = true
+	}
+
+	if err := channel.Validate(); err != nil {
+		return nil, fmt.Errorf("validate promoted distribution channel %q: %w", channelPath, err)
+	}
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		return nil, fmt.Errorf("write promoted distribution channel %q: %w", channelPath, err)
+	}
+
+	return &PromoteDistributionChannelResult{
+		Channel:      channel,
+		BOM:          targetBOM,
+		ChannelPath:  channelPath,
+		BOMPath:      targetBOMPath,
+		FromRevision: fromRevision,
+		ToRevision:   targetBOM.Spec.Revision,
+		Changed:      changed,
+	}, nil
+}
+
+func distributionChannelRelativeBOMPath(channelPath, bomPath string) string {
+	channelAbs, err := filepath.Abs(channelPath)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(bomPath))
+	}
+	bomAbs, err := filepath.Abs(bomPath)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(bomPath))
+	}
+	rel, err := filepath.Rel(filepath.Dir(channelAbs), bomAbs)
+	if err != nil {
+		return bomAbs
+	}
+	return filepath.ToSlash(rel)
 }
