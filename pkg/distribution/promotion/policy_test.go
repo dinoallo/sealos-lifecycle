@@ -111,6 +111,22 @@ func TestEvaluateDefault(t *testing.T) {
 			wantCodes:  []ViolationCode{ViolationHealthProofFailed},
 			wantHealth: true,
 		},
+		{
+			name: "alpha rejects provided failed health proof",
+			request: Request{
+				TargetChannel: ChannelAlpha,
+				Candidate: CandidateRevision{
+					Line:          "default-platform",
+					Revision:      "rev-20240424",
+					SourceChannel: ChannelAlpha,
+				},
+				HealthProof: HealthProofSummary{
+					Provided: true,
+					Passed:   false,
+				},
+			},
+			wantCodes: []ViolationCode{ViolationHealthProofFailed},
+		},
 	}
 
 	for _, tt := range tests {

@@ -155,14 +155,14 @@ func (p Policy) Evaluate(req Request) (*Decision, error) {
 			fmt.Sprintf("candidate source channel %q cannot promote to target channel %q", req.Candidate.SourceChannel, req.TargetChannel))
 	}
 	if rule.RequiresHealthProof {
-		switch {
-		case !req.HealthProof.Provided:
+		if !req.HealthProof.Provided {
 			decision.addViolation(ViolationHealthProofRequired,
 				fmt.Sprintf("target channel %q requires passed health proof", req.TargetChannel))
-		case !req.HealthProof.Passed:
-			decision.addViolation(ViolationHealthProofFailed,
-				"health proof did not pass")
 		}
+	}
+	if req.HealthProof.Provided && !req.HealthProof.Passed {
+		decision.addViolation(ViolationHealthProofFailed,
+			"health proof did not pass")
 	}
 	if len(req.HealthProof.FailedSignals) > 0 {
 		decision.addViolation(ViolationHealthProofFailed,
