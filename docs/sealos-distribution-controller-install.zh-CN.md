@@ -25,9 +25,11 @@ kubeconfig；base deployment 里默认是 `/host/etc/kubernetes/admin.conf`。
 
 ## 前置条件
 
-- 已经有 Kubernetes 集群，并且集群可以拉取或使用 `sealos-agent` 镜像。
-- controller 镜像里包含 `/usr/bin/sealos-agent`、`kubectl` 和 package hooks 需要的 host
-  tools；或者镜像加上挂载的 host paths 后，可以从 `PATH` 找到这些工具。
+- 已经有 Kubernetes 集群，并且集群可以拉取或预加载 controller 镜像。
+- controller 镜像里包含 `/usr/bin/sealos-agent`。本仓库提供了一个最小镜像定义：
+  [`docker/sealos-agent/Dockerfile`](../docker/sealos-agent/Dockerfile)。base deployment
+  也会把挂载的 host paths 放到 `PATH` 里，所以 `kubectl` 和 hook tools 可以放进派生镜像，
+  也可以由 host 提供。
 - 选中的 BOM 或本地 `DistributionChannel` 文件已经放到运行 controller pod 的节点的
   `/var/lib/sealos/distribution/...` 下。
 - 如果选中的 BOM 需要 local inputs、resources 或 patches，cluster-local repo 也要放到
@@ -49,6 +51,14 @@ rendered bundle 时调用 host tools。因此示例 deployment 使用 privileged
 
 先构建或发布一个包含 `sealos-agent` binary 的镜像，然后在应用 manifests 前替换
 deployment 里的镜像：
+
+```bash
+PLATFORM=linux_$(go env GOARCH)
+make build BINS=sealos-agent PLATFORM="${PLATFORM}"
+cp "bin/${PLATFORM}/sealos-agent" docker/sealos-agent/sealos-agent
+docker build -t example.com/sealos-agent:dev docker/sealos-agent
+docker push example.com/sealos-agent:dev
+```
 
 ```bash
 kubectl -n sealos-system set image \

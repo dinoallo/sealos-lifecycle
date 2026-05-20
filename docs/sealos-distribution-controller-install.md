@@ -28,10 +28,12 @@ deployment that is `/host/etc/kubernetes/admin.conf`.
 
 ## Prerequisites
 
-- A Kubernetes cluster that already has the `sealos-agent` image available.
-- A controller image that contains `/usr/bin/sealos-agent`, `kubectl`, and the
-  host tools needed by package hooks, or an image plus mounted host paths that
-  put those tools on `PATH`.
+- A Kubernetes cluster that can pull or preload the controller image.
+- A controller image that contains `/usr/bin/sealos-agent`. This repository
+  ships a minimal image definition at
+  [`docker/sealos-agent/Dockerfile`](../docker/sealos-agent/Dockerfile). The
+  base deployment also puts mounted host paths on `PATH`, so `kubectl` and hook
+  tools can either be baked into a derived image or supplied by the host.
 - The selected BOM or local `DistributionChannel` file staged under
   `/var/lib/sealos/distribution/...` on the node running the controller pod.
 - A cluster-local repo staged under `/var/lib/sealos/distribution/...` when the
@@ -55,6 +57,14 @@ present.
 
 Build or publish an image that contains the `sealos-agent` binary, then set that
 image in the deployment before applying the manifests:
+
+```bash
+PLATFORM=linux_$(go env GOARCH)
+make build BINS=sealos-agent PLATFORM="${PLATFORM}"
+cp "bin/${PLATFORM}/sealos-agent" docker/sealos-agent/sealos-agent
+docker build -t example.com/sealos-agent:dev docker/sealos-agent
+docker push example.com/sealos-agent:dev
+```
 
 ```bash
 kubectl -n sealos-system set image \

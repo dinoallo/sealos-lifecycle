@@ -228,6 +228,26 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 	}
 }
 
+func TestDistributionControllerImageDockerfileContract(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "docker", "sealos-agent", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read sealos-agent Dockerfile: %v", err)
+	}
+	dockerfile := string(data)
+	for _, want := range []string{
+		"fuse-overlayfs",
+		"uidmap",
+		"COPY sealos-agent /usr/bin/sealos-agent",
+		`ENTRYPOINT ["/usr/bin/sealos-agent"]`,
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Fatalf("sealos-agent Dockerfile missing %q", want)
+		}
+	}
+}
+
 func TestDistributionControllerRBACContract(t *testing.T) {
 	t.Parallel()
 
