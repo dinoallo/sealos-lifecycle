@@ -249,7 +249,7 @@ func newSyncPromoteCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&flags.distributionChannelFile, "distribution-channel", "", "path to the local DistributionChannel file to advance")
 	cmd.Flags().StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
-	cmd.Flags().StringVar(&flags.healthProofFile, "health-proof", "", "optional DistributionHealthProof file that must pass for the target BOM before promotion")
+	cmd.Flags().StringVar(&flags.healthProofFile, "health-proof", "", "DistributionHealthProof file that must pass when the target channel policy requires proof")
 	cmd.Flags().StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
 	cmd.Flags().StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
 	cmd.Flags().StringVar(&flags.approvedAt, "approved-at", "", "approval timestamp in RFC3339 format; defaults to the current time")

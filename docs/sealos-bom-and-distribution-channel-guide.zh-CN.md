@@ -260,7 +260,7 @@ lookup。
 
 同样在本地文件边界内，现在也有一个很小的 promotion 原语：
 `sealos sync promote`。它会把一份本地 `DistributionChannel` 文件推进到目标 BOM
-文件，可选检查一份本地 health proof，并记录 approver、reason、timestamp 和一条
+文件，按目标 channel 的 policy 检查本地 health proof，并记录 approver、reason、timestamp 和一条
 promotion history。这样，跟随本地 channel 的集群已经有一条可评审的 channel
 advancement 路径，但这不等于已经实现 registry/API-backed 的 release lookup。
 
@@ -328,8 +328,9 @@ sealos sync promote \
 - channel 文档是有效的 `DistributionChannel`
 - 目标 BOM 是有效 BOM
 - `DistributionChannel.spec.line` 匹配 `BOM.metadata.name`
-- 如果设置了 `--health-proof`，proof 必须是有效的
-  `DistributionHealthProof`，必须指向同一条 line 和目标 BOM revision，并且
+- 默认 promotion policy 允许目标 channel 前进到候选 BOM 的 source channel
+- 如果目标 channel 要求 proof，`--health-proof` 必须指向有效的
+  `DistributionHealthProof`，它必须指向同一条 line 和目标 BOM revision，并且
   `spec.passed: true`，所有 signals 也都不能失败
 
 然后它会写回更新后的 channel 文件，并追加一条
@@ -342,6 +343,17 @@ sealos sync promote \
 - approver
 - approval timestamp
 - 使用 `--health-proof` 时的 health proof path、digest 和 summary
+
+当前本地文件 promotion policy 很小且确定：
+
+| 目标 channel | 允许的候选 `BOM.spec.channel` | Health proof |
+| --- | --- | --- |
+| `alpha` | `alpha` | 不要求 |
+| `beta` | `alpha`, `beta` | 要求 |
+| `stable` | `beta`, `stable` | 要求 |
+
+这会阻止未经验证的 `alpha` 候选直接跳到 `stable`，也会把 beta/stable
+promotion 缺失 proof 视为 policy failure，而不是默认批准。
 
 最小 health proof 形态如下：
 
@@ -367,6 +379,11 @@ spec:
 生成的 `spec.bomPath` 会尽量写成相对于 channel 文件的路径。现有 render、
 validate、agent 和 controller 路径继续通过 `--distribution-channel` 或
 `distributionChannelPath` 消费同一份 channel 文件。
+
+`sealos sync promote` 的结构化输出也会返回 `policyDecision`。这个 decision
+记录已评估的 transition、目标 channel rule、health-proof requirement，以及
+policy engine 给出的 warning 或 violation 字段。失败的 decision 会在 channel
+文件写入前阻塞。
 
 ## Day 1 到 Day N 应该怎么表现
 
