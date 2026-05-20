@@ -65,11 +65,13 @@ type syncValidateOutput struct {
 	Packages                []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
 	Issues                  []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
 	LocalPolicy             string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
+	LocalPolicySource       string                      `json:"localPolicySource,omitempty" yaml:"localPolicySource,omitempty"`
 	LocalRepoRev            string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
 }
 
 type syncValidateAccumulator struct {
-	out syncValidateOutput
+	out                syncValidateOutput
+	localPolicyBOMRoot string
 }
 
 func (a *syncValidateAccumulator) issue(severity syncValidateSeverity, code, component, path, message string) {
@@ -192,6 +194,9 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 	doc := target.BOM
 	acc.out.BOMPath = target.BOMPath
+	if strings.TrimSpace(target.BOMPath) != "" {
+		acc.localPolicyBOMRoot = filepath.Dir(target.BOMPath)
+	}
 	if strings.TrimSpace(target.DistributionChannelPath) != "" {
 		acc.out.DistributionChannelPath = strings.TrimSpace(target.DistributionChannelPath)
 	}
@@ -204,8 +209,9 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 
 	var fallbackLoader packageformat.Loader
+	var fallbackSources hydrate.SourceProvider
 	if len(localRoots) < len(doc.Spec.Components) {
-		fallbackLoader, _, err = newSyncCachedArtifactResolver(acc.out.ClusterName)
+		fallbackLoader, fallbackSources, err = newSyncCachedArtifactResolver(acc.out.ClusterName)
 		if err != nil {
 			acc.error("packageResolutionFailed", "", "", err.Error())
 			return acc.finalize()
@@ -238,9 +244,10 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 
 	if len(resolved) > 0 {
 		acc.validatePackages(doc, resolved, localRoots, repo, topology)
-	}
-	if repo != nil {
-		acc.validateLocalPatchPolicy(repo)
+		acc.validateLocalPatchPolicy(doc, resolved, &syncSourceProvider{
+			local:    localRoots,
+			fallback: fallbackSources,
+		}, repo)
 	}
 
 	return acc.finalize()
@@ -410,19 +417,18 @@ func (a *syncValidateAccumulator) validateSecretBearingFile(componentName, path 
 	}
 }
 
-func (a *syncValidateAccumulator) validateLocalPatchPolicy(repo *localrepo.Repo) {
+func (a *syncValidateAccumulator) validateLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, sources hydrate.SourceProvider, repo *localrepo.Repo) {
+	policyDoc, source, policyPath, err := syncEffectiveLocalPatchPolicy(doc, resolved, a.localPolicyBOMRoot, sources, repo)
+	if err != nil {
+		a.error("localPatchPolicyInvalid", "", "", err.Error())
+		return
+	}
+	a.out.LocalPolicySource = string(source)
+	a.out.LocalPolicy = policyPath
 	if repo == nil {
 		return
 	}
-	policyDoc := repo.LocalPatchPolicy()
-	policy := ownership.DefaultLocalPatchPolicy()
-	if policyDoc != nil {
-		policy = policyDoc.Spec
-		a.out.LocalPolicy = repo.LocalPatchPolicyRelativePath()
-	} else {
-		a.out.LocalPolicy = string(ownership.LocalPatchPolicySourceBuiltInDefault)
-	}
-	compatibility, err := localrepo.EvaluatePatchCompatibility(repo, policy)
+	compatibility, err := localrepo.EvaluatePatchCompatibility(repo, policyDoc.Spec)
 	if err != nil {
 		a.error("localPatchPolicyInvalid", "", repo.LocalPatchPolicyRelativePath(), err.Error())
 		return
@@ -430,6 +436,47 @@ func (a *syncValidateAccumulator) validateLocalPatchPolicy(repo *localrepo.Repo)
 	for _, issue := range compatibility.InvalidPatches {
 		a.error("localPatchPolicyViolation", issue.Component, issue.RelativePath, issue.Reason)
 	}
+}
+
+func syncEffectiveLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, bomRoot string, sources hydrate.SourceProvider, repo *localrepo.Repo) (*ownership.LocalPatchPolicyDocument, ownership.LocalPatchPolicySource, string, error) {
+	policyDoc := ownership.DefaultLocalPatchPolicyDocument().Clone()
+	source := ownership.LocalPatchPolicySourceBuiltInDefault
+	policyPath := string(source)
+
+	if doc != nil && len(resolved) > 0 {
+		plan, err := hydrate.BuildPlanFromResolved(doc, resolved)
+		if err != nil {
+			return nil, "", "", err
+		}
+		bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
+		if err != nil {
+			return nil, "", "", err
+		}
+		packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
+		if err != nil {
+			return nil, "", "", err
+		}
+		if packagePolicy != nil {
+			policyDoc = packagePolicy
+			source = ownership.LocalPatchPolicySourcePackage
+			policyPath = string(source)
+		}
+		if bomPolicy != nil {
+			policyDoc = bomPolicy
+			source = ownership.LocalPatchPolicySourceBOM
+			policyPath = string(source)
+		}
+	}
+
+	if repo != nil {
+		if localPolicy := repo.LocalPatchPolicy(); localPolicy != nil {
+			policyDoc = localPolicy
+			source = ownership.LocalPatchPolicySourceLocalRepo
+			policyPath = repo.LocalPatchPolicyRelativePath()
+		}
+	}
+
+	return policyDoc, source, policyPath, nil
 }
 
 func syncValidatePatchCount(repo *localrepo.Repo, doc *bom.BOM) int {

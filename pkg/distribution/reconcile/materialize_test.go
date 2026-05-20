@@ -368,6 +368,245 @@ func TestMaterializeOverlaysLocalRepoInput(t *testing.T) {
 	}
 }
 
+func TestMaterializeUsesPackageLocalPatchPolicyWhenLocalRepoPolicyMissing(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+		{
+			Name:    "cilium",
+			Kind:    "addon",
+			Version: "v1.15.0",
+			Dependencies: []string{
+				"kubernetes",
+			},
+			Artifact: bom.ArtifactReference{
+				Name:   "cilium-cni",
+				Image:  "registry.example.io/sealos/cilium-cni:v1.15.0",
+				Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+			},
+		},
+	}
+
+	localRoot := t.TempDir()
+	writeLocalRepoPatch(t, localRoot, "cilium", "cilium-config.patch.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system\n  annotations:\n    package-policy.sealos.io/managed: \"true\"\n")
+	repo, err := localrepo.Load(localRoot)
+	if err != nil {
+		t.Fatalf("localrepo.Load() error = %v", err)
+	}
+
+	sourceRoot := filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node", "packages", "cilium")
+	ciliumSource := copiedPackageSource(t, sourceRoot)
+	writePackagePatchPolicy(t, ciliumSource, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: package-local-patch-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - metadata.annotations\n")
+
+	result, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		LocalRepo:   repo,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			switch image {
+			case doc.Spec.Components[0].Artifact.Reference():
+				return packageformat.LoadDir(fixtureRoot())
+			case doc.Spec.Components[1].Artifact.Reference():
+				pkg, err := packageformat.LoadDir(ciliumSource)
+				if err != nil {
+					return nil, err
+				}
+				pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+				return pkg, nil
+			default:
+				return nil, fmt.Errorf("unexpected image %q", image)
+			}
+		}),
+		Sources: hydrate.SourceMap{
+			"kubernetes": fixtureRoot(),
+			"cilium":     ciliumSource,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicySource), "package"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyName, "package-local-patch-policy"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyName = %q, want %q", got, want)
+	}
+	renderedManifestPath := filepath.Join(result.BundlePath, "components", "cilium", "files", "manifests", "cilium.yaml")
+	renderedManifest, err := os.ReadFile(renderedManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", renderedManifestPath, err)
+	}
+	if !strings.Contains(string(renderedManifest), "package-policy.sealos.io/managed: \"true\"") {
+		t.Fatalf("rendered manifest missing package-policy local patch annotation: %s", string(renderedManifest))
+	}
+}
+
+func TestMaterializeLocalRepoPolicyOverridesPackagePolicy(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := testBOM()
+	sourceRoot := copiedFixture(t)
+	writePackagePatchPolicy(t, sourceRoot, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: package-local-patch-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - metadata.annotations\n")
+
+	localRoot := t.TempDir()
+	writeLocalRepoPatchPolicy(t, localRoot, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: repo-local-patch-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - data\n")
+	repo, err := localrepo.Load(localRoot)
+	if err != nil {
+		t.Fatalf("localrepo.Load() error = %v", err)
+	}
+
+	result, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		LocalRepo:   repo,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			pkg, err := loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot).Load(image)
+			if err != nil {
+				return nil, err
+			}
+			pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			return pkg, nil
+		}),
+		Sources: hydrate.SourceMap{"kubernetes": sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicySource), "localRepo"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyName, "repo-local-patch-policy"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyName = %q, want %q", got, want)
+	}
+}
+
+func TestMaterializeUsesBOMLocalPatchPolicy(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := testBOM()
+	doc.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+	bomRoot := t.TempDir()
+	writePackagePatchPolicy(t, bomRoot, packagePolicyYAML("bom-local-patch-policy"))
+	sourceRoot := copiedFixture(t)
+	writePackagePatchPolicy(t, sourceRoot, packagePolicyYAML("package-local-patch-policy"))
+
+	result, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		BOMRoot:     bomRoot,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			pkg, err := loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot).Load(image)
+			if err != nil {
+				return nil, err
+			}
+			pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			return pkg, nil
+		}),
+		Sources: hydrate.SourceMap{"kubernetes": sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicySource), "bom"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyName, "bom-local-patch-policy"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyName = %q, want %q", got, want)
+	}
+}
+
+func TestMaterializeRejectsMultiplePackageLocalPatchPolicies(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+		{
+			Name:    "other",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "other-rootfs",
+				Image:  "registry.example.io/sealos/other-rootfs:v1.30.3",
+				Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+			},
+		},
+	}
+	sourceA := copiedFixture(t)
+	sourceB := copiedFixture(t)
+	writePackagePatchPolicy(t, sourceA, packagePolicyYAML("package-policy-a"))
+	writePackagePatchPolicy(t, sourceB, packagePolicyYAML("package-policy-b"))
+
+	_, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			var root string
+			componentName := ""
+			switch image {
+			case doc.Spec.Components[0].Artifact.Reference():
+				root = sourceA
+				componentName = "kubernetes"
+			case doc.Spec.Components[1].Artifact.Reference():
+				root = sourceB
+				componentName = "other"
+			default:
+				return nil, fmt.Errorf("unexpected image %q", image)
+			}
+			pkg, err := packageformat.LoadDir(root)
+			if err != nil {
+				return nil, err
+			}
+			pkg.Spec.Component = componentName
+			pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			return pkg, nil
+		}),
+		Sources: hydrate.SourceMap{
+			"kubernetes": sourceA,
+			"other":      sourceB,
+		},
+	})
+	if err == nil {
+		t.Fatal("Materialize() error = nil, want multiple package policy error")
+	}
+	if !strings.Contains(err.Error(), "multiple component packages declare local patch policies") {
+		t.Fatalf("Materialize() error = %v, want multiple package policy error", err)
+	}
+}
+
 func TestMaterializeRejectsInvalidLocalRepoPatch(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	constants.DefaultRuntimeRootDir = t.TempDir()
@@ -491,6 +730,32 @@ func copiedFixture(t *testing.T) string {
 		t.Fatalf("CopyDirV3() error = %v", err)
 	}
 	return dst
+}
+
+func copiedPackageSource(t *testing.T, root string) string {
+	t.Helper()
+
+	dst := filepath.Join(t.TempDir(), filepath.Base(root))
+	if err := fileutil.CopyDirV3(root, dst); err != nil {
+		t.Fatalf("CopyDirV3(%q, %q) error = %v", root, dst, err)
+	}
+	return dst
+}
+
+func writePackagePatchPolicy(t *testing.T, root, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, "policy", "local-patch-policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func packagePolicyYAML(name string) string {
+	return "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: " + name + "\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - data\n"
 }
 
 func writeLocalRepoInput(t *testing.T, root, component, filename, content string) {

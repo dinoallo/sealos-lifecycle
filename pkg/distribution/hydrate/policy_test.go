@@ -41,7 +41,7 @@ func TestLoadBundleLocalPatchPolicyRejectsUnsupportedSource(t *testing.T) {
 
 	_, err := LoadBundleLocalPatchPolicy(&Bundle{
 		Spec: BundleSpec{
-			LocalPatchPolicySource: ownership.LocalPatchPolicySource("package"),
+			LocalPatchPolicySource: ownership.LocalPatchPolicySource("unsupported"),
 			LocalPatchPolicyPath:   "policy/local-patch-policy.yaml",
 		},
 	}, root)

@@ -34,6 +34,7 @@ type Plan struct {
 	BOMName                string                              `json:"bomName" yaml:"bomName"`
 	Revision               string                              `json:"revision" yaml:"revision"`
 	Channel                bom.ReleaseChannel                  `json:"channel" yaml:"channel"`
+	BOMLocalPatchPolicy    string                              `json:"bomLocalPatchPolicy,omitempty" yaml:"bomLocalPatchPolicy,omitempty"`
 	LocalPatchPolicy       *ownership.LocalPatchPolicyDocument `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
 	LocalPatchPolicySource ownership.LocalPatchPolicySource    `json:"localPatchPolicySource,omitempty" yaml:"localPatchPolicySource,omitempty"`
 	LocalResources         []LocalResource                     `json:"localResources,omitempty" yaml:"localResources,omitempty"`
@@ -58,6 +59,7 @@ type ComponentPlan struct {
 	Artifact          string                       `json:"artifact" yaml:"artifact"`
 	Dependencies      []string                     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 	Inputs            []packageformat.Input        `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	LocalPatchPolicy  string                       `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
 	InputBindings     map[string]string            `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
 	HostInputBindings map[string]map[string]string `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
 	LocalPatches      []LocalPatch                 `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
@@ -111,9 +113,10 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 	}
 
 	plan := &Plan{
-		BOMName:  doc.Metadata.Name,
-		Revision: doc.Spec.Revision,
-		Channel:  doc.Spec.Channel,
+		BOMName:             doc.Metadata.Name,
+		Revision:            doc.Spec.Revision,
+		Channel:             doc.Spec.Channel,
+		BOMLocalPatchPolicy: doc.Spec.LocalPatchPolicy,
 	}
 
 	for _, name := range order {
@@ -125,14 +128,15 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 		inputs := append([]packageformat.Input(nil), pkg.Spec.Inputs...)
 		slices.SortFunc(inputs, compareInputs)
 		plan.Components = append(plan.Components, ComponentPlan{
-			Name:         component.Name,
-			PackageName:  pkg.Metadata.Name,
-			Version:      component.Version,
-			Class:        pkg.Spec.Class,
-			Artifact:     component.Artifact.Reference(),
-			Dependencies: append([]string(nil), dependenciesByComponent[name]...),
-			Inputs:       inputs,
-			Steps:        buildSteps(pkg),
+			Name:             component.Name,
+			PackageName:      pkg.Metadata.Name,
+			Version:          component.Version,
+			Class:            pkg.Spec.Class,
+			Artifact:         component.Artifact.Reference(),
+			Dependencies:     append([]string(nil), dependenciesByComponent[name]...),
+			Inputs:           inputs,
+			LocalPatchPolicy: pkg.Spec.LocalPatchPolicy,
+			Steps:            buildSteps(pkg),
 		})
 	}
 

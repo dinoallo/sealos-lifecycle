@@ -21,6 +21,7 @@ import (
 
 	"github.com/labring/sealos/pkg/distribution"
 	"github.com/labring/sealos/pkg/distribution/bom"
+	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
@@ -198,6 +199,63 @@ func TestRenderPlanWithMountedArtifactSourceProvider(t *testing.T) {
 	}
 }
 
+func TestRenderPlanUsesPackageLocalPatchPolicy(t *testing.T) {
+	t.Parallel()
+
+	root := copyRenderFixture(t)
+	policyPath := filepath.Join(root, "policy", ownership.LocalPatchPolicyFileName)
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(policy dir) error = %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte("apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: package-local-patch-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - metadata.annotations\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(policy) error = %v", err)
+	}
+
+	pkg, err := packageformat.LoadDir(root)
+	if err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+	pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+
+	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+	}
+	plan, err := BuildPlanFromResolved(doc, map[string]*packageformat.ComponentPackage{"kubernetes": pkg})
+	if err != nil {
+		t.Fatalf("BuildPlanFromResolved() error = %v", err)
+	}
+
+	out := t.TempDir()
+	rendered, err := RenderPlan(plan, SourceMap{"kubernetes": root}, out)
+	if err != nil {
+		t.Fatalf("RenderPlan() error = %v", err)
+	}
+
+	if got, want := rendered.Spec.LocalPatchPolicySource, ownership.LocalPatchPolicySourcePackage; got != want {
+		t.Fatalf("localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := rendered.Spec.LocalPatchPolicyName, "package-local-patch-policy"; got != want {
+		t.Fatalf("localPatchPolicyName = %q, want %q", got, want)
+	}
+	loaded, err := LoadBundleLocalPatchPolicy(rendered, out)
+	if err != nil {
+		t.Fatalf("LoadBundleLocalPatchPolicy() error = %v", err)
+	}
+	if got, want := loaded.EffectiveName(), "package-local-patch-policy"; got != want {
+		t.Fatalf("loaded policy name = %q, want %q", got, want)
+	}
+}
+
 func TestRenderPlanMissingSource(t *testing.T) {
 	t.Parallel()
 
@@ -215,6 +273,17 @@ func TestRenderPlanMissingSource(t *testing.T) {
 	if _, err := RenderPlan(plan, SourceMap{}, t.TempDir()); err == nil {
 		t.Fatal("RenderPlan() error = nil, want error")
 	}
+}
+
+func copyRenderFixture(t *testing.T) string {
+	t.Helper()
+
+	root := filepath.Join("..", "packageformat", "testdata", "kubernetes-rootfs")
+	dst := filepath.Join(t.TempDir(), "kubernetes-rootfs")
+	if err := copyEntry(root, dst); err != nil {
+		t.Fatalf("copyEntry(%q, %q) error = %v", root, dst, err)
+	}
+	return dst
 }
 
 func TestRenderPlanPreservesHostInputBindings(t *testing.T) {

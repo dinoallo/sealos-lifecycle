@@ -2813,6 +2813,7 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 
 	return reconcile.Options{
 		ClusterName:        clusterName,
+		BOMRoot:            syncBOMRoot(target),
 		RenderProvenance:   provenance,
 		LocalRepo:          repo,
 		LocalPatchRevision: localPatchRevision,
@@ -2825,6 +2826,13 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 			fallback: fallbackSources,
 		},
 	}, nil
+}
+
+func syncBOMRoot(target *syncResolvedTarget) string {
+	if target == nil || strings.TrimSpace(target.BOMPath) == "" {
+		return ""
+	}
+	return filepath.Dir(target.BOMPath)
 }
 
 func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo *localrepo.Repo, localPatchRevision string, packageSources map[string]string) (hydrate.RenderProvenance, error) {

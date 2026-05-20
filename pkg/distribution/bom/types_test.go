@@ -41,6 +41,19 @@ func TestBOMValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid local patch policy path",
+			mutate: func(b *BOM) {
+				b.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			},
+		},
+		{
+			name: "local patch policy path traversal",
+			mutate: func(b *BOM) {
+				b.Spec.LocalPatchPolicy = "../policy/local-patch-policy.yaml"
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -42,6 +42,7 @@ const (
 
 type Options struct {
 	ClusterName        string
+	BOMRoot            string
 	RenderProvenance   hydrate.RenderProvenance
 	SourcePreflight    *hydrate.SourcePreflight
 	ExecutionTopology  hydrate.ExecutionTopology
@@ -103,6 +104,9 @@ func MaterializeFile(path string, opts Options) (*Result, error) {
 		provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 	}
 	opts.RenderProvenance = provenance
+	if opts.BOMRoot == "" {
+		opts.BOMRoot = filepath.Dir(provenance.BOMPath)
+	}
 	return Materialize(doc, opts)
 }
 
@@ -136,7 +140,9 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
-	attachLocalBindings(plan, opts.LocalRepo)
+	if err := attachLocalBindings(plan, opts.BOMRoot, opts.Sources, opts.LocalRepo); err != nil {
+		return nil, err
+	}
 
 	topology, err := materializeExecutionTopology(opts.ClusterName, opts.ExecutionTopology)
 	if err != nil {
@@ -145,7 +151,7 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	provenance := opts.RenderProvenance
 	provenance.LocalRepoRevision = localRepoRevision(opts.LocalRepo)
 	provenance.LocalPatchRevision = opts.LocalPatchRevision
-	renderedBundle, stagePath, err := materializeBundle(plan, opts.ClusterName, opts.Sources, topology, provenance, opts.SourcePreflight)
+	renderedBundle, stagePath, err := materializeBundle(plan, opts.ClusterName, opts.BOMRoot, opts.Sources, topology, provenance, opts.SourcePreflight)
 	if err != nil {
 		return nil, err
 	}
@@ -191,14 +197,30 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	}, nil
 }
 
-func attachLocalBindings(plan *hydrate.Plan, repo *localrepo.Repo) {
+func attachLocalBindings(plan *hydrate.Plan, bomRoot string, sources hydrate.SourceProvider, repo *localrepo.Repo) error {
 	if plan == nil {
-		return
+		return nil
 	}
 	plan.LocalPatchPolicy = ownership.DefaultLocalPatchPolicyDocument().Clone()
 	plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBuiltInDefault
+	bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
+	if err != nil {
+		return err
+	}
+	packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
+	if err != nil {
+		return err
+	}
+	if packagePolicy != nil {
+		plan.LocalPatchPolicy = packagePolicy
+		plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
+	}
+	if bomPolicy != nil {
+		plan.LocalPatchPolicy = bomPolicy
+		plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
+	}
 	if repo == nil {
-		return
+		return nil
 	}
 
 	if localPatchPolicy := repo.LocalPatchPolicy(); localPatchPolicy != nil {
@@ -250,6 +272,7 @@ func attachLocalBindings(plan *hydrate.Plan, repo *localrepo.Repo) {
 			})
 		}
 	}
+	return nil
 }
 
 func localRepoRevision(repo *localrepo.Repo) string {
@@ -274,7 +297,7 @@ func materializeExecutionTopology(clusterName string, requested hydrate.Executio
 	return topology.snapshot(), nil
 }
 
-func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.SourceProvider, topology hydrate.ExecutionTopology, provenance hydrate.RenderProvenance, sourcePreflight *hydrate.SourcePreflight) (*hydrate.Bundle, string, error) {
+func materializeBundle(plan *hydrate.Plan, clusterName, bomRoot string, sources hydrate.SourceProvider, topology hydrate.ExecutionTopology, provenance hydrate.RenderProvenance, sourcePreflight *hydrate.SourcePreflight) (*hydrate.Bundle, string, error) {
 	storePath := BundleStorePath(clusterName)
 	if err := os.MkdirAll(storePath, 0o755); err != nil {
 		return nil, "", fmt.Errorf("create bundle store %q: %w", storePath, err)
@@ -291,7 +314,9 @@ func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.S
 		}
 	}()
 
-	renderedBundle, err := hydrate.RenderPlan(plan, sources, stagePath)
+	renderedBundle, err := hydrate.RenderPlanWithOptions(plan, sources, stagePath, hydrate.RenderOptions{
+		BOMRoot: bomRoot,
+	})
 	if err != nil {
 		return nil, "", err
 	}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -158,6 +159,144 @@ spec:
 	}
 }
 
+func TestSyncValidateUsesPackageLocalPatchPolicy(t *testing.T) {
+	tempDir := t.TempDir()
+	bomPath := filepath.Join(tempDir, "bom.yaml")
+	packageRoot := filepath.Join(tempDir, "package")
+	localRepoRoot := filepath.Join(tempDir, "local-repo")
+
+	writeSyncValidateBOM(t, bomPath)
+	writeSyncTestPackage(t, packageRoot)
+	writeSyncPackagePatchPolicy(t, packageRoot, strings.TrimSpace(`
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicy
+metadata:
+  name: package-local-patch-policy
+spec:
+  scope: clusterLocal
+  forbiddenExactPaths:
+    - status
+    - spec.selector
+  forbiddenMetadataKeys:
+    - uid
+    - resourceVersion
+    - generation
+    - creationTimestamp
+    - managedFields
+    - ownerReferences
+    - finalizers
+    - generateName
+    - selfLink
+    - deletionTimestamp
+    - deletionGracePeriodSeconds
+  forbiddenContainerFields:
+    - image
+  kindRules:
+    - kind: Deployment
+      allowedPrefixes:
+        - spec.template.metadata.annotations
+`)+"\n")
+	writeSyncLocalPatch(t, localRepoRoot, "runtime", "placement.patch.yaml", strings.TrimSpace(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        package-policy.sealos.io/managed: "true"
+`)+"\n")
+
+	out := runSyncValidate(syncValidateOptions{
+		BOMPath:        bomPath,
+		LocalRepoPath:  localRepoRoot,
+		PackageSources: []string{"runtime=" + packageRoot},
+	})
+	if !out.Passed {
+		t.Fatalf("validate passed = false, issues=%#v", out.Issues)
+	}
+	if got, want := out.LocalPolicySource, "package"; got != want {
+		t.Fatalf("localPolicySource = %q, want %q", got, want)
+	}
+	if got, want := out.LocalPolicy, "package"; got != want {
+		t.Fatalf("localPolicy = %q, want %q", got, want)
+	}
+}
+
+func TestSyncValidateUsesBOMLocalPatchPolicy(t *testing.T) {
+	tempDir := t.TempDir()
+	bomPath := filepath.Join(tempDir, "bom.yaml")
+	packageRoot := filepath.Join(tempDir, "package")
+	localRepoRoot := filepath.Join(tempDir, "local-repo")
+
+	bomDoc := syncLifecycleBOM()
+	bomDoc.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+	data, err := yaml.Marshal(bomDoc)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(BOM) error = %v", err)
+	}
+	writeSyncTestFile(t, bomPath, string(data), 0o644)
+	writeSyncTestPackage(t, packageRoot)
+	writeSyncPolicyFile(t, filepath.Dir(bomPath), strings.TrimSpace(`
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicy
+metadata:
+  name: bom-local-patch-policy
+spec:
+  scope: clusterLocal
+  forbiddenExactPaths:
+    - status
+    - spec.selector
+  forbiddenMetadataKeys:
+    - uid
+    - resourceVersion
+    - generation
+    - creationTimestamp
+    - managedFields
+    - ownerReferences
+    - finalizers
+    - generateName
+    - selfLink
+    - deletionTimestamp
+    - deletionGracePeriodSeconds
+  forbiddenContainerFields:
+    - image
+  kindRules:
+    - kind: Deployment
+      allowedPrefixes:
+        - spec.template.metadata.annotations
+`)+"\n")
+	writeSyncLocalPatch(t, localRepoRoot, "runtime", "placement.patch.yaml", strings.TrimSpace(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        bom-policy.sealos.io/managed: "true"
+`)+"\n")
+
+	out := runSyncValidate(syncValidateOptions{
+		BOMPath:        bomPath,
+		LocalRepoPath:  localRepoRoot,
+		PackageSources: []string{"runtime=" + packageRoot},
+	})
+	if !out.Passed {
+		t.Fatalf("validate passed = false, issues=%#v", out.Issues)
+	}
+	if got, want := out.LocalPolicySource, "bom"; got != want {
+		t.Fatalf("localPolicySource = %q, want %q", got, want)
+	}
+	if got, want := out.LocalPolicy, "bom"; got != want {
+		t.Fatalf("localPolicy = %q, want %q", got, want)
+	}
+}
+
 func TestSyncValidateCmdChecksTopologyHostInputs(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	runtimeRoot := t.TempDir()
@@ -213,6 +352,43 @@ func TestSyncValidateCmdChecksTopologyHostInputs(t *testing.T) {
 	}
 	if !syncValidateHasIssueCode(out.Issues, "hostInputUnknownHost") {
 		t.Fatalf("issues missing hostInputUnknownHost: %#v", out.Issues)
+	}
+}
+
+func writeSyncPackagePatchPolicy(t *testing.T, packageRoot, content string) {
+	t.Helper()
+
+	manifestPath := filepath.Join(packageRoot, "package.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", manifestPath, err)
+	}
+	needle := "  contents:\n"
+	if !strings.Contains(string(data), needle) {
+		t.Fatalf("package manifest missing %q", needle)
+	}
+	updated := strings.Replace(string(data), needle, "  localPatchPolicy: policy/local-patch-policy.yaml\n"+needle, 1)
+	if err := os.WriteFile(manifestPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", manifestPath, err)
+	}
+	path := filepath.Join(packageRoot, "policy", "local-patch-policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func writeSyncPolicyFile(t *testing.T, root, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, "policy", "local-patch-policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 }
 

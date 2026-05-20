@@ -54,6 +54,13 @@ func LoadMetadata(packageDir string) (*Metadata, error) {
 	}
 
 	paths := []string{packageformat.ManifestFileName}
+	if strings.TrimSpace(pkg.Spec.LocalPatchPolicy) != "" {
+		cleaned, err := cleanRelative(pkg.Spec.LocalPatchPolicy)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, cleaned)
+	}
 	for _, content := range pkg.Spec.Contents {
 		cleaned, err := cleanRelative(content.Path)
 		if err != nil {

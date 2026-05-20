@@ -119,14 +119,15 @@ type Hook struct {
 }
 
 type Spec struct {
-	Component     string        `json:"component" yaml:"component"`
-	Version       string        `json:"version" yaml:"version"`
-	Class         PackageClass  `json:"class" yaml:"class"`
-	Dependencies  []Dependency  `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Compatibility Compatibility `json:"compatibility,omitempty" yaml:"compatibility,omitempty"`
-	Inputs        []Input       `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Contents      []Content     `json:"contents" yaml:"contents"`
-	Hooks         []Hook        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+	Component        string        `json:"component" yaml:"component"`
+	Version          string        `json:"version" yaml:"version"`
+	Class            PackageClass  `json:"class" yaml:"class"`
+	Dependencies     []Dependency  `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	Compatibility    Compatibility `json:"compatibility,omitempty" yaml:"compatibility,omitempty"`
+	Inputs           []Input       `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Contents         []Content     `json:"contents" yaml:"contents"`
+	Hooks            []Hook        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+	LocalPatchPolicy string        `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
 }
 
 type ComponentPackage struct {
@@ -184,6 +185,11 @@ func (s Spec) Validate() error {
 	}
 	if len(s.Contents) == 0 {
 		return fmt.Errorf("contents cannot be empty")
+	}
+	if s.LocalPatchPolicy != "" {
+		if err := validateRelativePath("localPatchPolicy", s.LocalPatchPolicy); err != nil {
+			return err
+		}
 	}
 
 	dependencies := make(map[string]struct{}, len(s.Dependencies))

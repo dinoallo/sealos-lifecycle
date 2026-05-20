@@ -16,6 +16,8 @@ package bom
 
 import (
 	"fmt"
+	"path"
+	"strings"
 
 	"github.com/opencontainers/go-digest"
 	"sigs.k8s.io/yaml"
@@ -54,10 +56,11 @@ type Component struct {
 }
 
 type Spec struct {
-	Revision      string              `json:"revision" yaml:"revision"`
-	Channel       ReleaseChannel      `json:"channel" yaml:"channel"`
-	BaseArtifacts []ArtifactReference `json:"baseArtifacts,omitempty" yaml:"baseArtifacts,omitempty"`
-	Components    []Component         `json:"components" yaml:"components"`
+	Revision         string              `json:"revision" yaml:"revision"`
+	Channel          ReleaseChannel      `json:"channel" yaml:"channel"`
+	LocalPatchPolicy string              `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
+	BaseArtifacts    []ArtifactReference `json:"baseArtifacts,omitempty" yaml:"baseArtifacts,omitempty"`
+	Components       []Component         `json:"components" yaml:"components"`
 }
 
 type BOM struct {
@@ -101,6 +104,11 @@ func (b BOM) Validate() error {
 	}
 	if err := b.Spec.Channel.Validate(); err != nil {
 		return fmt.Errorf("spec.channel: %w", err)
+	}
+	if b.Spec.LocalPatchPolicy != "" {
+		if err := validateRelativePath("spec.localPatchPolicy", b.Spec.LocalPatchPolicy); err != nil {
+			return err
+		}
 	}
 	if len(b.Spec.Components) == 0 {
 		return fmt.Errorf("spec.components cannot be empty")
@@ -190,6 +198,23 @@ func (c Component) Validate() error {
 			return fmt.Errorf("duplicate dependency %q", dependency)
 		}
 		dependencies[dependency] = struct{}{}
+	}
+	return nil
+}
+
+func validateRelativePath(field, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s cannot be empty", field)
+	}
+	if strings.HasPrefix(value, "/") {
+		return fmt.Errorf("%s must be relative, got %q", field, value)
+	}
+	cleaned := path.Clean(value)
+	if cleaned == "." || cleaned == "" {
+		return fmt.Errorf("%s cannot be empty", field)
+	}
+	if strings.HasPrefix(cleaned, "../") || cleaned == ".." {
+		return fmt.Errorf("%s cannot escape the BOM root, got %q", field, value)
 	}
 	return nil
 }

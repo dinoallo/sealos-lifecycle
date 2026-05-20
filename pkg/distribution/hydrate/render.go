@@ -56,6 +56,10 @@ func (m SourceMap) Source(component ComponentPlan) (Source, error) {
 	return Source{Root: root}, nil
 }
 
+type RenderOptions struct {
+	BOMRoot string
+}
+
 type MountedArtifactSourceProvider struct {
 	Mounter packageformat.ImageMounter
 	mounts  map[string]packageformat.MountedImage
@@ -124,6 +128,10 @@ func (p *MountedArtifactSourceProvider) Close() error {
 }
 
 func RenderPlan(plan *Plan, sources SourceProvider, outputDir string) (*Bundle, error) {
+	return RenderPlanWithOptions(plan, sources, outputDir, RenderOptions{})
+}
+
+func RenderPlanWithOptions(plan *Plan, sources SourceProvider, outputDir string, opts RenderOptions) (*Bundle, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("plan cannot be nil")
 	}
@@ -136,6 +144,25 @@ func RenderPlan(plan *Plan, sources SourceProvider, outputDir string) (*Bundle, 
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create output directory %q: %w", outputDir, err)
+	}
+
+	if plan.LocalPatchPolicy == nil {
+		bomPolicy, err := LoadBOMLocalPatchPolicy(plan, opts.BOMRoot)
+		if err != nil {
+			return nil, err
+		}
+		packagePolicy, err := LoadPackageLocalPatchPolicy(plan, sources)
+		if err != nil {
+			return nil, err
+		}
+		if packagePolicy != nil {
+			plan.LocalPatchPolicy = packagePolicy
+			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
+		}
+		if bomPolicy != nil {
+			plan.LocalPatchPolicy = bomPolicy
+			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
+		}
 	}
 
 	bundle := NewBundle(plan)

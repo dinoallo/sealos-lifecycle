@@ -33,6 +33,8 @@ type LocalPatchPolicySource string
 const (
 	LocalPatchPolicySourceBuiltInDefault LocalPatchPolicySource = "builtInDefault"
 	LocalPatchPolicySourceLocalRepo      LocalPatchPolicySource = "localRepo"
+	LocalPatchPolicySourceBOM            LocalPatchPolicySource = "bom"
+	LocalPatchPolicySourcePackage        LocalPatchPolicySource = "package"
 )
 
 type PolicyMetadata struct {
@@ -112,7 +114,7 @@ func (d LocalPatchPolicyDocument) Validate() error {
 
 func (s LocalPatchPolicySource) Validate() error {
 	switch s {
-	case LocalPatchPolicySourceBuiltInDefault, LocalPatchPolicySourceLocalRepo:
+	case LocalPatchPolicySourceBuiltInDefault, LocalPatchPolicySourceLocalRepo, LocalPatchPolicySourceBOM, LocalPatchPolicySourcePackage:
 		return nil
 	case "":
 		return fmt.Errorf("local patch policy source cannot be empty")

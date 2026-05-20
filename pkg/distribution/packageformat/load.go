@@ -120,6 +120,11 @@ func LoadFromImage(mounter ImageMounter, image string) (*ComponentPackage, error
 }
 
 func validatePackageContents(root string, pkg *ComponentPackage) error {
+	if pkg.Spec.LocalPatchPolicy != "" {
+		if err := validatePackageFilePath(root, pkg.Spec.LocalPatchPolicy, "local patch policy"); err != nil {
+			return err
+		}
+	}
 	for _, content := range pkg.Spec.Contents {
 		contentPath := filepath.Join(root, filepath.FromSlash(content.Path))
 		if _, err := os.Stat(contentPath); err != nil {
@@ -141,6 +146,21 @@ func validatePackageContents(root string, pkg *ComponentPackage) error {
 		if info.IsDir() {
 			return fmt.Errorf("component package hook %q must reference a file, got directory %q", hook.Name, hook.Path)
 		}
+	}
+	return nil
+}
+
+func validatePackageFilePath(root, relativePath, label string) error {
+	resolved := filepath.Join(root, filepath.FromSlash(relativePath))
+	info, err := os.Stat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("component package %s %q not found", label, relativePath)
+		}
+		return fmt.Errorf("stat component package %s %q: %w", label, relativePath, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("component package %s %q must reference a file, got directory", label, relativePath)
 	}
 	return nil
 }

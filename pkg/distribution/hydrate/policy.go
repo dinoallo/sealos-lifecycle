@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/opencontainers/go-digest"
@@ -33,6 +34,85 @@ func resolvePlanLocalPatchPolicy(plan *Plan) ownership.LocalPatchPolicyDocument 
 		return *plan.LocalPatchPolicy.Clone()
 	}
 	return ownership.DefaultLocalPatchPolicyDocument()
+}
+
+func LoadBOMLocalPatchPolicy(plan *Plan, bomRoot string) (*ownership.LocalPatchPolicyDocument, error) {
+	if plan == nil {
+		return nil, nil
+	}
+	policyPath := strings.TrimSpace(plan.BOMLocalPatchPolicy)
+	if policyPath == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(bomRoot) == "" {
+		return nil, fmt.Errorf("BOM root cannot be empty when BOM declares local patch policy %q", policyPath)
+	}
+	cleanPath, err := cleanRelative(policyPath)
+	if err != nil {
+		return nil, fmt.Errorf("BOM local patch policy: %w", err)
+	}
+	resolved := filepath.Join(bomRoot, filepath.FromSlash(cleanPath))
+	document, err := ownership.LoadLocalPatchPolicyFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("load BOM local patch policy %q: %w", cleanPath, err)
+	}
+	return document.Clone(), nil
+}
+
+func LoadPackageLocalPatchPolicy(plan *Plan, sources SourceProvider) (*ownership.LocalPatchPolicyDocument, error) {
+	if plan == nil || len(plan.Components) == 0 {
+		return nil, nil
+	}
+	if sources == nil {
+		return nil, fmt.Errorf("source provider cannot be nil")
+	}
+
+	type candidate struct {
+		component string
+		path      string
+		document  *ownership.LocalPatchPolicyDocument
+	}
+	candidates := make([]candidate, 0)
+	for _, component := range plan.Components {
+		policyPath := strings.TrimSpace(component.LocalPatchPolicy)
+		if policyPath == "" {
+			continue
+		}
+		source, err := sources.Source(component)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(source.Root) == "" {
+			return nil, fmt.Errorf("source root for component %q cannot be empty", component.Name)
+		}
+		cleanPath, err := cleanRelative(policyPath)
+		if err != nil {
+			return nil, fmt.Errorf("component %q local patch policy: %w", component.Name, err)
+		}
+		resolved := filepath.Join(source.Root, filepath.FromSlash(cleanPath))
+		document, err := ownership.LoadLocalPatchPolicyFile(resolved)
+		if err != nil {
+			return nil, fmt.Errorf("load component %q local patch policy %q: %w", component.Name, cleanPath, err)
+		}
+		candidates = append(candidates, candidate{
+			component: component.Name,
+			path:      cleanPath,
+			document:  document,
+		})
+	}
+
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	if len(candidates) > 1 {
+		descriptions := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			descriptions = append(descriptions, fmt.Sprintf("%s:%s", candidate.component, candidate.path))
+		}
+		slices.Sort(descriptions)
+		return nil, fmt.Errorf("multiple component packages declare local patch policies: %s; exactly one package policy is supported", strings.Join(descriptions, ", "))
+	}
+	return candidates[0].document.Clone(), nil
 }
 
 func renderLocalPatchPolicy(plan *Plan, bundle *Bundle, outputDir string) error {

@@ -52,6 +52,19 @@ func TestComponentPackageValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "valid local patch policy path",
+			mutate: func(p *ComponentPackage) {
+				p.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			},
+		},
+		{
+			name: "local patch policy path traversal",
+			mutate: func(p *ComponentPackage) {
+				p.Spec.LocalPatchPolicy = "../policy/local-patch-policy.yaml"
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid hook target",
 			mutate: func(p *ComponentPackage) {
 				p.Spec.Hooks[0].Target = ExecutionTarget("node0")
