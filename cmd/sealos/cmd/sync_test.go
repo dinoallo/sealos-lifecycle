@@ -514,6 +514,254 @@ func TestSyncPromoteCmdRejectsInvalidApprovedAt(t *testing.T) {
 	}
 }
 
+func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
+	root := t.TempDir()
+	targetBOM := testSyncBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	bomPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	if err := yamlutil.MarshalFile(bomPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "reports", "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		Status:                "Passed",
+		ExitCode:              0,
+		MutatingApply:         true,
+		RevertCheck:           true,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Warning",
+		PostApplyState:        "Clean",
+		PostRevertState:       "Clean",
+		Stages: []syncHealthProofAcceptanceReportStage{
+			{Name: "render", Status: "Passed"},
+			{Name: "apply", Status: "Passed", Mutates: true},
+			{Name: "validate-cluster", Status: "Passed", Mutates: true},
+		},
+	})
+	proofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+		"--output-file", proofPath,
+		"--summary", "beta cohort passed",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.Metadata.Name, "default-platform-rev-20240424-health"; got != want {
+		t.Fatalf("metadata.name = %q, want %q", got, want)
+	}
+	if got, want := out.Spec.Line, targetBOM.Metadata.Name; got != want {
+		t.Fatalf("spec.line = %q, want %q", got, want)
+	}
+	if got, want := out.Spec.TargetRevision, targetBOM.Spec.Revision; got != want {
+		t.Fatalf("spec.targetRevision = %q, want %q", got, want)
+	}
+	if !out.Spec.Passed {
+		t.Fatal("spec.passed = false, want true")
+	}
+	if got, want := out.Spec.Summary, "beta cohort passed"; got != want {
+		t.Fatalf("spec.summary = %q, want %q", got, want)
+	}
+	if got, want := out.Spec.CollectedAt, "2024-04-24T11:00:00Z"; got != want {
+		t.Fatalf("spec.collectedAt = %q, want %q", got, want)
+	}
+	if !syncHealthProofTestSignalPassed(out, "runtime-preflight") {
+		t.Fatal("runtime-preflight signal did not pass; Warning should be accepted as non-blocking")
+	}
+	if !syncHealthProofTestSignalPassed(out, "mutating-apply") {
+		t.Fatal("mutating-apply signal did not pass")
+	}
+	if !syncHealthProofTestSignalPassed(out, "stage/apply") {
+		t.Fatal("stage/apply signal did not pass")
+	}
+	loaded, _, err := bom.LoadDistributionHealthProofFile(proofPath)
+	if err != nil {
+		t.Fatalf("LoadDistributionHealthProofFile() error = %v", err)
+	}
+	if got, want := loaded.Spec.TargetRevision, targetBOM.Spec.Revision; got != want {
+		t.Fatalf("persisted spec.targetRevision = %q, want %q", got, want)
+	}
+}
+
+func TestSyncHealthProofCmdReportsFailedAcceptanceSignal(t *testing.T) {
+	root := t.TempDir()
+	targetBOM := testSyncBOM()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		Status:                "Failed",
+		ExitCode:              1,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Blocked",
+		Stages: []syncHealthProofAcceptanceReportStage{
+			{Name: "runtime-preflight", Status: "Failed", Reason: "blocked"},
+		},
+	})
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if out.Spec.Passed {
+		t.Fatal("spec.passed = true, want false")
+	}
+	if syncHealthProofTestSignalPassed(out, "acceptance-report") {
+		t.Fatal("acceptance-report signal passed, want failed")
+	}
+	if syncHealthProofTestSignalPassed(out, "runtime-preflight") {
+		t.Fatal("runtime-preflight signal passed, want failed")
+	}
+	if syncHealthProofTestSignalPassed(out, "stage/runtime-preflight") {
+		t.Fatal("stage/runtime-preflight signal passed, want failed")
+	}
+}
+
+func TestSyncHealthProofCmdRequiresMutatingApplyEvidence(t *testing.T) {
+	root := t.TempDir()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		Status:                "Passed",
+		ExitCode:              0,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Ready",
+		Stages: []syncHealthProofAcceptanceReportStage{
+			{Name: "render", Status: "Passed"},
+			{Name: "apply", Status: "Skipped", Mutates: true},
+		},
+	})
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if out.Spec.Passed {
+		t.Fatal("spec.passed = true, want false")
+	}
+	if syncHealthProofTestSignalPassed(out, "mutating-apply") {
+		t.Fatal("mutating-apply signal passed, want failed")
+	}
+}
+
+func TestSyncHealthProofCmdFailsWhenPostApplyStateMissing(t *testing.T) {
+	root := t.TempDir()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		Status:                "Passed",
+		ExitCode:              0,
+		MutatingApply:         true,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Ready",
+		Stages: []syncHealthProofAcceptanceReportStage{
+			{Name: "apply", Status: "Passed", Mutates: true},
+		},
+	})
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if out.Spec.Passed {
+		t.Fatal("spec.passed = true, want false")
+	}
+	if syncHealthProofTestSignalPassed(out, "post-apply-drift") {
+		t.Fatal("post-apply-drift signal passed, want failed")
+	}
+}
+
+func TestSyncHealthProofCmdRejectsInvalidCollectedAt(t *testing.T) {
+	root := t.TempDir()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		Status:                "Passed",
+		ExitCode:              0,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Ready",
+	})
+
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+		"--collected-at", "not-rfc3339",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want invalid timestamp")
+	}
+	if !strings.Contains(err.Error(), "parse --collected-at as RFC3339") {
+		t.Fatalf("Execute() error = %v, want collected-at parse error", err)
+	}
+}
+
 func TestSyncApplyCmdWithRuntimeRootOverride(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	defaultRuntimeRoot := t.TempDir()
@@ -8974,6 +9222,70 @@ func testSyncBOM() *bom.BOM {
 		},
 	}
 	return doc
+}
+
+type syncHealthProofTestReportOptions struct {
+	Status                string
+	ExitCode              int
+	MutatingApply         bool
+	RevertCheck           bool
+	SourcePreflightState  string
+	RuntimePreflightState string
+	PostApplyState        string
+	PostRevertState       string
+	Stages                []syncHealthProofAcceptanceReportStage
+}
+
+func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthProofTestReportOptions) {
+	t.Helper()
+
+	report := syncHealthProofAcceptanceReport{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindPackageAcceptanceReport,
+		Metadata: bom.Metadata{
+			Name: "poc-minimal",
+		},
+		Spec: syncHealthProofAcceptanceReportSpec{
+			ClusterName:           "poc-minimal",
+			StartedAt:             "2024-04-24T10:00:00Z",
+			FinishedAt:            "2024-04-24T11:00:00Z",
+			Status:                opts.Status,
+			ExitCode:              opts.ExitCode,
+			MutatingApply:         opts.MutatingApply,
+			RevertCheck:           opts.RevertCheck,
+			PackageMode:           "local",
+			BOMFile:               "/work/bom.yaml",
+			Workdir:               "/work",
+			RuntimeRoot:           "/work/runtime",
+			LocalRepo:             "/work/local-repo",
+			BundleDir:             "/work/bundle",
+			Kubeconfig:            "/etc/kubernetes/admin.conf",
+			HostRoot:              "/",
+			OutputsFormat:         "yaml",
+			DesiredStateDigest:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			LocalRepoRevision:     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			SourcePreflightState:  opts.SourcePreflightState,
+			RuntimePreflightState: opts.RuntimePreflightState,
+			PostApplyState:        opts.PostApplyState,
+			PostRevertState:       opts.PostRevertState,
+			Stages:                opts.Stages,
+			Notes: []string{
+				"Secret values are not captured in this report.",
+			},
+		},
+	}
+	if err := yamlutil.MarshalFile(path, report); err != nil {
+		t.Fatalf("MarshalFile(acceptance report) error = %v", err)
+	}
+}
+
+func syncHealthProofTestSignalPassed(proof bom.DistributionHealthProof, name string) bool {
+	for _, signal := range proof.Spec.Signals {
+		if signal.Name == name {
+			return signal.Passed
+		}
+	}
+	return false
 }
 
 func syncFixtureRoot() string {

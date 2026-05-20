@@ -192,6 +192,7 @@ func newSyncCmd() *cobra.Command {
 	cmd.AddCommand(policyApprovalScanCmd)
 	cmd.AddCommand(newSyncPolicyReportCmd())
 	cmd.AddCommand(newSyncPolicyGateCmd())
+	cmd.AddCommand(newSyncHealthProofCmd())
 	cmd.AddCommand(newSyncPromoteCmd())
 	return cmd
 }

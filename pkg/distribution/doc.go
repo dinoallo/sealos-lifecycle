@@ -29,4 +29,5 @@ const (
 	KindDistributionChannel     = "DistributionChannel"
 	KindDistributionHealthProof = "DistributionHealthProof"
 	KindHydratedBundle          = "HydratedBundle"
+	KindPackageAcceptanceReport = "PackageAcceptanceReport"
 )
