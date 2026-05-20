@@ -270,6 +270,110 @@ func TestSyncRenderCmdRejectsAmbiguousTarget(t *testing.T) {
 	}
 }
 
+func TestSyncPromoteCmd(t *testing.T) {
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(channel dir) error = %v", err)
+	}
+	oldBOM := testSyncBOM()
+	oldBOM.Spec.Revision = "rev-20240423"
+	oldBOMPath := filepath.Join(root, "boms", "rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(oldBOMPath, oldBOM); err != nil {
+		t.Fatalf("MarshalFile(oldBOM) error = %v", err)
+	}
+	targetBOM := testSyncBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := bom.NewDistributionChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, oldBOM.Spec.Revision, "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"promote",
+		"--distribution-channel", channelPath,
+		"--target-bom", targetBOMPath,
+		"--reason", "beta cohort passed",
+		"--approved-by", "release-team",
+		"--approved-at", "2024-04-24T10:30:00Z",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+
+	var out syncPromoteOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.DistributionChannelPath, channelPath; got != want {
+		t.Fatalf("distributionChannelPath = %q, want %q", got, want)
+	}
+	if got, want := out.Line, targetBOM.Metadata.Name; got != want {
+		t.Fatalf("line = %q, want %q", got, want)
+	}
+	if got, want := out.Channel, string(bom.ChannelStable); got != want {
+		t.Fatalf("channel = %q, want %q", got, want)
+	}
+	if got, want := out.FromRevision, "rev-20240423"; got != want {
+		t.Fatalf("fromRevision = %q, want %q", got, want)
+	}
+	if got, want := out.ToRevision, "rev-20240424"; got != want {
+		t.Fatalf("toRevision = %q, want %q", got, want)
+	}
+	if !out.Changed {
+		t.Fatal("changed = false, want true")
+	}
+	if got, want := out.Promotion.ApprovedAt, "2024-04-24T10:30:00Z"; got != want {
+		t.Fatalf("promotion.approvedAt = %q, want %q", got, want)
+	}
+	if got, want := out.Promotion.BOMPath, "../boms/rev-20240424.yaml"; got != want {
+		t.Fatalf("promotion.bomPath = %q, want %q", got, want)
+	}
+
+	loaded, err := bom.LoadDistributionChannelFile(channelPath)
+	if err != nil {
+		t.Fatalf("LoadDistributionChannelFile() error = %v", err)
+	}
+	if got, want := loaded.Spec.TargetRevision, "rev-20240424"; got != want {
+		t.Fatalf("persisted targetRevision = %q, want %q", got, want)
+	}
+	if got, want := loaded.Spec.BOMPath, "../boms/rev-20240424.yaml"; got != want {
+		t.Fatalf("persisted bomPath = %q, want %q", got, want)
+	}
+	if got, want := len(loaded.Spec.PromotionHistory), 1; got != want {
+		t.Fatalf("len(persisted promotionHistory) = %d, want %d", got, want)
+	}
+}
+
+func TestSyncPromoteCmdRejectsInvalidApprovedAt(t *testing.T) {
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"promote",
+		"--distribution-channel", filepath.Join(t.TempDir(), "channel.yaml"),
+		"--target-bom", filepath.Join(t.TempDir(), "bom.yaml"),
+		"--reason", "passed canary",
+		"--approved-by", "release-team",
+		"--approved-at", "not-rfc3339",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want invalid timestamp")
+	}
+	if !strings.Contains(err.Error(), "parse --approved-at as RFC3339") {
+		t.Fatalf("Execute() error = %v, want approved-at parse error", err)
+	}
+}
+
 func TestSyncApplyCmdWithRuntimeRootOverride(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	defaultRuntimeRoot := t.TempDir()

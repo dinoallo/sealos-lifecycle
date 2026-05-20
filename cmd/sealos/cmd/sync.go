@@ -191,7 +191,89 @@ func newSyncCmd() *cobra.Command {
 	cmd.AddCommand(policyApprovalScanCmd)
 	cmd.AddCommand(newSyncPolicyReportCmd())
 	cmd.AddCommand(newSyncPolicyGateCmd())
+	cmd.AddCommand(newSyncPromoteCmd())
 	return cmd
+}
+
+func newSyncPromoteCmd() *cobra.Command {
+	var flags struct {
+		distributionChannelFile string
+		targetBOMFile           string
+		reason                  string
+		approvedBy              string
+		approvedAt              string
+		output                  string
+	}
+
+	cmd := &cobra.Command{
+		Use:          "promote",
+		Short:        "Promote a local DistributionChannel to a target BOM revision",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var approvedAt time.Time
+			if strings.TrimSpace(flags.approvedAt) != "" {
+				parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(flags.approvedAt))
+				if err != nil {
+					return fmt.Errorf("parse --approved-at as RFC3339: %w", err)
+				}
+				approvedAt = parsed
+			}
+
+			result, err := bom.PromoteDistributionChannelFile(bom.PromoteDistributionChannelOptions{
+				ChannelPath:   flags.distributionChannelFile,
+				TargetBOMPath: flags.targetBOMFile,
+				Reason:        flags.reason,
+				ApprovedBy:    flags.approvedBy,
+				ApprovedAt:    approvedAt,
+				AppendHistory: true,
+			})
+			if err != nil {
+				return err
+			}
+			out := syncPromoteOutput{
+				DistributionChannelPath: result.ChannelPath,
+				BOMPath:                 result.BOMPath,
+				Line:                    result.Channel.Spec.Line,
+				Channel:                 string(result.Channel.Spec.Channel),
+				FromRevision:            result.FromRevision,
+				ToRevision:              result.ToRevision,
+				Changed:                 result.Changed,
+				Promotion:               result.Channel.Spec.PromotionHistory[len(result.Channel.Spec.PromotionHistory)-1],
+			}
+			return writeSyncOutput(cmd, out, flags.output, "promotion result")
+		},
+	}
+	cmd.Flags().StringVar(&flags.distributionChannelFile, "distribution-channel", "", "path to the local DistributionChannel file to advance")
+	cmd.Flags().StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
+	cmd.Flags().StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
+	cmd.Flags().StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
+	cmd.Flags().StringVar(&flags.approvedAt, "approved-at", "", "approval timestamp in RFC3339 format; defaults to the current time")
+	addSyncOutputFlag(cmd, &flags.output)
+	if err := cmd.MarkFlagRequired("distribution-channel"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("target-bom"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("reason"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("approved-by"); err != nil {
+		panic(err)
+	}
+	return cmd
+}
+
+type syncPromoteOutput struct {
+	DistributionChannelPath string                       `json:"distributionChannelPath" yaml:"distributionChannelPath"`
+	BOMPath                 string                       `json:"bomPath" yaml:"bomPath"`
+	Line                    string                       `json:"line" yaml:"line"`
+	Channel                 string                       `json:"channel" yaml:"channel"`
+	FromRevision            string                       `json:"fromRevision" yaml:"fromRevision"`
+	ToRevision              string                       `json:"toRevision" yaml:"toRevision"`
+	Changed                 bool                         `json:"changed" yaml:"changed"`
+	Promotion               bom.DistributionPromotionRef `json:"promotion" yaml:"promotion"`
 }
 
 func newSyncPolicyApprovalScanCmd() *cobra.Command {

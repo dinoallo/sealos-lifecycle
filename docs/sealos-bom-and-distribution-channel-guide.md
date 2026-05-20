@@ -267,6 +267,12 @@ matches the target BOM `metadata.name`, that `targetRevision` matches the BOM
 `spec.revision`, and then renders that concrete BOM. It does not provide live
 lookup for "latest stable on this distribution line" yet.
 
+The same local-file boundary also has a small promotion primitive:
+`sealos sync promote`. It advances one local `DistributionChannel` file to a
+target BOM file after recording an approver, reason, timestamp, and promotion
+history entry. That gives file-backed channel followers a reviewable channel
+advancement path without implying registry/API-backed release lookup.
+
 ## Day 0 Selection
 
 At Day 0, a cluster should not infer its release target from package content or
@@ -309,6 +315,43 @@ It does not yet implement:
 
 - registry/API-backed `DistributionChannel` lookup
 - "follow the latest stable revision on this line" resolution
+
+## Local Channel Promotion
+
+For the current local-file model, promotion means updating one
+`DistributionChannel` document so that `spec.targetRevision` and `spec.bomPath`
+point at a different BOM revision on the same distribution line.
+
+Use:
+
+```bash
+sealos sync promote \
+  --distribution-channel channels/default-platform-stable.yaml \
+  --target-bom boms/default-platform/rev-008.yaml \
+  --reason "beta cohort passed source preflight and rollout validation" \
+  --approved-by release-team
+```
+
+The command validates that:
+
+- the channel document is a valid `DistributionChannel`
+- the target BOM is a valid BOM
+- `DistributionChannel.spec.line` matches `BOM.metadata.name`
+
+It then writes the updated channel file and appends
+`spec.promotionHistory[]` with:
+
+- the previous revision
+- the new revision
+- the BOM path written into the channel
+- the reason
+- the approver
+- the approval timestamp
+
+The generated `spec.bomPath` is relative to the channel file when possible.
+Existing render, validate, agent, and controller paths continue to consume the
+same channel file through `--distribution-channel` or
+`distributionChannelPath`.
 
 ## Day 1 To Day N Behavior
 
@@ -373,9 +416,9 @@ for the in-cluster installation workflow and sample targets.
 
 This mode currently supplies the watched API, status conditions, and installable
 manifests, including a durable `DistributionRolloutPolicy` object for host
-batch size. Registry-backed channel lookup, promotion automation, canary
-pauses, health gates, and automatic rollback are still outside the implemented
-surface.
+batch size. Registry-backed channel lookup, health-gated promotion automation,
+canary pauses, health gates, and automatic rollback are still outside the
+implemented surface.
 
 ## Applied Revision State
 
@@ -430,7 +473,8 @@ line, not as "whatever the cluster currently drifted into."
 - The final API-backed `DistributionChannel` schema and storage contract
 - Resolution rules from `distribution line + channel` to one BOM revision
   without requiring a local `spec.bomPath`
-- How channel advancement history is stored and audited
+- API-backed channel advancement history and audit storage beyond the current
+  local `spec.promotionHistory[]` field
 - Whether `BOM.spec.channel` should become optional first and then be removed
   later
 - The exact Day 0 operator interface for API-backed pinned versus

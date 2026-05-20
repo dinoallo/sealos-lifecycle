@@ -258,6 +258,12 @@ spec:
 这份具体 BOM。它还没有提供“这条 distribution line 的 latest stable”这种 live
 lookup。
 
+同样在本地文件边界内，现在也有一个很小的 promotion 原语：
+`sealos sync promote`。它会把一份本地 `DistributionChannel` 文件推进到目标 BOM
+文件，并记录 approver、reason、timestamp 和一条 promotion history。这样，跟随
+本地 channel 的集群已经有一条可评审的 channel advancement 路径，但这不等于已经
+实现 registry/API-backed 的 release lookup。
+
 ## Day 0 怎么选
 
 在 Day 0，集群不应该从 package 内容或 live state 里反推 release target。它
@@ -299,6 +305,42 @@ BOM，再进入 materialization。
 
 - registry/API 驱动的 `DistributionChannel` lookup
 - “帮你跟随这条线的 latest stable” 这种解析逻辑
+
+## 本地 Channel Promotion
+
+在当前本地文件模型里，promotion 的含义是更新一份 `DistributionChannel` 文档，
+让它的 `spec.targetRevision` 和 `spec.bomPath` 指向同一条 distribution line 上
+的另一份 BOM revision。
+
+用法：
+
+```bash
+sealos sync promote \
+  --distribution-channel channels/default-platform-stable.yaml \
+  --target-bom boms/default-platform/rev-008.yaml \
+  --reason "beta cohort passed source preflight and rollout validation" \
+  --approved-by release-team
+```
+
+这个命令会校验：
+
+- channel 文档是有效的 `DistributionChannel`
+- 目标 BOM 是有效 BOM
+- `DistributionChannel.spec.line` 匹配 `BOM.metadata.name`
+
+然后它会写回更新后的 channel 文件，并追加一条
+`spec.promotionHistory[]`，内容包括：
+
+- 上一个 revision
+- 新 revision
+- 写入 channel 的 BOM path
+- promotion reason
+- approver
+- approval timestamp
+
+生成的 `spec.bomPath` 会尽量写成相对于 channel 文件的路径。现有 render、
+validate、agent 和 controller 路径继续通过 `--distribution-channel` 或
+`distributionChannelPath` 消费同一份 channel 文件。
 
 ## Day 1 到 Day N 应该怎么表现
 
@@ -360,7 +402,8 @@ sealos-agent --controller --controller-namespace sealos-system
 
 这个模式目前提供 watched API、status condition 和可安装 manifests，也包含用于 host
 batch size 的持久 `DistributionRolloutPolicy` 对象。registry-backed channel lookup、
-promotion automation、canary pause、health gate 和自动 rollback 仍然不在已实现范围内。
+health-gated promotion automation、canary pause、health gate 和自动 rollback 仍然
+不在已实现范围内。
 
 ## Applied revision state
 
@@ -414,7 +457,8 @@ digest。
 - API-backed 的最终版 `DistributionChannel` schema 和存储契约
 - 不依赖本地 `spec.bomPath` 时，从 `distribution line + channel` 解析到 BOM
   revision 的规则
-- channel advancement history 怎么存、怎么审计
+- API-backed 的 channel advancement history 怎么存、怎么审计；当前只有本地
+  `spec.promotionHistory[]`
 - `BOM.spec.channel` 是先变 optional，还是以后直接移除
 - API-backed pin 模式和 channel 模式在 Day 0 的最终 operator interface 长什么样
 
