@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,12 +27,19 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/apply/processor"
 	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/agent"
+	distributioncontroller "github.com/labring/sealos/pkg/distribution/controller"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
 	"github.com/labring/sealos/pkg/system"
@@ -78,6 +86,12 @@ func newRootCmd() *cobra.Command {
 		once                    bool
 		output                  string
 		runtimeRoot             string
+		controller              bool
+		controllerNamespace     string
+		metricsBindAddress      string
+		healthProbeBindAddress  string
+		leaderElection          bool
+		leaderElectionNamespace string
 	}
 
 	cmd := &cobra.Command{
@@ -88,6 +102,22 @@ func newRootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(flags.runtimeRoot) != "" {
 				constants.DefaultRuntimeRootDir = strings.TrimSpace(flags.runtimeRoot)
+			}
+			if flags.controller {
+				return runController(cmd.Context(), cmd.ErrOrStderr(), controllerOptions{
+					defaults: distributioncontroller.Defaults{
+						ClusterName:    flags.clusterName,
+						KubeconfigPath: flags.kubeconfigPath,
+						HostRoot:       flags.hostRoot,
+						Mounter:        &lazyImageMounter{id: "sealos-agent", factory: newImageMounter},
+						Stderr:         cmd.ErrOrStderr(),
+					},
+					namespace:               flags.controllerNamespace,
+					metricsBindAddress:      flags.metricsBindAddress,
+					healthProbeBindAddress:  flags.healthProbeBindAddress,
+					leaderElection:          flags.leaderElection,
+					leaderElectionNamespace: flags.leaderElectionNamespace,
+				})
 			}
 			target, err := targetOptions(flags.bomFile, flags.distributionChannelFile)
 			if err != nil {
@@ -143,9 +173,92 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flags.once, "once", false, "run one reconcile pass and exit")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or json")
 	cmd.Flags().StringVar(&flags.runtimeRoot, "runtime-root", "", "override the cluster runtime root used to resolve sync state, bundles, and inventory")
+	cmd.Flags().BoolVar(&flags.controller, "controller", false, "run as a Kubernetes controller watching DistributionTarget objects")
+	cmd.Flags().StringVar(&flags.controllerNamespace, "controller-namespace", "", "namespace to watch for DistributionTarget objects; empty watches all namespaces")
+	cmd.Flags().StringVar(&flags.metricsBindAddress, "metrics-bind-address", "0", "address for controller metrics; use 0 to disable")
+	cmd.Flags().StringVar(&flags.healthProbeBindAddress, "health-probe-bind-address", ":8081", "address for controller health probes; use 0 to disable")
+	cmd.Flags().BoolVar(&flags.leaderElection, "leader-elect", false, "enable leader election for controller mode")
+	cmd.Flags().StringVar(&flags.leaderElectionNamespace, "leader-election-namespace", "", "namespace for leader election leases")
 	buildah.RegisterRootCommand(cmd)
 	cobra.OnInitialize(onInitialize)
 	return cmd
+}
+
+type controllerOptions struct {
+	defaults                distributioncontroller.Defaults
+	namespace               string
+	metricsBindAddress      string
+	healthProbeBindAddress  string
+	leaderElection          bool
+	leaderElectionNamespace string
+	newManager              func(ctrl.Options) (controllerManager, error)
+	setupDistributionTarget func(controllerManager, distributioncontroller.Defaults) error
+}
+
+type controllerManager interface {
+	Start(context.Context) error
+	AddHealthzCheck(string, healthz.Checker) error
+	AddReadyzCheck(string, healthz.Checker) error
+}
+
+func runController(ctx context.Context, errOut io.Writer, opts controllerOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseDevMode(debug), ctrlzap.WriteTo(errOut)))
+
+	scheme := k8sruntime.NewScheme()
+	if err := distributioncontroller.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("register distribution controller scheme: %w", err)
+	}
+	managerOptions := ctrl.Options{
+		Scheme:                 scheme,
+		HealthProbeBindAddress: strings.TrimSpace(opts.healthProbeBindAddress),
+		Metrics: metricsserver.Options{
+			BindAddress: strings.TrimSpace(opts.metricsBindAddress),
+		},
+		LeaderElection:          opts.leaderElection,
+		LeaderElectionID:        "sealos-agent.distribution.sealos.io",
+		LeaderElectionNamespace: strings.TrimSpace(opts.leaderElectionNamespace),
+	}
+	if namespace := strings.TrimSpace(opts.namespace); namespace != "" {
+		managerOptions.Cache.DefaultNamespaces = map[string]cache.Config{
+			namespace: {},
+		}
+	}
+
+	newManager := opts.newManager
+	if newManager == nil {
+		newManager = func(managerOptions ctrl.Options) (controllerManager, error) {
+			return ctrl.NewManager(ctrl.GetConfigOrDie(), managerOptions)
+		}
+	}
+	mgr, err := newManager(managerOptions)
+	if err != nil {
+		return fmt.Errorf("create controller manager: %w", err)
+	}
+	setupDistributionTarget := opts.setupDistributionTarget
+	if setupDistributionTarget == nil {
+		setupDistributionTarget = func(mgr controllerManager, defaults distributioncontroller.Defaults) error {
+			typedMgr, ok := mgr.(ctrl.Manager)
+			if !ok {
+				return fmt.Errorf("controller manager does not expose controller-runtime manager")
+			}
+			return (&distributioncontroller.Reconciler{
+				Defaults: defaults,
+			}).SetupWithManager(typedMgr)
+		}
+	}
+	if err := setupDistributionTarget(mgr, opts.defaults); err != nil {
+		return fmt.Errorf("setup distribution target controller: %w", err)
+	}
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return fmt.Errorf("add health check: %w", err)
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return fmt.Errorf("add ready check: %w", err)
+	}
+	return mgr.Start(ctx)
 }
 
 func targetOptions(bomPath, distributionChannelPath string) (agent.TargetOptions, error) {
