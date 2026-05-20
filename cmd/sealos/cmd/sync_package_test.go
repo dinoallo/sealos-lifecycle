@@ -10,6 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
+
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
 func TestSyncPackageBuildCmd(t *testing.T) {
@@ -163,6 +165,82 @@ func TestSyncPackagePushCmd(t *testing.T) {
 	if got, want := out.Reference, "registry.example.io/sealos/kubernetes-rootfs:v1.30.3@sha256:1234"; got != want {
 		t.Fatalf("out.Reference = %q, want %q", got, want)
 	}
+}
+
+func TestSyncPackagePullCmd(t *testing.T) {
+	fixtureRoot, err := filepath.Abs(syncFixtureRoot())
+	if err != nil {
+		t.Fatalf("Abs() error = %v", err)
+	}
+	mounter := &fakeSyncPackageImageMounter{
+		mounts: map[string]packageformat.MountedImage{
+			"registry.example.io/sealos/kubernetes-rootfs:v1.30.3": {
+				Name:       "mounted-package",
+				MountPoint: fixtureRoot,
+			},
+		},
+	}
+	previousMounterFactory := newSyncPackageImageMounter
+	newSyncPackageImageMounter = func(id string) (packageformat.ImageMounter, error) {
+		if got, want := id, "sync-package-pull"; got != want {
+			t.Fatalf("mounter id = %q, want %q", got, want)
+		}
+		return mounter, nil
+	}
+	t.Cleanup(func() {
+		newSyncPackageImageMounter = previousMounterFactory
+	})
+
+	outputDir := filepath.Join(t.TempDir(), "pulled-package")
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"package",
+		"pull",
+		"--image", "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+		"--output-dir", outputDir,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var out syncPackagePullOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.OutputDir, outputDir; got != want {
+		t.Fatalf("out.OutputDir = %q, want %q", got, want)
+	}
+	if got, want := out.PackageComponent, "kubernetes"; got != want {
+		t.Fatalf("out.PackageComponent = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "package.yaml")); err != nil {
+		t.Fatalf("pulled package manifest missing: %v", err)
+	}
+	if got, want := mounter.unmounted[0], "mounted-package"; got != want {
+		t.Fatalf("unmounted = %q, want %q", got, want)
+	}
+}
+
+type fakeSyncPackageImageMounter struct {
+	mounts    map[string]packageformat.MountedImage
+	unmounted []string
+}
+
+func (m *fakeSyncPackageImageMounter) Mount(image string) (packageformat.MountedImage, error) {
+	info, ok := m.mounts[image]
+	if !ok {
+		return packageformat.MountedImage{}, os.ErrNotExist
+	}
+	return info, nil
+}
+
+func (m *fakeSyncPackageImageMounter) Unmount(name string) error {
+	m.unmounted = append(m.unmounted, name)
+	return nil
 }
 
 func TestSyncPackageRootArgs(t *testing.T) {

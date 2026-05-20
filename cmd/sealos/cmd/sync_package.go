@@ -13,12 +13,17 @@ import (
 	"github.com/spf13/pflag"
 	"sigs.k8s.io/yaml"
 
+	"github.com/labring/sealos/pkg/apply/processor"
+	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/distribution/ocipackage"
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
 type syncPackageCommandRunner func(args []string, stderr io.Writer) error
+type syncPackageImageMounterFactory func(id string) (packageformat.ImageMounter, error)
 
 var runSyncPackageSubcommand syncPackageCommandRunner = defaultSyncPackageCommandRunner
+var newSyncPackageImageMounter syncPackageImageMounterFactory = defaultSyncPackageImageMounter
 
 type syncPackageBuildOutput struct {
 	PackageDir       string `json:"packageDir" yaml:"packageDir"`
@@ -38,15 +43,25 @@ type syncPackagePushOutput struct {
 	Reference   string `json:"reference" yaml:"reference"`
 }
 
+type syncPackagePullOutput struct {
+	Image            string `json:"image" yaml:"image"`
+	OutputDir        string `json:"outputDir" yaml:"outputDir"`
+	PackageName      string `json:"packageName" yaml:"packageName"`
+	PackageComponent string `json:"packageComponent" yaml:"packageComponent"`
+	PackageVersion   string `json:"packageVersion" yaml:"packageVersion"`
+	PackageClass     string `json:"packageClass" yaml:"packageClass"`
+}
+
 func newSyncPackageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "package",
-		Short: "Build and push OCI component package images",
+		Short: "Build, push, pull, and inspect OCI component package images",
 		Args:  cobra.NoArgs,
 	}
 	cmd.AddCommand(newSyncPackageInspectCmd())
 	cmd.AddCommand(newSyncPackageBuildCmd())
 	cmd.AddCommand(newSyncPackagePushCmd())
+	cmd.AddCommand(newSyncPackagePullCmd())
 	return cmd
 }
 
@@ -285,6 +300,71 @@ func newSyncPackagePushCmd() *cobra.Command {
 	mustMarkFlagRequired(cmd, "image")
 	mustMarkFlagRequired(cmd, "destination")
 	return cmd
+}
+
+func newSyncPackagePullCmd() *cobra.Command {
+	var flags struct {
+		image     string
+		outputDir string
+		overwrite bool
+		output    string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "pull",
+		Short: "Pull an OCI component package image into a local package directory",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mounter, err := newSyncPackageImageMounter("sync-package-pull")
+			if err != nil {
+				return err
+			}
+			result, err := ocipackage.Pull(ocipackage.PullOptions{
+				Image:     flags.image,
+				OutputDir: flags.outputDir,
+				Mounter:   mounter,
+				Overwrite: flags.overwrite,
+			})
+			if err != nil {
+				return err
+			}
+			out := syncPackagePullOutput{
+				Image:            result.Image,
+				OutputDir:        result.OutputDir,
+				PackageName:      result.Package.Metadata.Name,
+				PackageComponent: result.Package.Spec.Component,
+				PackageVersion:   result.Package.Spec.Version,
+				PackageClass:     string(result.Package.Spec.Class),
+			}
+			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
+				{"image", out.Image},
+				{"output_dir", out.OutputDir},
+				{"package_name", out.PackageName},
+				{"package_component", out.PackageComponent},
+				{"package_version", out.PackageVersion},
+				{"package_class", out.PackageClass},
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.image, "image", "", "OCI component package image reference to pull")
+	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "local directory to write the component package into")
+	cmd.Flags().BoolVar(&flags.overwrite, "overwrite", false, "overwrite output-dir when it already exists")
+	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
+	mustMarkFlagRequired(cmd, "image")
+	mustMarkFlagRequired(cmd, "output-dir")
+	return cmd
+}
+
+func defaultSyncPackageImageMounter(id string) (packageformat.ImageMounter, error) {
+	if err := buildah.TrySetupWithDefaults(); err != nil {
+		return nil, err
+	}
+	builder, err := newSyncBuildah(id)
+	if err != nil {
+		return nil, err
+	}
+	return processor.NewPackageImageMounter(builder), nil
 }
 
 func defaultSyncPackageCommandRunner(args []string, stderr io.Writer) error {

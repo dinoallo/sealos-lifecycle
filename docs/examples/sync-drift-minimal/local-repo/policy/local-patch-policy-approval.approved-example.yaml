@@ -1,0 +1,32 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicyGateApproval
+metadata:
+  name: custom-local-patch-policy-approval-example
+spec:
+  owner: platform-sre
+  approvedBy: reviewer@example.com
+  changeRef: OPS-1234
+  expiresAt: 2099-12-31T00:00:00Z
+  oldPolicy:
+    name: custom-local-patch-policy
+    scope: clusterLocal
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  newPolicy:
+    name: custom-local-patch-policy
+    scope: clusterLocal
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  approvals:
+    - code: wideningChange
+      expectedCount: 1
+      expectedImpact:
+        addedAllowedPrefixes:
+          - kind: ConfigMap
+            path: metadata.annotations
+      reason: allow a narrow ConfigMap annotation expansion during this migration window
+    - code: incompatiblePatches
+      expectedCount: 1
+      expectedImpact:
+        incompatiblePatches:
+          - component: grafana
+            relativePath: grafana-image.patch.yaml
+      reason: migrate the legacy grafana image patch in the same rollout

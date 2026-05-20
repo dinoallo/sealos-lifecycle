@@ -52,6 +52,16 @@ Options:
                    This option is available when using: make {build}(.multiarch)
                    Example: make build BINS="sealos sealctl"
 
+  SYNC_PACKAGE_SMOKE_ARGS
+                   Extra arguments passed to scripts/poc/minimal-single-node/smoke.sh.
+                   Example: make verify-sync-package-smoke SYNC_PACKAGE_SMOKE_ARGS="--skip-build"
+                   The smoke script writes acceptance-report.yaml under its workdir
+                   unless --report-file is passed here.
+
+  I_UNDERSTAND_THIS_MUTATES_HOST
+                   Must be set to 1 for verify-sync-package-apply and
+                   verify-sync-package-revert.
+
   PLATFORMS        Platform to build for. Default is linux_arm64 and linux_amd64.
                    This option is available when using: make {build}.multiarch
                    Example: make build.multiarch PLATFORMS="linux_arm64 linux_amd64"
@@ -109,6 +119,59 @@ format:
 .PHONY: coverage
 coverage:
 	@$(MAKE) go.coverage
+
+## verify-sync-package-smoke: Run the safe minimal single-node package lifecycle smoke flow.
+.PHONY: verify-sync-package-smoke
+verify-sync-package-smoke:
+	@scripts/poc/minimal-single-node/smoke.sh $(SYNC_PACKAGE_SMOKE_ARGS)
+
+## verify-sync-package-apply: Run the mutating minimal single-node package apply acceptance flow.
+.PHONY: verify-sync-package-apply
+verify-sync-package-apply:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target mutates the host" >&2; \
+		exit 1; \
+	fi; \
+	scripts/poc/minimal-single-node/smoke.sh --apply $(SYNC_PACKAGE_SMOKE_ARGS)
+
+## verify-sync-package-revert: Run mutating apply plus scoped drift/revert acceptance.
+.PHONY: verify-sync-package-revert
+verify-sync-package-revert:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target mutates the host" >&2; \
+		exit 1; \
+	fi; \
+	scripts/poc/minimal-single-node/smoke.sh --apply --revert-check $(SYNC_PACKAGE_SMOKE_ARGS)
+
+## verify-local-patch-policy: Validate LocalPatchPolicy parsing, provenance, and materialization guards.
+.PHONY: verify-local-patch-policy
+verify-local-patch-policy:
+	go test ./pkg/distribution/ownership ./pkg/distribution/hydrate ./pkg/distribution/localrepo ./pkg/distribution/policyreport ./pkg/distribution/reconcile ./pkg/distribution/compare ./pkg/distribution/commit -count=1
+
+## verify-local-patch-policy-gate: Evaluate a LocalPatchPolicy change with the same gate semantics used in CI.
+.PHONY: verify-local-patch-policy-gate
+verify-local-patch-policy-gate:
+	@set -eu; \
+	if [ -z "$(OLD_POLICY)" ]; then echo "OLD_POLICY is required" >&2; exit 1; fi; \
+	if [ -z "$(NEW_POLICY)" ]; then echo "NEW_POLICY is required" >&2; exit 1; fi; \
+	set -- sync policy-gate --old-policy "$(OLD_POLICY)" --new-policy "$(NEW_POLICY)"; \
+	if [ -n "$(LOCAL_REPO)" ]; then set -- "$$@" --local-repo "$(LOCAL_REPO)"; fi; \
+	if [ -n "$(APPROVAL_FILE)" ]; then set -- "$$@" --approval-file "$(APPROVAL_FILE)"; fi; \
+	if [ -n "$(APPROVAL_EXPIRY_WARNING_DAYS)" ]; then set -- "$$@" --approval-expiry-warning-days "$(APPROVAL_EXPIRY_WARNING_DAYS)"; fi; \
+	if [ -n "$(FAIL_WHEN_APPROVAL_EXPIRES_SOON)" ]; then set -- "$$@" --fail-when-approval-expires-soon; fi; \
+	go run ./cmd/sealos "$$@"
+
+## verify-local-patch-policy-approvals: Scan LocalPatchPolicyGateApproval files for invalid, expired, or near-expiry exceptions.
+.PHONY: verify-local-patch-policy-approvals
+verify-local-patch-policy-approvals:
+	@set -eu; \
+	root='$(if $(APPROVAL_SCAN_ROOT),$(APPROVAL_SCAN_ROOT),.)'; \
+	set -- sync policy-approval-scan --root "$$root"; \
+	if [ -n "$(APPROVAL_EXPIRY_WARNING_DAYS)" ]; then set -- "$$@" --approval-expiry-warning-days "$(APPROVAL_EXPIRY_WARNING_DAYS)"; fi; \
+	if [ -n "$(FAIL_WHEN_APPROVAL_EXPIRES_SOON)" ]; then set -- "$$@" --fail-when-approval-expires-soon; fi; \
+	go run ./cmd/sealos "$$@"
 
 ## verify-license: Verify the license headers for all files.
 .PHONY: verify-license

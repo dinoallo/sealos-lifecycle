@@ -49,6 +49,7 @@ type BOMReference struct {
 
 type RevisionSnapshot struct {
 	BOM                BOMReference `json:"bom" yaml:"bom"`
+	LocalRepoRevision  string       `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
 	LocalPatchRevision string       `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
 	DesiredStateDigest string       `json:"desiredStateDigest" yaml:"desiredStateDigest"`
 }
@@ -64,6 +65,7 @@ type Condition struct {
 type AppliedRevisionSpec struct {
 	ClusterName        string       `json:"clusterName" yaml:"clusterName"`
 	BOM                BOMReference `json:"bom" yaml:"bom"`
+	LocalRepoRevision  string       `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
 	LocalPatchRevision string       `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
 	DesiredStateDigest string       `json:"desiredStateDigest" yaml:"desiredStateDigest"`
 }
@@ -72,7 +74,24 @@ type AppliedRevisionStatus struct {
 	State                  ClusterState      `json:"state" yaml:"state"`
 	LastAppliedTime        *metav1.Time      `json:"lastAppliedTime,omitempty" yaml:"lastAppliedTime,omitempty"`
 	LastSuccessfulRevision *RevisionSnapshot `json:"lastSuccessfulRevision,omitempty" yaml:"lastSuccessfulRevision,omitempty"`
+	ObservedSummary        *ObservedSummary  `json:"observedSummary,omitempty" yaml:"observedSummary,omitempty"`
 	Conditions             []Condition       `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+}
+
+type ObservedSummary struct {
+	LastObservedTime     *metav1.Time `json:"lastObservedTime,omitempty" yaml:"lastObservedTime,omitempty"`
+	Total                int          `json:"total" yaml:"total"`
+	Present              int          `json:"present" yaml:"present"`
+	Missing              int          `json:"missing" yaml:"missing"`
+	Matched              int          `json:"matched" yaml:"matched"`
+	Drifted              int          `json:"drifted" yaml:"drifted"`
+	Clean                int          `json:"clean" yaml:"clean"`
+	Dirty                int          `json:"dirty" yaml:"dirty"`
+	Orphan               int          `json:"orphan" yaml:"orphan"`
+	MixedOwnershipObject int          `json:"mixedOwnershipObject" yaml:"mixedOwnershipObject"`
+	DirectCommitEligible int          `json:"directCommitEligible" yaml:"directCommitEligible"`
+	DirectRevertEligible int          `json:"directRevertEligible" yaml:"directRevertEligible"`
+	BundleMatchRequired  int          `json:"bundleMatchRequired" yaml:"bundleMatchRequired"`
 }
 
 type AppliedRevision struct {
@@ -157,6 +176,11 @@ func (s AppliedRevisionStatus) Validate() error {
 			return fmt.Errorf("lastSuccessfulRevision: %w", err)
 		}
 	}
+	if s.ObservedSummary != nil {
+		if err := s.ObservedSummary.Validate(); err != nil {
+			return fmt.Errorf("observedSummary: %w", err)
+		}
+	}
 
 	conditionTypes := make(map[string]struct{}, len(s.Conditions))
 	for i, condition := range s.Conditions {
@@ -218,6 +242,31 @@ func (c Condition) Validate() error {
 	default:
 		return fmt.Errorf("invalid condition status %q", c.Status)
 	}
+}
+
+func (s ObservedSummary) Validate() error {
+	for _, field := range []struct {
+		name  string
+		value int
+	}{
+		{name: "total", value: s.Total},
+		{name: "present", value: s.Present},
+		{name: "missing", value: s.Missing},
+		{name: "matched", value: s.Matched},
+		{name: "drifted", value: s.Drifted},
+		{name: "clean", value: s.Clean},
+		{name: "dirty", value: s.Dirty},
+		{name: "orphan", value: s.Orphan},
+		{name: "mixedOwnershipObject", value: s.MixedOwnershipObject},
+		{name: "directCommitEligible", value: s.DirectCommitEligible},
+		{name: "directRevertEligible", value: s.DirectRevertEligible},
+		{name: "bundleMatchRequired", value: s.BundleMatchRequired},
+	} {
+		if field.value < 0 {
+			return fmt.Errorf("%s cannot be negative", field.name)
+		}
+	}
+	return nil
 }
 
 func validateDigest(field, value string) error {

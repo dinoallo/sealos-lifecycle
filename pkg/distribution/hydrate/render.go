@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	fileutil "github.com/labring/sealos/pkg/utils/file"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
@@ -138,13 +139,31 @@ func RenderPlan(plan *Plan, sources SourceProvider, outputDir string) (*Bundle, 
 	}
 
 	bundle := NewBundle(plan)
+	if err := renderLocalPatchPolicy(plan, bundle, outputDir); err != nil {
+		return nil, err
+	}
+	if err := renderLocalResources(plan, bundle, outputDir); err != nil {
+		return nil, err
+	}
+	localPatchPolicy := resolvePlanLocalPatchPolicy(plan).Spec
 	for _, component := range plan.Components {
-		rendered, err := renderComponent(component, sources, outputDir)
+		rendered, err := renderComponent(component, sources, outputDir, localPatchPolicy)
 		if err != nil {
 			return nil, err
 		}
 		bundle.Spec.Components = append(bundle.Spec.Components, rendered)
 	}
+
+	trackedObjects, err := collectTrackedK8sObjects(bundle, outputDir)
+	if err != nil {
+		return nil, err
+	}
+	bundle.Spec.TrackedK8sObjects = trackedObjects
+	trackedHostPaths, err := collectTrackedHostPaths(bundle, outputDir)
+	if err != nil {
+		return nil, err
+	}
+	bundle.Spec.TrackedHostPaths = trackedHostPaths
 
 	bundlePath := filepath.Join(outputDir, BundleFileName)
 	if err := yamlutil.MarshalFile(bundlePath, bundle); err != nil {
@@ -153,7 +172,30 @@ func RenderPlan(plan *Plan, sources SourceProvider, outputDir string) (*Bundle, 
 	return bundle, nil
 }
 
-func renderComponent(component ComponentPlan, sources SourceProvider, outputDir string) (RenderedComponent, error) {
+func renderLocalResources(plan *Plan, bundle *Bundle, outputDir string) error {
+	if plan == nil || len(plan.LocalResources) == 0 {
+		return nil
+	}
+
+	rendered := make([]string, 0, len(plan.LocalResources))
+	for _, resource := range plan.LocalResources {
+		relativePath := resource.RelativePath
+		if relativePath == "" {
+			relativePath = filepath.Base(resource.Path)
+		}
+		relativePath = filepath.ToSlash(relativePath)
+
+		dst := filepath.Join(outputDir, "local-resources", filepath.FromSlash(relativePath))
+		if err := copyEntry(resource.Path, dst); err != nil {
+			return fmt.Errorf("copy local resource %q: %w", resource.Path, err)
+		}
+		rendered = append(rendered, mustBundlePath(outputDir, dst))
+	}
+	bundle.Spec.LocalResources = rendered
+	return nil
+}
+
+func renderComponent(component ComponentPlan, sources SourceProvider, outputDir string, policy ownership.LocalPatchPolicy) (RenderedComponent, error) {
 	source, err := sources.Source(component)
 	if err != nil {
 		return RenderedComponent{}, err
@@ -174,16 +216,18 @@ func renderComponent(component ComponentPlan, sources SourceProvider, outputDir 
 	}
 
 	rendered := RenderedComponent{
-		Name:         component.Name,
-		PackageName:  component.PackageName,
-		Version:      component.Version,
-		Class:        component.Class,
-		Artifact:     component.Artifact,
-		Dependencies: append([]string(nil), component.Dependencies...),
-		Inputs:       append([]packageformat.Input(nil), component.Inputs...),
-		ManifestPath: mustBundlePath(outputDir, manifestDst),
-		RootPath:     mustBundlePath(outputDir, componentFilesDir),
-		Steps:        make([]RenderedStep, 0, len(component.Steps)),
+		Name:          component.Name,
+		PackageName:   component.PackageName,
+		Version:       component.Version,
+		Class:         component.Class,
+		Artifact:      component.Artifact,
+		Dependencies:  append([]string(nil), component.Dependencies...),
+		Inputs:        append([]packageformat.Input(nil), component.Inputs...),
+		InputBindings: cloneBindings(component.InputBindings),
+		LocalPatches:  make([]string, 0, len(component.LocalPatches)),
+		ManifestPath:  mustBundlePath(outputDir, manifestDst),
+		RootPath:      mustBundlePath(outputDir, componentFilesDir),
+		Steps:         make([]RenderedStep, 0, len(component.Steps)),
 	}
 
 	copied := make(map[string]string, len(component.Steps))
@@ -217,6 +261,31 @@ func renderComponent(component ComponentPlan, sources SourceProvider, outputDir 
 			Args:           append([]string(nil), step.Args...),
 			TimeoutSeconds: step.TimeoutSeconds,
 		})
+	}
+
+	for _, input := range component.Inputs {
+		bindingPath, ok := component.InputBindings[input.Name]
+		if !ok {
+			continue
+		}
+
+		inputPath, err := cleanRelative(input.Path)
+		if err != nil {
+			return RenderedComponent{}, fmt.Errorf("component %q input %q: %w", component.Name, input.Name, err)
+		}
+
+		dst := filepath.Join(componentFilesDir, filepath.FromSlash(inputPath))
+		if err := copyEntry(bindingPath, dst); err != nil {
+			return RenderedComponent{}, fmt.Errorf("overlay component %q input %q from %q: %w", component.Name, input.Name, bindingPath, err)
+		}
+	}
+
+	if err := renderHostInputBindings(component, &rendered, componentDir, outputDir); err != nil {
+		return RenderedComponent{}, err
+	}
+
+	if err := renderLocalPatches(component, &rendered, outputDir, policy); err != nil {
+		return RenderedComponent{}, err
 	}
 
 	return rendered, nil
@@ -265,4 +334,73 @@ func mustBundlePath(root, target string) string {
 		panic(err)
 	}
 	return filepath.ToSlash(relative)
+}
+
+func cloneBindings(bindings map[string]string) map[string]string {
+	if len(bindings) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(bindings))
+	for name, path := range bindings {
+		cloned[name] = path
+	}
+	return cloned
+}
+
+func cloneHostBindings(bindings map[string]map[string]string) map[string]map[string]string {
+	if len(bindings) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]map[string]string, len(bindings))
+	for inputName, hostBindings := range bindings {
+		if len(hostBindings) == 0 {
+			continue
+		}
+		hostCloned := make(map[string]string, len(hostBindings))
+		for host, path := range hostBindings {
+			hostCloned[host] = path
+		}
+		cloned[inputName] = hostCloned
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func renderHostInputBindings(component ComponentPlan, rendered *RenderedComponent, componentDir, outputDir string) error {
+	if len(component.HostInputBindings) == 0 || rendered == nil {
+		return nil
+	}
+
+	hostInputBindings := make(map[string]map[string]string)
+	for _, input := range component.Inputs {
+		bindings, ok := component.HostInputBindings[input.Name]
+		if !ok || len(bindings) == 0 {
+			continue
+		}
+		inputPath, err := cleanRelative(input.Path)
+		if err != nil {
+			return fmt.Errorf("component %q host-scoped input %q: %w", component.Name, input.Name, err)
+		}
+		renderedBindings := make(map[string]string, len(bindings))
+		for host, bindingPath := range bindings {
+			cleanHost := strings.TrimSpace(host)
+			if cleanHost == "" {
+				return fmt.Errorf("component %q host-scoped input %q cannot use an empty host", component.Name, input.Name)
+			}
+			dst := filepath.Join(componentDir, "host-inputs", filepath.FromSlash(cleanHost), filepath.FromSlash(inputPath))
+			if err := copyEntry(bindingPath, dst); err != nil {
+				return fmt.Errorf("copy component %q host-scoped input %q for host %q from %q: %w", component.Name, input.Name, cleanHost, bindingPath, err)
+			}
+			renderedBindings[cleanHost] = mustBundlePath(outputDir, dst)
+		}
+		hostInputBindings[input.Name] = renderedBindings
+	}
+	if len(hostInputBindings) > 0 {
+		rendered.HostInputBindings = hostInputBindings
+	}
+	return nil
 }

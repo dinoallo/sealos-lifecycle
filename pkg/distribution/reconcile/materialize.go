@@ -26,8 +26,11 @@ import (
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
+	"github.com/labring/sealos/pkg/distribution/localrepo"
+	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/state"
+	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
 
 const (
@@ -37,6 +40,10 @@ const (
 
 type Options struct {
 	ClusterName        string
+	RenderProvenance   hydrate.RenderProvenance
+	SourcePreflight    *hydrate.SourcePreflight
+	ExecutionTopology  hydrate.ExecutionTopology
+	LocalRepo          *localrepo.Repo
 	LocalPatchRevision string
 	PackageLoader      packageformat.Loader
 	Sources            hydrate.SourceProvider
@@ -67,6 +74,22 @@ func MaterializeFile(path string, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	provenance := opts.RenderProvenance
+	if provenance.BOMPath == "" {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve BOM path %q: %w", path, err)
+		}
+		provenance.BOMPath = absPath
+	}
+	if provenance.BOMDigest == "" {
+		data, err := os.ReadFile(provenance.BOMPath)
+		if err != nil {
+			return nil, fmt.Errorf("read BOM path %q: %w", provenance.BOMPath, err)
+		}
+		provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
+	}
+	opts.RenderProvenance = provenance
 	return Materialize(doc, opts)
 }
 
@@ -100,8 +123,16 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
+	attachLocalBindings(plan, opts.LocalRepo)
 
-	renderedBundle, bundlePath, err := materializeBundle(plan, opts.ClusterName, opts.Sources)
+	topology, err := materializeExecutionTopology(opts.ClusterName, opts.ExecutionTopology)
+	if err != nil {
+		return nil, err
+	}
+	provenance := opts.RenderProvenance
+	provenance.LocalRepoRevision = localRepoRevision(opts.LocalRepo)
+	provenance.LocalPatchRevision = opts.LocalPatchRevision
+	renderedBundle, bundlePath, err := materializeBundle(plan, opts.ClusterName, opts.Sources, topology, provenance, opts.SourcePreflight)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +150,7 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 		opts.ClusterName,
 		ref,
 		desiredStateDigest.String(),
+		localRepoRevision(opts.LocalRepo),
 		opts.LocalPatchRevision,
 	)
 	if err != nil {
@@ -134,7 +166,90 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	}, nil
 }
 
-func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.SourceProvider) (*hydrate.Bundle, string, error) {
+func attachLocalBindings(plan *hydrate.Plan, repo *localrepo.Repo) {
+	if plan == nil {
+		return
+	}
+	plan.LocalPatchPolicy = ownership.DefaultLocalPatchPolicyDocument().Clone()
+	plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBuiltInDefault
+	if repo == nil {
+		return
+	}
+
+	if localPatchPolicy := repo.LocalPatchPolicy(); localPatchPolicy != nil {
+		plan.LocalPatchPolicy = localPatchPolicy
+		plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceLocalRepo
+	}
+
+	resources := repo.Resources()
+	if len(resources) > 0 {
+		plan.LocalResources = make([]hydrate.LocalResource, 0, len(resources))
+		for _, resource := range resources {
+			plan.LocalResources = append(plan.LocalResources, hydrate.LocalResource{
+				Path:         resource.Path,
+				RelativePath: resource.RelativePath,
+			})
+		}
+	}
+
+	for i := range plan.Components {
+		component := &plan.Components[i]
+		if len(component.Inputs) > 0 {
+			bindings := make(map[string]string)
+			hostBindings := make(map[string]map[string]string)
+			for _, input := range component.Inputs {
+				if path, ok := repo.BindingFor(component.Name, input); ok {
+					bindings[input.Name] = path
+				}
+				if perHost := repo.HostBindingsFor(component.Name, input); len(perHost) > 0 {
+					hostBindings[input.Name] = perHost
+				}
+			}
+			if len(bindings) > 0 {
+				component.InputBindings = bindings
+			}
+			if len(hostBindings) > 0 {
+				component.HostInputBindings = hostBindings
+			}
+		}
+
+		patches := repo.PatchesFor(component.Name)
+		if len(patches) == 0 {
+			continue
+		}
+		component.LocalPatches = make([]hydrate.LocalPatch, 0, len(patches))
+		for _, patch := range patches {
+			component.LocalPatches = append(component.LocalPatches, hydrate.LocalPatch{
+				Path:         patch.Path,
+				RelativePath: patch.RelativePath,
+			})
+		}
+	}
+}
+
+func localRepoRevision(repo *localrepo.Repo) string {
+	if repo == nil {
+		return ""
+	}
+	return repo.Revision
+}
+
+func materializeExecutionTopology(clusterName string, requested hydrate.ExecutionTopology) (hydrate.ExecutionTopology, error) {
+	normalized := requested.Normalize()
+	if !normalized.Empty() {
+		return normalized, nil
+	}
+	topology, err := loadApplyExecutionTopology(clusterName)
+	if err != nil {
+		return hydrate.ExecutionTopology{}, err
+	}
+	if topology == nil {
+		return hydrate.NewSingleNodeExecutionTopology(), nil
+	}
+	return topology.snapshot(), nil
+}
+
+func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.SourceProvider, topology hydrate.ExecutionTopology, provenance hydrate.RenderProvenance, sourcePreflight *hydrate.SourcePreflight) (*hydrate.Bundle, string, error) {
 	storePath := BundleStorePath(clusterName)
 	if err := os.MkdirAll(storePath, 0o755); err != nil {
 		return nil, "", fmt.Errorf("create bundle store %q: %w", storePath, err)
@@ -151,6 +266,12 @@ func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.S
 	renderedBundle, err := hydrate.RenderPlan(plan, sources, stagePath)
 	if err != nil {
 		return nil, "", err
+	}
+	renderedBundle.Spec.RenderProvenance = provenance
+	renderedBundle.Spec.SourcePreflight = sourcePreflight
+	renderedBundle.Spec.ExecutionTopology = topology.Normalize()
+	if err := yamlutil.MarshalFile(filepath.Join(stagePath, hydrate.BundleFileName), renderedBundle); err != nil {
+		return nil, "", fmt.Errorf("write bundle manifest %q: %w", filepath.Join(stagePath, hydrate.BundleFileName), err)
 	}
 
 	currentPath := CurrentBundlePath(clusterName)

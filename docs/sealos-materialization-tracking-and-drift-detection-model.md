@@ -25,6 +25,10 @@ hydration, apply, and bootstrap-time generation.
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md)
 - Local repo and secret-handling model:
   [sealos-local-repo-and-secret-guide.md](./sealos-local-repo-and-secret-guide.md)
+- Local patch policy source and scope:
+  [sealos-local-patch-policy-design.md](./sealos-local-patch-policy-design.md)
+- Operator action quick reference:
+  [sealos-sync-operator-action-reference.md](./sealos-sync-operator-action-reference.md)
 - Current applied revision schema:
   [pkg/distribution/state/types.go](../pkg/distribution/state/types.go)
 - Current materialization path:
@@ -43,7 +47,7 @@ practical gap:
 - How should Sealos track generated outputs that are not stored directly in the
   package artifact?
 - Which live objects should be observed, and which should be treated as
-  baseline-owned desired state?
+  `globalBaseline`-owned desired state?
 
 This document answers those questions without mixing them back into the package
 contract or release-policy documents.
@@ -141,7 +145,7 @@ The projection class determines the right comparison rule.
 | `bytewiseFile` | binaries, plain config files, directly written host files | Compare content hash, existence, and file mode. |
 | `normalizedK8sObject` | package manifests, local repo resources, approved local Secret objects | Ignore status, `managedFields`, `resourceVersion`, `uid`, and other server-assigned metadata. Compare only ownership-relevant fields. This is the main strategy for Kubernetes resource state stored in etcd. |
 | `semanticGeneratedFile` | generated host-side files such as kubeadm-produced static Pod manifests | Parse the generated object and compare only fields that belong to tracked intent. Ignore formatting, key order, and non-semantic rewrites. |
-| `observeOnly` | runtime-generated objects such as operator-created connection Secrets | Do not treat the object itself as baseline-owned desired state. Observe for health or reference resolution only. |
+| `observeOnly` | runtime-generated objects such as operator-created connection Secrets | Do not treat the object itself as `globalBaseline`-owned desired state. Observe for health or reference resolution only. |
 
 One practical rule follows from this table:
 
@@ -209,6 +213,20 @@ Local repo `patches/` should be tracked in two ways:
 - through the final projection they modify
 
 The patch file itself is not the live object. The target object or file is.
+
+In the current single-node MVP, this patch shape is intentionally narrow:
+
+- `patches/<component>/**/*.yaml`
+- each YAML document is a partial Kubernetes object overlay
+- the target object is identified by `apiVersion`, `kind`, `metadata.name`, and
+  usually `metadata.namespace`
+- render merges the patch into the matching package manifest object and also
+  keeps the patch document in the bundle as a `localPatch` fragment for
+  ownership-aware compare
+- patch files are not applied directly as standalone resources
+- the current validator only permits a narrow set of local patch paths, notably
+  `ConfigMap.data` / `binaryData`, workload placement fields, selected
+  secret-name references, and ingress or service exposure fields
 
 ## Example: Tracking Kubernetes Object State Stored In Etcd
 
@@ -291,9 +309,13 @@ See:
 - [scripts/poc/minimal-single-node/packages/kubernetes/package.yaml](../scripts/poc/minimal-single-node/packages/kubernetes/package.yaml)
 - [scripts/poc/minimal-single-node/packages/kubernetes/hooks/bootstrap.sh](../scripts/poc/minimal-single-node/packages/kubernetes/hooks/bootstrap.sh)
 
-That means a file such as
-`/etc/kubernetes/manifests/kube-apiserver.yaml` should be treated as a
-`generatedHostPath` projection.
+That means files such as:
+
+- `/etc/kubernetes/manifests/kube-apiserver.yaml`
+- `/etc/kubernetes/manifests/kube-controller-manager.yaml`
+- `/etc/kubernetes/manifests/kube-scheduler.yaml`
+
+should be treated as `generatedHostPath` projections.
 
 For such a generated host file, Sealos should track at least:
 
@@ -303,6 +325,136 @@ For such a generated host file, Sealos should track at least:
 - the local repo revision that supplied cluster-specific values
 - the generated target path
 - the last successful normalized digest of the generated static Pod manifest
+
+Current single-node MVP note:
+
+- the repository now tracks three known generated host files from this flow:
+  `kube-apiserver.yaml`, `kube-controller-manager.yaml`, and
+  `kube-scheduler.yaml` under `/etc/kubernetes/manifests/`
+- it records each path as a `generatedHostPath` produced by the Kubernetes
+  bootstrap hook through `kubeadm`
+- current compare behavior is intentionally narrow:
+  it validates semantic identity as a Kubernetes `Pod` in namespace
+  `kube-system`, and also checks that the expected control-plane container
+  exists
+- it derives a small field-level expectation from the rendered `kubeadm.yaml`:
+  the expected control-plane container image for each tracked static Pod
+- it now also derives a small known-field set from the same rendered input:
+  the expected command name, selected flags such as
+  `--service-cluster-ip-range` and `--cluster-cidr`, and a small set of
+  expected volume mounts such as `/etc/kubernetes/pki`
+- the current parser also tolerates both common kubeadm shapes for
+  `extraArgs`: mapping form and list-of-`name`/`value` form; it also derives
+  expected mounts from `extraVolumes`
+- it still does not compare the full generated manifest against a complete
+  field-level desired intent model
+- `sync diff` and `sync status` report this projection today, but
+  `sync revert` and `sync commit` do not yet manage it directly
+- current CLI output also carries a generated-projection remediation hint:
+  semantic field drift points operators back to the rendered `kubeadm` input,
+  while parse-level failures are classified as manual-review cases
+- the current hint also distinguishes who must change the source of truth:
+  `changeOwner=localInput` for field drift that can be reconciled through
+  cluster-local bootstrap inputs, `changeOwner=globalBaseline` for drift that
+  points back to the selected BOM/package global baseline, and
+  `changeOwner=manualReview` for cases where Sealos cannot safely classify the
+  live projection automatically
+- the current CLI payload also includes a small operator playbook:
+  `nextSteps[]` gives ordered follow-up actions, and `allowedCommands[]`
+  enumerates the Sealos commands that are safe to use from that state
+- for generated projections, `commandGuidance[]` now adds command-level
+  preconditions and an evaluated `availability`, so `sync diff/status` can say
+  not only which command is relevant, but also whether it is currently blocked
+  by a missing prerequisite such as a bundle digest mismatch
+
+## Current Remediation Model For Ordinary Drift
+
+Generated projections are not the only tracked projections that now carry
+operator guidance. In the current single-node MVP, `sync diff` and
+`sync status` also attach a remediation block to ordinary `k8sObject` drift and
+direct `hostPath` drift.
+
+The intent is to keep `changeOwner` aligned with the ownership boundary that
+must absorb the fix:
+
+| Projection | Typical Drift Owner | Current `changeOwner` | Typical Action |
+| --- | --- | --- | --- |
+| package-owned `k8sObject` | selected package or BOM global baseline | `globalBaseline` | `reviewDistributionBaselineForAppliedObject` |
+| local-owned `k8sObject` | local repo patch or local resource | `localOverlay` | `reviewLocalObjectOverlayAndCommitOrReapply` |
+| package-owned direct `hostPath` | selected package or BOM global baseline | `globalBaseline` | `reviewDistributionBaselineForHostPath` |
+| local-owned direct `hostPath` | local repo input binding | `localInput` | `reviewLocalHostInputAndCommitOrReapply` |
+| generated `generatedHostPath` | local bootstrap input, global baseline, or manual review | `localInput`, `globalBaseline`, or `manualReview` | already covered above |
+
+### Ordinary Kubernetes Objects
+
+For ordinary `k8sObject` projections, the current CLI behavior is:
+
+- a `global` object that is `Drifted` or `Missing` is treated as an
+  `Orphan`-class problem and points back to the selected package/BOM global
+  baseline
+- a `local` object that is `Drifted` or `Missing` is treated as a `Dirty`
+  cluster-local overlay problem and points back to the local repo
+- the remediation payload includes:
+  - `action`
+  - `changeOwner`
+  - `source`
+  - optional `policyName` and `policyEligiblePaths[]` when the drifted object
+    fields fall within the current default `LocalPatchPolicy`
+  - `nextSteps[]`
+  - `allowedCommands[]`
+  - `commandGuidance[]`
+
+Current single-node MVP guidance for ordinary objects is intentionally narrow:
+
+- `globalBaseline` object drift allows operator-facing commands such as
+  `sync diff`, `sync status`, `sync revert`, `sync render`, `sync apply`,
+  `sync package build`, and `sync package push`
+- when a package-owned object drifts only on fields that are already covered by
+  the default `LocalPatchPolicy`, the remediation block still classifies the
+  live state as `globalBaseline`, but it now surfaces `policyName` and
+  `policyEligiblePaths[]` to show that the durable fix can be expressed as a
+  local repo patch instead of a package/BOM fork
+- `localOverlay` object drift allows `sync diff`, `sync status`,
+  `sync commit`, `sync revert`, `sync render`, and `sync apply` when the live
+  object still exists
+- if the local-owned object is missing, the current guidance removes
+  `sync commit` and points operators toward `sync revert` or local repo edits
+
+### Direct Host Paths
+
+For direct `hostPath` projections, the current CLI behavior follows the same
+ownership split:
+
+- a `global` direct host path points back to the selected package/BOM global
+  baseline
+- a `local` direct host path points back to the cluster-local input that bound
+  that file
+- the current single-node MVP only offers `sync commit` for local-owned direct
+  host files that are backed by a declared input binding and are still present
+  on disk
+- missing local-owned host files are guided toward `sync revert`, not
+  `sync commit`
+
+### Command Preconditions
+
+The remediation payload is not just a static playbook. `commandGuidance[]`
+also carries evaluated command availability.
+
+In the current single-node MVP, the main precondition is:
+
+- `bundleMatchesRecordedDesiredStateDigest`
+
+This means:
+
+- `sync diff` and `sync status` can always explain the drift
+- commands that would change live state or promote the current desired state,
+  especially `sync revert`, `sync commit`, and `sync apply`, are marked
+  `available` or `blocked` depending on whether the inspected bundle still
+  matches the recorded desired-state digest for that cluster
+
+That distinction matters because operator guidance should not suggest a live
+repair command when the inspected bundle is already detached from the cluster's
+recorded desired state.
 
 ## Inventory Beyond `AppliedRevision`
 
@@ -410,6 +562,381 @@ It does need a clear first-pass model for:
 
 That is enough to keep the Kubernetes bootstrap path, Cilium package flow, and
 initial stateful examples conceptually coherent.
+
+## Observation Layers In CLI Output
+
+The CLI should not collapse every drift-related concept into one field.
+
+At least three layers need to stay distinct:
+
+1. Current compare result
+   - What `sync diff` sees right now by comparing the rendered bundle with live
+     tracked objects.
+   - This is the raw compare payload, including object-by-object mismatch paths.
+   - In the current CLI shape this is exposed under `sync diff.currentCompare`.
+
+2. Persisted observed snapshot
+   - A summarized snapshot that can be safely written back into
+     `AppliedRevision.status.observedSummary` when the rendered bundle digest
+     matches the cluster's recorded desired-state digest.
+   - This is the right place for stable counters such as `dirty`, `orphan`, and
+     `mixedOwnershipObject`.
+   - In the current CLI shape this is exposed as
+     `sync diff.persistedObservedSummary` and
+     `sync status.recordedObservedSummary`.
+
+3. Recorded revision state
+   - The cluster-level state stored in `AppliedRevision.status.state`.
+   - This answers the coarse question: is the recorded revision currently
+     `Clean`, `Dirty`, `Orphan`, or `Degraded`?
+   - In the current CLI shape this is exposed as `recordedState` in
+     `sync status`, and as `recordedRevision.state` in `sync diff`.
+
+Keeping these layers separate avoids two common operator mistakes:
+
+- mistaking the current raw compare result for a persisted observation snapshot
+- mistaking a persisted observed snapshot for the full recorded revision state
+
+The same distinction also makes temporary bundle inspection safer. If `sync diff`
+or `sync status` is pointed at an ad hoc `--bundle-dir` and that bundle does not
+match the cluster's recorded desired-state digest, Sealos should still return the
+current compare result, but it should not silently overwrite the recorded
+observed snapshot or revision state.
+
+## Local Patch Policy Artifact
+
+The current single-node MVP no longer treats local-patch policy as an implicit
+code-only constant.
+
+Instead, each rendered bundle now carries an explicit policy artifact:
+
+- `bundle.spec.localPatchPolicySource`
+- `bundle.spec.localPatchPolicyScope`
+- `bundle.spec.localPatchPolicyName`
+- `bundle.spec.localPatchPolicyPath`
+- `bundle.spec.localPatchPolicyDigest`
+
+and the policy document itself is rendered at that path, currently
+`policy/local-patch-policy.yaml`.
+
+If the local repo provides its own `policy/local-patch-policy.yaml`, that
+document is copied into the bundle and becomes the source of truth for:
+
+- local patch validation during render
+- `policyEligible` mismatch annotation during compare
+- local patch overlay extraction during `sync commit`
+
+If the local repo does not provide one, render still writes an explicit default
+policy artifact into the bundle so the rendered revision remains self-describing.
+
+In other words, the current single-node MVP now makes policy ownership
+explicit:
+
+- `localPatchPolicySource: localRepo` means the cluster-local repo defined it
+- `localPatchPolicySource: builtInDefault` means Sealos rendered the built-in
+  default policy into the bundle
+- `localPatchPolicyScope: clusterLocal` means the rendered artifact governs
+  cluster-local override surfaces only; package/BOM-scoped local patch policy
+  is currently unsupported
+- package and BOM content do not define local-patch policy yet
+
+## Current `sync diff` And `sync status` Output Shape
+
+The current single-node MVP already exposes these layers directly in CLI YAML.
+The examples below are intentionally shortened; they show the fields that carry
+the main state model, not every counter or mismatch.
+
+### Example: `sync diff`
+
+```yaml
+clusterName: demo
+bomName: minimal-single-node
+revision: rev-poc-001
+channel: alpha
+bundlePath: /var/lib/sealos/demo/distribution/current
+appliedRevisionPath: /var/lib/sealos/demo/distribution/applied-revision.yaml
+localPatchPolicy:
+  source: builtInDefault
+  scope: clusterLocal
+  name: defaultLocalPatchPolicy
+currentState: Orphan
+headline: state=Orphan; dirtyObjects=0; orphanObjects=1; dirtyHostPaths=0; orphanHostPaths=0; directCommitEligible=0; directRevertEligible=0; bundleMatchRequired=0; policyEligibleOrphanObjects=1
+observationPersisted: true
+persistedObservedSummary:
+  total: 2
+  matched: 1
+  drifted: 1
+  clean: 1
+  orphan: 1
+  directCommitEligible: 0
+  directRevertEligible: 1
+  bundleMatchRequired: 1
+operatorActionSummary:
+  directCommitEligible: 0
+  directRevertEligible: 0
+  bundleMatchRequired: 0
+recordedRevision:
+  desiredStateDigest: sha256:...
+  localRepoRevision: sha256:...
+  state: Orphan
+  observedSummary:
+    orphan: 1
+    directCommitEligible: 0
+    directRevertEligible: 1
+    bundleMatchRequired: 1
+policyEligibleOrphanObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: kube-system
+    name: cilium-config
+    operatorAction: promoteToLocalPatch
+    operatorActionMetadata:
+      allowsDirectCommit: false
+      allowsDirectRevert: false
+      requiresBundleMatch: false
+    paths:
+      - data.enable-hubble
+    remediation:
+      action: reviewDistributionBaselineForAppliedObject
+      changeOwner: globalBaseline
+      policyName: defaultLocalPatchPolicy
+      policyEligiblePaths:
+        - data.enable-hubble
+currentCompare:
+  summary:
+    total: 2
+    matched: 1
+    drifted: 1
+    clean: 1
+    orphan: 1
+  objects:
+    - tracked:
+        apiVersion: apps/v1
+        kind: DaemonSet
+        namespace: kube-system
+        name: cilium
+      state: Orphan
+      comparison: drifted
+      mismatches:
+        - path: spec.template.spec.containers[name=cilium-agent].image
+          reason: valueMismatch
+          ownership: global
+          state: Orphan
+      remediation:
+        action: reviewDistributionBaselineForAppliedObject
+        changeOwner: globalBaseline
+        allowedCommands:
+          - sync diff
+          - sync status
+          - sync revert
+          - sync render
+          - sync apply
+          - sync package build
+          - sync package push
+        commandGuidance:
+          - command: sync revert
+            preconditions:
+              - bundleMatchesRecordedDesiredStateDigest
+            availability: available
+```
+
+How to read this:
+
+- `headline` is the shortest reusable operator summary for this compare run. It
+  is intended to stay stable enough for alert titles, ticket subjects, or
+  dashboard labels.
+- `localPatchPolicy` is the effective ownership policy provenance for the
+  inspected rendered bundle. In legacy bundles that never recorded this
+  metadata, CLI output still shows the effective built-in default policy name,
+  while `path` and `digest` remain empty.
+- `currentCompare` is the raw compare result for this specific rendered bundle.
+- `policyEligibleOrphanObjects` is a top-level shortcut for the subset of
+  `currentCompare` that is still `Orphan`, but already falls within the
+  default `LocalPatchPolicy`.
+- `operatorAction` is the compact operator-facing action name. For this subset,
+  `promoteToLocalPatch` means the drift is still globally owned today, but the
+  allowed long-term fix is to capture it as a local repo patch.
+- `persistedObservedSummary` is the snapshot Sealos was willing to write back
+  because the inspected bundle still matched the recorded desired-state digest.
+- `recordedRevision` is the cluster's recorded state object, including the last
+  persisted `observedSummary`.
+- those recorded summaries now include the same direct-action counts too, so
+  the recorded snapshot can answer both "how much drift existed" and "how much
+  of that drift was directly commit- or revert-eligible" at observation time.
+- the object-level `remediation` explains both ownership routing
+  (`globalBaseline`) and currently safe commands.
+
+### Example: `sync status`
+
+```yaml
+clusterName: demo
+bomName: minimal-single-node
+revision: rev-poc-001
+channel: alpha
+bundlePath: /var/lib/sealos/demo/distribution/current
+localPatchPolicy:
+  source: localRepo
+  scope: clusterLocal
+  name: custom-local-patch-policy
+  path: policy/local-patch-policy.yaml
+  digest: sha256:...
+desiredStateDigest: sha256:...
+localRepoRevision: sha256:...
+localPatchRevision: patch-rev-1
+recordedState: Orphan
+recordedObservedSummary:
+  total: 3
+  clean: 1
+  dirty: 1
+  orphan: 1
+  mixedOwnershipObject: 1
+  directCommitEligible: 1
+  directRevertEligible: 2
+  bundleMatchRequired: 2
+currentState: Orphan
+headline: state=Orphan; dirtyObjects=1; orphanObjects=2; dirtyHostPaths=1; orphanHostPaths=0; directCommitEligible=2; directRevertEligible=2; bundleMatchRequired=2; policyEligibleOrphanObjects=1
+summary:
+  total: 3
+  clean: 1
+  dirty: 1
+  orphan: 1
+operatorActionSummary:
+  directCommitEligible: 2
+  directRevertEligible: 2
+  bundleMatchRequired: 2
+mixedOwnershipObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: default
+    name: grafana-settings
+    ownerships:
+      - global
+      - local
+dirtyObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: default
+    name: grafana-settings
+    operatorAction: commitOrReapplyLocalOverlay
+    paths:
+      - data.adminUser
+    remediation:
+      action: reviewLocalObjectOverlayAndCommitOrReapply
+      changeOwner: localOverlay
+      commandGuidance:
+        - command: sync commit
+          preconditions:
+            - bundleMatchesRecordedDesiredStateDigest
+          availability: available
+orphanObjects:
+  - apiVersion: apps/v1
+    kind: DaemonSet
+    namespace: kube-system
+    name: cilium
+    operatorAction: revertOrUpdateGlobalBaseline
+    paths:
+      - spec.template.spec.containers[name=cilium-agent].image
+    remediation:
+      action: reviewDistributionBaselineForAppliedObject
+      changeOwner: globalBaseline
+policyEligibleOrphanObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: kube-system
+    name: cilium-config
+    operatorAction: promoteToLocalPatch
+    paths:
+      - data.enable-hubble
+    remediation:
+      action: reviewDistributionBaselineForAppliedObject
+      changeOwner: globalBaseline
+      policyName: defaultLocalPatchPolicy
+      policyEligiblePaths:
+        - data.enable-hubble
+dirtyHostPaths:
+  - path: /etc/kubernetes/kubeadm.yaml
+    operatorAction: commitOrReapplyLocalInput
+    operatorActionMetadata:
+      allowsDirectCommit: true
+      allowsDirectRevert: true
+      requiresBundleMatch: true
+    reasons:
+      - contentMismatch
+    remediation:
+      action: reviewLocalHostInputAndCommitOrReapply
+      changeOwner: localInput
+```
+
+How to read this:
+
+- `summary` is the current live summary for the inspected bundle.
+- `headline` is the most compressed operator-facing summary. It is stable and
+  machine-friendly enough to reuse in alerts, tickets, or dashboards without
+  re-parsing the full object and host-path lists.
+- `recordedObservedSummary` is the last persisted summary attached to
+  `AppliedRevision`.
+- `localPatchPolicy` tells the operator which ownership policy artifact this
+  rendered bundle actually carried. This matters because local patch
+  validation, compare-side `policyEligible` annotation, and `sync commit`
+  overlay extraction now all consume the same bundle-carried policy.
+- that recorded snapshot now includes the same direct-action counters too, so
+  it can answer both "how much drift existed" and "how much of that drift was
+  directly commit- or revert-eligible" at observation time.
+- `mixedOwnershipObjects` calls out objects that contain both `global` and
+  `local` fragments, even if only one side drifted this time.
+- `policyEligibleOrphanObjects` is a narrower subset of `orphanObjects`: it
+  highlights package-owned object drift that is still currently `Orphan`, but
+  whose changed paths already fall within the default `LocalPatchPolicy`.
+- `operatorAction` turns that routing into a stable summary-level action name,
+  such as `commitOrReapplyLocalOverlay`, `revertOrUpdateGlobalBaseline`, or
+  `promoteToLocalPatch`. The same pattern also applies to host-path summaries,
+  for example `commitOrReapplyLocalInput` or
+  `rerenderOrUpdateGlobalBaseline`.
+- `operatorActionMetadata` adds a narrow structured view on top of that action
+  name: whether this action supports direct `sync commit`, whether it supports
+  direct `sync revert`, and whether those direct paths depend on
+  `bundleMatchesRecordedDesiredStateDigest`.
+- `operatorActionSummary` is the top-level count view over the current drift
+  set. It intentionally counts only the main dirty/orphan object and host-path
+  lists, not the narrower `policyEligibleOrphanObjects` subset.
+- the `Observed` condition message now carries the same direct-action counts in
+  compact sentence form, so operators can see the commit/revert posture without
+  first expanding the full structured summary.
+- `dirtyObjects`, `orphanObjects`, and `dirtyHostPaths` are already grouped by
+  ownership state, so the remediation block can point directly to
+  `localOverlay`, `localInput`, or `globalBaseline`.
+
+One practical operator rule follows:
+
+- use `sync diff` when you need the full raw compare payload
+- use `sync status` when you need the summarized ownership view and the current
+  cluster-level recorded state side by side
+
+## Current `operatorAction` Matrix
+
+This sub-design only needs one stable fact here: the current single-node MVP
+already compresses ownership routing into a small fixed set of
+`operatorAction` values, and those values are now part of the CLI output
+contract.
+
+Treat these names as the stable surface emitted by `sync diff` / `sync status`:
+
+- `commitOrReapplyLocalOverlay`
+- `promoteToLocalPatch`
+- `revertOrUpdateGlobalBaseline`
+- `commitOrReapplyLocalInput`
+- `updateLocalInputAndRerender`
+- `rerenderOrUpdateGlobalBaseline`
+- `manualReview`
+
+The canonical matrix for meaning, direct command capability, and
+bundle-match guardrails now lives in:
+[sealos-sync-operator-action-reference.md](./sealos-sync-operator-action-reference.md)
+
+For actions that modify live state or persist observed state, the current CLI
+still depends on the same digest guardrails described earlier:
+`bundleMatchesRecordedDesiredStateDigest` is what decides whether command
+guidance becomes `available` or `blocked`.
 
 ## Open Questions
 

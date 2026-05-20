@@ -30,7 +30,7 @@ render/apply pieces:
 
 - BOM, package, hydration, and applied-state types under `pkg/distribution/*`
 - `sealos sync render` in `cmd/sealos/cmd/sync.go`
-  - resolves BOM package artifacts from OCI image references by default
+  - resolves BOM package artifacts from OCI image references by default, pulling them into a digest-keyed runtime cache first
   - still supports `--package-source` as a local package-directory override for development
 - `sealos sync apply` in `cmd/sealos/cmd/sync.go`
 - a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
@@ -76,7 +76,7 @@ Bottom line for this environment:
 
 ### In Scope
 
-- BOM artifact resolution through mounted OCI package images
+- BOM artifact resolution through cached OCI package images
 - local package directories loaded via `packageformat.LoadDir` as the current verified PoC override path
 - one BOM with three components
 - rendering via `sealos sync render`
@@ -130,11 +130,12 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/packages/containerd/` | Local `containerd-runtime` package. |
 | `scripts/poc/minimal-single-node/packages/kubernetes/` | Local `kubernetes-rootfs` package. |
 | `scripts/poc/minimal-single-node/packages/cilium/` | Local `cilium-cni` package. |
-| `cmd/sealos/cmd/sync_package.go` | First-class `sealos sync package build/push` CLI for OCI component package images. |
+| `cmd/sealos/cmd/sync_package.go` | First-class `sealos sync package build/push/pull` CLI for OCI component package images. |
 | `scripts/poc/minimal-single-node/render.sh` | Convenience wrapper around `sealos sync render`, preferring the generated OCI BOM when present. |
 | `scripts/poc/minimal-single-node/publish-oci.sh` | Publishes the PoC package set to OCI and writes an OCI-backed BOM. |
 | `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
 | `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
+| `scripts/poc/minimal-single-node/smoke.sh` | Safe package lifecycle smoke wrapper for package inspect, local repo init/doctor, source preflight, render, runtime preflight, plan, and `sourcePreflight` metadata verification. |
 | `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, apply, and validate. |
 | `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
 
@@ -277,6 +278,61 @@ For the validated run recorded in this document:
 
 ## Execution Plan
 
+### Standard Safe Smoke
+
+Use the standard smoke target when you want to verify the current package
+lifecycle without mutating the host:
+
+```bash
+make verify-sync-package-smoke
+```
+
+The default smoke path builds the current `sealos` binary, uses a temporary
+runtime root and local repo, inspects the three package directories, initializes
+and fills the cluster-local repo from package default inputs, runs local-repo
+doctor, validates source inputs, runs source preflight, renders the bundle, runs
+rendered-bundle runtime preflight against a temporary host root, runs `sync plan`,
+and verifies the rendered bundle contains non-blocking `spec.sourcePreflight`
+metadata.
+
+Every smoke run writes an `acceptance-report.yaml` file under its workdir unless
+`--report-file` is passed through `SYNC_PACKAGE_SMOKE_ARGS`. The report records
+the BOM, package sources, local repo, rendered bundle, desired-state digest,
+preflight states, post-apply or post-revert state when available, and the status
+and output path for each stage. Secret values are not copied into the report.
+The smoke script validates the report with `check-report.sh` before returning
+success, using `safe`, `apply`, or `revert` mode according to the selected
+mutation flags.
+
+Host mutation is deliberately opt-in:
+
+```bash
+make verify-sync-package-apply I_UNDERSTAND_THIS_MUTATES_HOST=1
+```
+
+The apply acceptance target requires the explicit confirmation variable because
+it mutates the real host by default. It reuses the same source preflight, render,
+runtime preflight, and plan path, then runs `sync apply`, `sync status`,
+`sync diff`, and `validate.sh` against the selected kubeconfig and host root.
+Extra smoke arguments can still be passed through `SYNC_PACKAGE_SMOKE_ARGS`.
+
+A stricter mutating acceptance target also validates the current revert loop:
+
+```bash
+make verify-sync-package-revert I_UNDERSTAND_THIS_MUTATES_HOST=1
+```
+
+This is not an uninstall test and it does not delete data-plane resources such
+as Secrets, PVCs, or databases. It first applies and validates the bundle, then
+injects a temporary, object-scoped drift into the Cilium ConfigMap, verifies
+`sync diff` observes the drift, runs object-scoped `sync revert`, verifies the
+rendered desired value is restored, and validates the cluster again.
+
+OCI package image builds are also opt-in with `--build-packages`; the default
+safe smoke path focuses on package parsing, source readiness, render, runtime
+preflight, and plan so it can run in local developer and CI environments without
+a registry or prepared host.
+
 ### Phase 0: Compile Or Obtain `sealos`
 
 Status:
@@ -406,6 +462,7 @@ Success criteria:
 - `<sealos-run-root>/distribution/applied-revision.yaml` is updated
 - the OCI-backed render path pulls package images from a registry and still
   produces the same rendered bundle shape
+- pulled package images are cached under the cluster runtime distribution store by image digest
 - the local override path still works for in-tree development without buildah or
   registry usage
 

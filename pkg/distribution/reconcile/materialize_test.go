@@ -24,8 +24,10 @@ import (
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
+	"github.com/labring/sealos/pkg/distribution/localrepo"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/state"
+	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
 	fileutil "github.com/labring/sealos/pkg/utils/file"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
@@ -91,6 +93,15 @@ func TestMaterializeFile(t *testing.T) {
 	if !strings.HasPrefix(loaded.Spec.BOM.Digest, "sha256:") {
 		t.Fatalf("loaded.spec.bom.digest = %q, want sha256 digest", loaded.Spec.BOM.Digest)
 	}
+	if got, want := result.Bundle.Spec.ExecutionTopology.FirstMaster, "localhost"; got != want {
+		t.Fatalf("bundle.executionTopology.firstMaster = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(result.Bundle.Spec.ExecutionTopology.AllNodes, ","), "localhost"; got != want {
+		t.Fatalf("bundle.executionTopology.allNodes = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.ExecutionTopology.RolesForHost("localhost")[0], "master"; got != want {
+		t.Fatalf("bundle.executionTopology localhost role = %q, want %q", got, want)
+	}
 }
 
 func TestMaterializeReplacesCurrentBundle(t *testing.T) {
@@ -155,6 +166,261 @@ func TestMaterializeReplacesCurrentBundle(t *testing.T) {
 	}
 }
 
+func TestMaterializeSnapshotsClusterInventoryTopology(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	clusterName := "cluster-topology"
+	writeClusterInventory(t, clusterName, []v1beta1.Host{
+		{
+			IPS:   []string{"10.0.0.10:22", "10.0.0.11:22"},
+			Roles: []string{v1beta1.MASTER},
+		},
+		{
+			IPS:   []string{"10.0.0.12:22"},
+			Roles: []string{v1beta1.NODE},
+		},
+	})
+
+	doc := testBOM()
+	sourceRoot := fixtureRoot()
+	result, err := Materialize(doc, Options{
+		ClusterName:   clusterName,
+		PackageLoader: loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot),
+		Sources:       hydrate.SourceMap{"kubernetes": sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+
+	topology := result.Bundle.Spec.ExecutionTopology
+	if got, want := topology.Source, "clusterInventory"; got != want {
+		t.Fatalf("executionTopology.source = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(topology.AllNodes, ","), "10.0.0.10:22,10.0.0.11:22,10.0.0.12:22"; got != want {
+		t.Fatalf("executionTopology.allNodes = %q, want %q", got, want)
+	}
+	if got, want := topology.FirstMaster, "10.0.0.10:22"; got != want {
+		t.Fatalf("executionTopology.firstMaster = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(topology.RolesForHost("10.0.0.12:22"), ","), v1beta1.NODE; got != want {
+		t.Fatalf("executionTopology worker roles = %q, want %q", got, want)
+	}
+}
+
+func TestMaterializeOverlaysLocalRepoInput(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+		{
+			Name:    "cilium",
+			Kind:    "addon",
+			Version: "v1.15.0",
+			Dependencies: []string{
+				"kubernetes",
+			},
+			Artifact: bom.ArtifactReference{
+				Name:   "cilium-cni",
+				Image:  "registry.example.io/sealos/cilium-cni:v1.15.0",
+				Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+			},
+		},
+	}
+
+	localRoot := t.TempDir()
+	writeLocalRepoInput(t, localRoot, "cilium", "cilium-values.yaml", "hubble:\n  enabled: true\n")
+	writeLocalRepoHostInput(t, localRoot, "cilium", "10.0.0.11", "cilium-values.yaml", "hubble:\n  enabled: false\n")
+	writeLocalRepoResource(t, localRoot, filepath.Join("secrets", "grafana-admin-credentials.yaml"), "apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n")
+	writeLocalRepoPatchPolicy(t, localRoot, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: custom-local-patch-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - data\n        - metadata.annotations\n")
+	writeLocalRepoPatch(t, localRoot, "cilium", "cilium-config.patch.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system\n  annotations:\n    local.sealos.io/managed: \"true\"\ndata:\n  enable-hubble: \"true\"\n")
+
+	repo, err := localrepo.Load(localRoot)
+	if err != nil {
+		t.Fatalf("localrepo.Load() error = %v", err)
+	}
+
+	sourceRoot := filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node", "packages", "cilium")
+	result, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		LocalRepo:   repo,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			switch image {
+			case doc.Spec.Components[0].Artifact.Reference():
+				return packageformat.LoadDir(fixtureRoot())
+			case doc.Spec.Components[1].Artifact.Reference():
+				return packageformat.LoadDir(sourceRoot)
+			default:
+				return nil, fmt.Errorf("unexpected image %q", image)
+			}
+		}),
+		Sources: hydrate.SourceMap{
+			"kubernetes": fixtureRoot(),
+			"cilium":     sourceRoot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+
+	renderedPath := filepath.Join(result.BundlePath, "components", "cilium", "files", "files", "values", "basic.yaml")
+	data, err := os.ReadFile(renderedPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", renderedPath, err)
+	}
+	if !strings.Contains(string(data), "enabled: true") {
+		t.Fatalf("rendered input file = %q, want local repo content", string(data))
+	}
+
+	if got, want := result.AppliedRevision.Spec.LocalRepoRevision, repo.Revision; got != want {
+		t.Fatalf("spec.localRepoRevision = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyName, "custom-local-patch-policy"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyName = %q, want %q", got, want)
+	}
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicySource), "localRepo"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicyScope), "clusterLocal"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyScope = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyPath, "policy/local-patch-policy.yaml"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyPath = %q, want %q", got, want)
+	}
+	if got := result.Bundle.Spec.LocalPatchPolicyDigest; got == "" {
+		t.Fatal("bundle.spec.localPatchPolicyDigest = empty, want sha256 digest")
+	}
+	if got, want := len(result.Bundle.Spec.LocalResources), 1; got != want {
+		t.Fatalf("len(bundle.spec.localResources) = %d, want %d", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(result.BundlePath, result.Bundle.Spec.LocalResources[0])); err != nil {
+		t.Fatalf("Stat(local resource) error = %v", err)
+	}
+	ciliumComponent := findRenderedComponent(result.Bundle, "cilium")
+	if ciliumComponent == nil {
+		t.Fatal("bundle missing cilium component")
+	}
+	if got := ciliumComponent.InputBindings["cilium-values"]; got == "" {
+		t.Fatal("bundle input binding missing for cilium-values")
+	}
+	if got, want := ciliumComponent.HostInputBindings["cilium-values"]["10.0.0.11"], "components/cilium/host-inputs/10.0.0.11/files/values/basic.yaml"; got != want {
+		t.Fatalf("bundle host input binding = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(result.BundlePath, ciliumComponent.HostInputBindings["cilium-values"]["10.0.0.11"])); err != nil {
+		t.Fatalf("Stat(rendered host input binding) error = %v", err)
+	}
+	if got, want := len(ciliumComponent.LocalPatches), 1; got != want {
+		t.Fatalf("len(ciliumComponent.LocalPatches) = %d, want %d", got, want)
+	}
+	renderedManifestPath := filepath.Join(result.BundlePath, "components", "cilium", "files", "manifests", "cilium.yaml")
+	renderedManifest, err := os.ReadFile(renderedManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", renderedManifestPath, err)
+	}
+	if !strings.Contains(string(renderedManifest), "enable-hubble: \"true\"") {
+		t.Fatalf("rendered manifest missing local patch value: %s", string(renderedManifest))
+	}
+	if !strings.Contains(string(renderedManifest), "local.sealos.io/managed: \"true\"") {
+		t.Fatalf("rendered manifest missing local patch annotation: %s", string(renderedManifest))
+	}
+
+	var sawLocalPatch bool
+	for _, object := range result.Bundle.Spec.TrackedK8sObjects {
+		if object.Kind == "ConfigMap" && object.Component == "cilium" && object.Source == hydrate.InventorySourceLocalPatch {
+			sawLocalPatch = true
+			break
+		}
+	}
+	if !sawLocalPatch {
+		t.Fatalf("tracked objects missing local patch entry: %+v", result.Bundle.Spec.TrackedK8sObjects)
+	}
+}
+
+func TestMaterializeRejectsInvalidLocalRepoPatch(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+		{
+			Name:    "cilium",
+			Kind:    "addon",
+			Version: "v1.15.0",
+			Dependencies: []string{
+				"kubernetes",
+			},
+			Artifact: bom.ArtifactReference{
+				Name:   "cilium-cni",
+				Image:  "registry.example.io/sealos/cilium-cni:v1.15.0",
+				Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+			},
+		},
+	}
+
+	localRoot := t.TempDir()
+	writeLocalRepoPatch(t, localRoot, "cilium", "cilium-config.patch.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system\n  resourceVersion: \"1\"\ndata:\n  enable-hubble: \"true\"\n")
+	repo, err := localrepo.Load(localRoot)
+	if err != nil {
+		t.Fatalf("localrepo.Load() error = %v", err)
+	}
+
+	sourceRoot := filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node", "packages", "cilium")
+	_, err = Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		LocalRepo:   repo,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			switch image {
+			case doc.Spec.Components[0].Artifact.Reference():
+				return packageformat.LoadDir(fixtureRoot())
+			case doc.Spec.Components[1].Artifact.Reference():
+				return packageformat.LoadDir(sourceRoot)
+			default:
+				return nil, fmt.Errorf("unexpected image %q", image)
+			}
+		}),
+		Sources: hydrate.SourceMap{
+			"kubernetes": fixtureRoot(),
+			"cilium":     sourceRoot,
+		},
+	})
+	if err == nil {
+		t.Fatal("Materialize() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "local patch metadata key") && !strings.Contains(err.Error(), "local patch cannot modify") {
+		t.Fatalf("Materialize() error = %v, want ownership validation failure", err)
+	}
+}
+
 type trackedSourceProvider struct {
 	root   string
 	closed int
@@ -210,4 +476,76 @@ func copiedFixture(t *testing.T) string {
 		t.Fatalf("CopyDirV3() error = %v", err)
 	}
 	return dst
+}
+
+func writeLocalRepoInput(t *testing.T, root, component, filename, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, "inputs", component, filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func writeLocalRepoHostInput(t *testing.T, root, component, host, filename, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, "inputs", component, "hosts", host, filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func writeLocalRepoResource(t *testing.T, root, relativePath, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, "resources", relativePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func writeLocalRepoPatch(t *testing.T, root, component, relativePath, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, localrepo.PatchesDirName, component, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func writeLocalRepoPatchPolicy(t *testing.T, root, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, localrepo.PolicyDirName, "local-patch-policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func findRenderedComponent(bundle *hydrate.Bundle, name string) *hydrate.RenderedComponent {
+	if bundle == nil {
+		return nil
+	}
+	for i := range bundle.Spec.Components {
+		if bundle.Spec.Components[i].Name == name {
+			return &bundle.Spec.Components[i]
+		}
+	}
+	return nil
 }

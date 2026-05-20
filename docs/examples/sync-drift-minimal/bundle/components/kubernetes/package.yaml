@@ -1,0 +1,21 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: kubernetes-rootfs
+spec:
+  component: kubernetes
+  version: v1.30.3
+  class: rootfs
+  inputs:
+    - name: kubeadm-cluster-config
+      type: configFile
+      path: files/etc/kubernetes/kubeadm.yaml
+      format: yaml
+      required: true
+  contents:
+    - name: kubelet
+      type: rootfs
+      path: rootfs/usr/bin/kubelet
+    - name: kubeadm-cluster-config
+      type: file
+      path: files/etc/kubernetes/kubeadm.yaml

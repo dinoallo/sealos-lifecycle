@@ -19,6 +19,7 @@ import (
 	"slices"
 
 	"github.com/labring/sealos/pkg/distribution/bom"
+	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
@@ -30,21 +31,37 @@ const (
 )
 
 type Plan struct {
-	BOMName    string             `json:"bomName" yaml:"bomName"`
-	Revision   string             `json:"revision" yaml:"revision"`
-	Channel    bom.ReleaseChannel `json:"channel" yaml:"channel"`
-	Components []ComponentPlan    `json:"components" yaml:"components"`
+	BOMName                string                              `json:"bomName" yaml:"bomName"`
+	Revision               string                              `json:"revision" yaml:"revision"`
+	Channel                bom.ReleaseChannel                  `json:"channel" yaml:"channel"`
+	LocalPatchPolicy       *ownership.LocalPatchPolicyDocument `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
+	LocalPatchPolicySource ownership.LocalPatchPolicySource    `json:"localPatchPolicySource,omitempty" yaml:"localPatchPolicySource,omitempty"`
+	LocalResources         []LocalResource                     `json:"localResources,omitempty" yaml:"localResources,omitempty"`
+	Components             []ComponentPlan                     `json:"components" yaml:"components"`
+}
+
+type LocalPatch struct {
+	Path         string `json:"path" yaml:"path"`
+	RelativePath string `json:"relativePath,omitempty" yaml:"relativePath,omitempty"`
+}
+
+type LocalResource struct {
+	Path         string `json:"path" yaml:"path"`
+	RelativePath string `json:"relativePath,omitempty" yaml:"relativePath,omitempty"`
 }
 
 type ComponentPlan struct {
-	Name         string                     `json:"name" yaml:"name"`
-	PackageName  string                     `json:"packageName" yaml:"packageName"`
-	Version      string                     `json:"version" yaml:"version"`
-	Class        packageformat.PackageClass `json:"class" yaml:"class"`
-	Artifact     string                     `json:"artifact" yaml:"artifact"`
-	Dependencies []string                   `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Inputs       []packageformat.Input      `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Steps        []Step                     `json:"steps" yaml:"steps"`
+	Name              string                       `json:"name" yaml:"name"`
+	PackageName       string                       `json:"packageName" yaml:"packageName"`
+	Version           string                       `json:"version" yaml:"version"`
+	Class             packageformat.PackageClass   `json:"class" yaml:"class"`
+	Artifact          string                       `json:"artifact" yaml:"artifact"`
+	Dependencies      []string                     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	Inputs            []packageformat.Input        `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	InputBindings     map[string]string            `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
+	HostInputBindings map[string]map[string]string `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
+	LocalPatches      []LocalPatch                 `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
+	Steps             []Step                       `json:"steps" yaml:"steps"`
 }
 
 type Step struct {

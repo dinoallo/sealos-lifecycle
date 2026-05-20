@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-settings
+  namespace: default
+data:
+  adminUser: root

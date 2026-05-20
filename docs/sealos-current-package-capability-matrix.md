@@ -1,0 +1,117 @@
+# Current Package Capability Matrix
+
+## Status
+
+Repo-aligned capability snapshot for the current BOM-driven MVP
+
+## Summary
+
+This document answers one narrow question:
+
+- what package-related capability is already present in this repository today
+- what is present but intentionally narrow
+- what should not be mistaken as already implemented
+
+The scope here is the current `sync`-based, BOM-driven MVP.
+
+## Reading Rule
+
+Read this matrix as an implementation snapshot, not as a long-term promise.
+
+- `Ready now` means the repository already has a concrete code path and tests
+  for the capability.
+- `Ready with boundary` means the capability exists, but only inside the
+  current single-node or narrow-surface model.
+- `Not implemented` means users should not assume the repository already
+  supports that workflow.
+
+## Ready Now
+
+| Capability | Current State | Main Evidence | Important Caveat |
+| --- | --- | --- | --- |
+| Author and validate a component package directory | Ready now | [pkg/distribution/packageformat/load.go](../pkg/distribution/packageformat/load.go), [cmd/sealos/cmd/sync_package.go](../cmd/sealos/cmd/sync_package.go) | The contract is still marked experimental in the wider `sync` flow. |
+| Inspect package metadata from a local package directory | Ready now | `sealos sync package inspect` in [cmd/sealos/cmd/sync_package.go](../cmd/sealos/cmd/sync_package.go), tests in [cmd/sealos/cmd/sync_package_test.go](../cmd/sealos/cmd/sync_package_test.go) | This is package-directory inspection, not release selection. |
+| Build one OCI image from one component package directory | Ready now | `sealos sync package build` in [cmd/sealos/cmd/sync_package.go](../cmd/sealos/cmd/sync_package.go), staging logic in [pkg/distribution/ocipackage/ocipackage.go](../pkg/distribution/ocipackage/ocipackage.go) | Build still depends on the local image/build environment being prepared. |
+| Push a built OCI component package image and capture its digest | Ready now | `sealos sync package push` in [cmd/sealos/cmd/sync_package.go](../cmd/sealos/cmd/sync_package.go) | Push is transport-level only; it does not update any BOM automatically. |
+| Pull an OCI component package image into a local package directory | Ready now | `sealos sync package pull` in [cmd/sealos/cmd/sync_package.go](../cmd/sealos/cmd/sync_package.go), reusable pull/cache logic in [pkg/distribution/ocipackage/pull.go](../pkg/distribution/ocipackage/pull.go) | Pull extracts the package filesystem and validates `package.yaml`; registry auth is still delegated to the local image/buildah environment. |
+| Resolve component packages from a BOM | Ready now | [pkg/distribution/bom/resolve.go](../pkg/distribution/bom/resolve.go), `sync render` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go) | Resolution is still explicit-BOM driven. |
+| Resolve packages from either local directory overrides or cached OCI artifacts | Ready now | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/ocipackage/pull.go](../pkg/distribution/ocipackage/pull.go), [pkg/distribution/packageformat/load.go](../pkg/distribution/packageformat/load.go) | BOM-driven OCI references are pulled into the cluster runtime cache under a digest-derived key before render/validate reads them. |
+| Render a BOM into a hydrated desired-state bundle | Ready now | [pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go), [pkg/distribution/hydrate/render.go](../pkg/distribution/hydrate/render.go) | Render is cluster-targeted but still centered on the current single-node path. |
+| Apply a rendered bundle to the resolved cluster targets | Ready now | [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The deployment unit is still the rendered bundle, and multi-node behavior is still executor-level rather than controller-driven. |
+| Carry package content types through deployment | Ready now | `rootfs`, `file`, `manifest`, hooks through [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The semantics are intentionally narrow and repo-specific for the MVP. |
+| Initialize a cluster-local repo skeleton from package input contracts | Ready now | `sealos sync local-repo init` in [cmd/sealos/cmd/sync_localrepo.go](../cmd/sealos/cmd/sync_localrepo.go), tests in [cmd/sealos/cmd/sync_test.go](../cmd/sealos/cmd/sync_test.go) | It creates templates and policy metadata only; real Secret values must still be supplied by operators. |
+| Inspect a cluster-local repo before validation/render | Ready now | `sealos sync local-repo doctor` in [cmd/sealos/cmd/sync_localrepo.go](../cmd/sealos/cmd/sync_localrepo.go), tests in [cmd/sealos/cmd/sync_test.go](../cmd/sealos/cmd/sync_test.go) | It catches unresolved init templates, stale component dirs, Secret-like permission/kind mistakes, and missing local patch policy without printing Secret payload. |
+| Bind local repo `inputs/`, `resources/`, and `patches/` into render/apply | Ready now | [pkg/distribution/localrepo/localrepo.go](../pkg/distribution/localrepo/localrepo.go), [pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go) | The local-repo model is still cluster-local and single-node scoped. |
+| Validate a BOM, local package sources, local repo, and cluster topology before render/apply | Ready now | `sealos sync validate` in [cmd/sealos/cmd/sync_validate.go](../cmd/sealos/cmd/sync_validate.go) | Validation is read-only and checks package/local-repo/topology conformance; it is not a live cluster health check. |
+| Run, enforce, and record source preflight before render | Ready now | `sealos sync preflight --file ...` and the default `sealos sync render` source gate in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), bundle metadata in [pkg/distribution/hydrate/bundle.go](../pkg/distribution/hydrate/bundle.go), tests in [cmd/sealos/cmd/sync_test.go](../cmd/sealos/cmd/sync_test.go) | Source preflight aggregates local-repo doctor and validate, then render persists a sanitized summary into `spec.sourcePreflight`. |
+| Check rendered bundle freshness and runtime readiness before apply | Ready now | `sealos sync preflight --bundle-dir ...` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), runtime checks in [sync_runtime_preflight.go](../cmd/sealos/cmd/sync_runtime_preflight.go) | Rendered-bundle preflight checks topology/render-input freshness plus local host/runtime readiness such as privileges, systemd, swap, Kubernetes state, ports, known binaries, kubeconfig/client availability, and managed service state. Runtime warnings stay in structured output; blocking runtime checks gate `sync apply`. |
+| Preview rendered bundle apply intent before mutating the cluster | Ready now | `sealos sync plan` in [cmd/sealos/cmd/sync_plan.go](../cmd/sealos/cmd/sync_plan.go) | The plan is static and read-only: it resolves targets and summarizes resources, but does not run SSH, kubectl, or dynamic apply probes. |
+| Diff, status, commit, and revert against the rendered desired state | Ready now | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/compare](../pkg/distribution/compare), [pkg/distribution/commit](../pkg/distribution/commit) | This is the current `sync` operator loop, not a controller yet. |
+| Run a safe end-to-end package lifecycle smoke flow | Ready now | `make verify-sync-package-smoke`, backed by [scripts/poc/minimal-single-node/smoke.sh](../scripts/poc/minimal-single-node/smoke.sh) | The default smoke path builds the current CLI, uses temporary state, runs package inspect, local-repo init/doctor, source preflight, render, runtime preflight, plan, and sourcePreflight verification. Host mutation and OCI image build are explicit opt-ins via `SYNC_PACKAGE_SMOKE_ARGS`. |
+| Run a mutating single-node apply acceptance flow | Ready now | `make verify-sync-package-apply I_UNDERSTAND_THIS_MUTATES_HOST=1`, backed by [scripts/poc/minimal-single-node/smoke.sh](../scripts/poc/minimal-single-node/smoke.sh) | This target intentionally mutates the host. It reuses the smoke path, then runs `sync apply`, `sync status`, `sync diff`, and `validate.sh` after the rendered-bundle runtime preflight passes. Extra smoke arguments still flow through `SYNC_PACKAGE_SMOKE_ARGS`. |
+| Run a mutating single-node drift/revert acceptance flow | Ready now | `make verify-sync-package-revert I_UNDERSTAND_THIS_MUTATES_HOST=1`, backed by [scripts/poc/minimal-single-node/smoke.sh](../scripts/poc/minimal-single-node/smoke.sh) | This target first runs the apply acceptance flow, then injects a temporary Cilium ConfigMap drift, verifies `sync diff` observes it, runs object-scoped `sync revert`, and verifies the rendered desired value is restored. This is drift recovery, not uninstall, and it does not delete Secret/PVC/database data-plane resources. |
+| Produce and validate a package lifecycle acceptance report | Ready now | `acceptance-report.yaml` from [scripts/poc/minimal-single-node/smoke.sh](../scripts/poc/minimal-single-node/smoke.sh), validated by [scripts/poc/minimal-single-node/check-report.sh](../scripts/poc/minimal-single-node/check-report.sh) | Every smoke/apply/revert run writes a report under the workdir unless `--report-file` is provided, then validates it in `safe`, `apply`, or `revert` mode. It captures stage status, output paths, BOM/package/local-repo identity, desired-state digest, and post-apply/post-revert state without copying Secret payloads. |
+| Override the cluster runtime root for `sync` workflows | Ready now | `--runtime-root` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go) | This is primarily for tests, smoke runs, and scripted workflows that need explicit control over where rendered state, current bundles, and Clusterfile inventory are read from. |
+| Policy-driven validation for cluster-local patch surface | Ready now | [pkg/distribution/ownership/policy.go](../pkg/distribution/ownership/policy.go), [pkg/distribution/policyreport](../pkg/distribution/policyreport) | The supported policy scope is still deliberately narrow. |
+
+## Ready With Boundary
+
+| Capability | Current State | Main Evidence | Boundary |
+| --- | --- | --- | --- |
+| Deploy package content to Kubernetes and the host from one unified flow | Ready with boundary | [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The deployment unit is the rendered bundle, not a standalone package install command. |
+| Resolve `allNodes`, `firstMaster`, and `cluster` apply targets from cluster inventory | Ready with boundary | [pkg/distribution/reconcile/topology.go](../pkg/distribution/reconcile/topology.go), [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The current execution path is still CLI-driven and assumes package hooks/scripts are already written with multi-node-safe behavior. |
+| Commit a local input-backed host file from a selected multi-node host | Ready with boundary | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/commit/commit.go](../pkg/distribution/commit/commit.go) | Current multi-node commit support is intentionally narrow: it only covers local-input regular files, writes selected hosts back to host-scoped inputs when present, and rejects divergent selected-host commits that would overwrite the default input without host-scoped provenance. |
+| Track host files, Kubernetes objects, and some generated projections | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go), [pkg/distribution/compare/compare.go](../pkg/distribution/compare/compare.go) | Generated projection coverage is intentionally narrow. |
+| Support generated control-plane static Pod tracking | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go) | Only the explicitly modeled kubeadm-generated static Pod set is covered. |
+| Approval-governed local patch policy gate | Ready with boundary | [pkg/distribution/policyreport/gate.go](../pkg/distribution/policyreport/gate.go), [.github/workflows/local_patch_policy_gate.yml](./../.github/workflows/local_patch_policy_gate.yml) | This governs local patch policy only, not every future ownership policy. |
+| Time-based approval hygiene scanning | Ready with boundary | `sealos sync policy-approval-scan` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [.github/workflows/local_patch_policy_approval_scan.yml](./../.github/workflows/local_patch_policy_approval_scan.yml) | The scan is repo-level and approval-focused, not a general cluster health controller. |
+
+## Not Implemented
+
+These are the main things users should **not** mistake as already done.
+
+| Capability | Current State | Why It Matters |
+| --- | --- | --- |
+| Direct “install this package” workflow without BOM/bundle mediation | Not implemented | The current deployment path is `package -> BOM -> render -> bundle -> apply`, not package-direct install. |
+| Fully generalized multi-node topology-aware rollout and orchestration | Not implemented | `sync apply` can now resolve runtime targets, but there is still no controller-driven orchestration, rollout policy, or package-level safety model for every multi-node workflow. |
+| Controller-based continuous reconcile loop | Not implemented | Today the primary interface is CLI-driven render/apply/diff/status/commit/revert. |
+| `DistributionChannel`-driven release resolution | Not implemented | Current operation still uses explicit BOM files or revisions rather than live channel objects. |
+| Fully generalized generated-output drift management | Not implemented | The MVP tracks a narrow known set, not every possible generated artifact. |
+| Package/BOM-defined local patch policy source | Not implemented | Current policy sources are only `localRepo` and `builtInDefault`. |
+| Multi-layer policy merge across package, BOM, and cluster-local inputs | Not implemented | The current model intentionally rejects that complexity. |
+
+## Practical Interpretation
+
+The shortest accurate statement for the current repository is:
+
+- packaging is ready
+- package resolution is ready
+- deployment is ready as a BOM-driven MVP
+- multi-node orchestration and release-system behavior are not ready yet
+
+That means the repository is already strong enough for:
+
+- package authoring
+- OCI package build, push, and pull
+- BOM-driven render/apply workflows
+- drift and ownership experiments on the current CLI-driven path
+
+But it is not yet the final shape of:
+
+- multi-cluster release management
+- fully generalized multi-node topology-aware deployment
+- continuous controller-based reconciliation
+
+## Related Documents
+
+- Packaging contract:
+  [sealos-component-package-format-design.md](./sealos-component-package-format-design.md)
+- OCI packaging milestone:
+  [sealos-oci-component-packaging-milestone-plan.md](./sealos-oci-component-packaging-milestone-plan.md)
+- Minimal prepared-host PoC:
+  [sealos-minimal-k8s-package-poc-plan.md](./sealos-minimal-k8s-package-poc-plan.md)
+- Local repo and deployment loop:
+  [sealos-local-repo-and-secret-guide.md](./sealos-local-repo-and-secret-guide.md),
+  [sealos-sync-drift-walkthrough.md](./sealos-sync-drift-walkthrough.md)
+- Release and channel model that still remains to be implemented:
+  [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md)

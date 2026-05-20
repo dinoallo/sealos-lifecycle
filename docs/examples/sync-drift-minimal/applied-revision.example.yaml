@@ -1,0 +1,55 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: AppliedRevision
+metadata:
+  name: demo-current
+  labels:
+    distribution.sealos.io/bom-name: minimal-single-node
+    distribution.sealos.io/revision: rev-poc-001
+    distribution.sealos.io/channel: alpha
+spec:
+  clusterName: demo
+  bom:
+    name: minimal-single-node
+    revision: rev-poc-001
+    channel: alpha
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  localRepoRevision: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  localPatchRevision: patch-rev-1
+  desiredStateDigest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+status:
+  state: Orphan
+  lastAppliedTime: "2026-05-09T12:00:00Z"
+  lastSuccessfulRevision:
+    bom:
+      name: minimal-single-node
+      revision: rev-poc-001
+      channel: alpha
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+    localRepoRevision: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    localPatchRevision: patch-rev-1
+    desiredStateDigest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  observedSummary:
+    lastObservedTime: "2026-05-09T12:05:00Z"
+    total: 5
+    present: 5
+    missing: 0
+    matched: 2
+    drifted: 3
+    clean: 2
+    dirty: 2
+    orphan: 1
+    mixedOwnershipObject: 1
+    directCommitEligible: 2
+    directRevertEligible: 2
+    bundleMatchRequired: 2
+  conditions:
+    - type: Applied
+      status: "True"
+      lastTransitionTime: "2026-05-09T12:00:00Z"
+      reason: ReconcileSucceeded
+      message: desired revision applied
+    - type: Observed
+      status: "True"
+      lastTransitionTime: "2026-05-09T12:05:00Z"
+      reason: GlobalOwnershipDriftDetected
+      message: detected 1 orphan object(s), 0 orphan host path(s), 1 dirty object(s), and 1 dirty host path(s); 2 direct commit-eligible, 2 direct revert-eligible, 2 bundle-match-guarded drift item(s)

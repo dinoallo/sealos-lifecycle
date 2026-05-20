@@ -1,0 +1,141 @@
+clusterName: demo
+bomName: minimal-single-node
+revision: rev-poc-001
+channel: alpha
+bundlePath: docs/examples/sync-drift-minimal/bundle
+appliedRevisionPath: /path/to/runtime-root/demo/distribution/applied-revision.yaml
+localPatchPolicy:
+  source: localRepo
+  scope: clusterLocal
+  name: custom-local-patch-policy
+  path: policy/local-patch-policy.yaml
+  digest: sha256:0a8dd714794d507db7ef8f9c7369965692acf8b46c756be7c9beeb22fed875c2
+desiredStateDigest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+localRepoRevision: sha256:2222222222222222222222222222222222222222222222222222222222222222
+localPatchRevision: patch-rev-1
+recordedState: Orphan
+recordedObservedSummary:
+  lastObservedTime: "2026-05-09T12:05:00Z"
+  total: 5
+  present: 5
+  missing: 0
+  matched: 1
+  drifted: 4
+  clean: 1
+  dirty: 2
+  orphan: 2
+  mixedOwnershipObject: 1
+  directCommitEligible: 2
+  directRevertEligible: 2
+  bundleMatchRequired: 2
+currentState: Orphan
+lastAppliedTime: "2026-05-09T12:00:00Z"
+headline: state=Orphan; dirtyObjects=1; orphanObjects=1; dirtyHostPaths=1; orphanHostPaths=1; directCommitEligible=2; directRevertEligible=2; bundleMatchRequired=2; policyEligibleOrphanObjects=1
+summary:
+  total: 5
+  present: 5
+  missing: 0
+  matched: 1
+  drifted: 4
+  clean: 1
+  dirty: 2
+  orphan: 2
+operatorActionSummary:
+  directCommitEligible: 2
+  directRevertEligible: 2
+  bundleMatchRequired: 2
+mixedOwnershipObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: default
+    name: grafana-settings
+    ownerships:
+      - global
+      - local
+dirtyObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: default
+    name: grafana-settings
+    operatorAction: commitOrReapplyLocalOverlay
+    operatorActionMetadata:
+      allowsDirectCommit: true
+      allowsDirectRevert: true
+      requiresBundleMatch: true
+    paths:
+      - data.adminUser
+    remediation:
+      action: reviewLocalObjectOverlayAndCommitOrReapply
+      changeOwner: localOverlay
+      policyName: custom-local-patch-policy
+      commandGuidance:
+        - command: sync commit
+          preconditions:
+            - bundleMatchesRecordedDesiredStateDigest
+          availability: available
+        - command: sync revert
+          preconditions:
+            - bundleMatchesRecordedDesiredStateDigest
+          availability: available
+orphanObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: kube-system
+    name: cilium-config
+    operatorAction: promoteToLocalPatch
+    operatorActionMetadata:
+      allowsDirectCommit: false
+      allowsDirectRevert: false
+      requiresBundleMatch: false
+    paths:
+      - data.enable-hubble
+    remediation:
+      action: reviewDistributionBaselineForAppliedObject
+      changeOwner: globalBaseline
+      policyName: custom-local-patch-policy
+      policyEligiblePaths:
+        - data.enable-hubble
+dirtyHostPaths:
+  - path: /etc/kubernetes/kubeadm.yaml
+    component: kubernetes
+    operatorAction: commitOrReapplyLocalInput
+    operatorActionMetadata:
+      allowsDirectCommit: true
+      allowsDirectRevert: true
+      requiresBundleMatch: true
+    reasons:
+      - contentMismatch
+    remediation:
+      action: reviewLocalHostInputAndCommitOrReapply
+      changeOwner: localInput
+orphanHostPaths:
+  - path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    component: kubernetes
+    operatorAction: rerenderOrUpdateGlobalBaseline
+    operatorActionMetadata:
+      allowsDirectCommit: false
+      allowsDirectRevert: false
+      requiresBundleMatch: false
+    reasons:
+      - semanticMismatch
+    remediation:
+      action: reviewDistributionBaselineForGeneratedProjection
+      changeOwner: globalBaseline
+policyEligibleOrphanObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: kube-system
+    name: cilium-config
+    operatorAction: promoteToLocalPatch
+    operatorActionMetadata:
+      allowsDirectCommit: false
+      allowsDirectRevert: false
+      requiresBundleMatch: false
+    paths:
+      - data.enable-hubble
+    remediation:
+      action: reviewDistributionBaselineForAppliedObject
+      changeOwner: globalBaseline
+      policyName: custom-local-patch-policy
+      policyEligiblePaths:
+        - data.enable-hubble

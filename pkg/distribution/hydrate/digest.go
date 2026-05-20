@@ -26,17 +26,25 @@ import (
 )
 
 func DigestBundle(root string) (digest.Digest, error) {
+	return digestDirectory(root, "bundle")
+}
+
+func DigestDirectory(root string) (digest.Digest, error) {
+	return digestDirectory(root, "directory")
+}
+
+func digestDirectory(root, kind string) (digest.Digest, error) {
 	if root == "" {
-		return "", fmt.Errorf("bundle root cannot be empty")
+		return "", fmt.Errorf("%s root cannot be empty", kind)
 	}
 
 	root = filepath.Clean(root)
 	info, err := os.Stat(root)
 	if err != nil {
-		return "", fmt.Errorf("stat bundle root %q: %w", root, err)
+		return "", fmt.Errorf("stat %s root %q: %w", kind, root, err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("bundle root %q must be a directory", root)
+		return "", fmt.Errorf("%s root %q must be a directory", kind, root)
 	}
 
 	digester := digest.Canonical.Digester()
@@ -84,7 +92,7 @@ func DigestBundle(root string) (digest.Digest, error) {
 			return fmt.Errorf("unsupported bundle entry %q with mode %v", relative, info.Mode())
 		}
 	}); err != nil {
-		return "", fmt.Errorf("walk bundle %q: %w", root, err)
+		return "", fmt.Errorf("walk %s %q: %w", kind, root, err)
 	}
 
 	return digester.Digest(), nil

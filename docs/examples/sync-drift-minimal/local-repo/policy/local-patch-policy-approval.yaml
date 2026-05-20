@@ -1,0 +1,18 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicyGateApproval
+metadata:
+  name: custom-local-patch-policy-approval
+spec:
+  owner: platform-sre
+  approvedBy: reviewer@example.com
+  changeRef: OPS-0000
+  expiresAt: 2099-12-31T00:00:00Z
+  oldPolicy:
+    name: custom-local-patch-policy
+    scope: clusterLocal
+    digest: sha256:2ba775938ed729a6b49224877706ebad84988f91c4fec417a0525523afe1d6ef
+  newPolicy:
+    name: custom-local-patch-policy
+    scope: clusterLocal
+    digest: sha256:2ba775938ed729a6b49224877706ebad84988f91c4fec417a0525523afe1d6ef
+  approvals: []

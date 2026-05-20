@@ -45,6 +45,13 @@ func TestAppliedRevisionValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "negative observed summary",
+			mutate: func(a *AppliedRevision) {
+				a.Status.ObservedSummary = &ObservedSummary{Dirty: -1}
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -82,10 +89,11 @@ func validAppliedRevision() *AppliedRevision {
 	)
 	doc.Status.State = StateClean
 	doc.Status.Conditions = []Condition{
-		NewCondition("Applied", corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
+		NewCondition(ConditionTypeApplied, corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
 	}
 	doc.Status.LastSuccessfulRevision = &RevisionSnapshot{
 		BOM:                ref,
+		LocalRepoRevision:  "sha256:abababababababababababababababababababababababababababababababab",
 		LocalPatchRevision: "local-rev-1",
 		DesiredStateDigest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 	}

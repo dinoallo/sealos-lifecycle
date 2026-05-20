@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/state"
+	"github.com/labring/sealos/pkg/utils/iputils"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
 
@@ -55,13 +57,19 @@ type ApplyResult struct {
 }
 
 type bundleExecutor struct {
-	bundlePath       string
-	clusterName      string
-	kubeconfigPath   string
-	hostRoot         string
-	stderr           io.Writer
-	waitTimeout      time.Duration
-	untaintAttempted bool
+	bundle                *hydrate.Bundle
+	bundlePath            string
+	clusterName           string
+	desiredStateDigest    string
+	kubeconfigPath        string
+	hostRoot              string
+	stderr                io.Writer
+	waitTimeout           time.Duration
+	topology              *clusterExecutionTopology
+	remoteExec            applyRemoteExecutor
+	stagedBundleRoots     map[string]string
+	localResourcesApplied bool
+	untaintAttempted      bool
 }
 
 func Apply(opts ApplyOptions) (*ApplyResult, error) {
@@ -77,7 +85,7 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 		return nil, fmt.Errorf("resolve bundle path %q: %w", opts.BundlePath, err)
 	}
 
-	bundle, err := loadBundle(bundlePath)
+	bundle, err := LoadBundle(bundlePath)
 	if err != nil {
 		return nil, err
 	}
@@ -90,18 +98,37 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	if _, err := loadRenderedRevision(opts.ClusterName, desiredStateDigest); err != nil {
 		return nil, err
 	}
+	topology, hasSnapshot, err := applyExecutionTopologyFromSnapshot(opts.ClusterName, bundle.Spec.ExecutionTopology)
+	if err != nil {
+		return nil, err
+	}
+	if !hasSnapshot {
+		topology, err = loadApplyExecutionTopology(opts.ClusterName)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := validatePreparedHostBundle(bundlePath, bundle); err != nil {
 		return nil, err
 	}
 	executor := bundleExecutor{
-		bundlePath:     bundlePath,
-		clusterName:    opts.ClusterName,
-		kubeconfigPath: opts.KubeconfigPath,
-		hostRoot:       opts.HostRoot,
-		stderr:         opts.Stderr,
-		waitTimeout:    opts.WaitTimeout,
+		bundle:             bundle,
+		bundlePath:         bundlePath,
+		clusterName:        opts.ClusterName,
+		desiredStateDigest: desiredStateDigest.String(),
+		kubeconfigPath:     opts.KubeconfigPath,
+		hostRoot:           opts.HostRoot,
+		stderr:             opts.Stderr,
+		waitTimeout:        opts.WaitTimeout,
+		topology:           topology,
 	}
 	executor.applyDefaults()
+	if executor.topology != nil && executor.topology.hasRemoteHosts() {
+		executor.remoteExec, err = newApplyRemoteExecutor(executor.topology)
+		if err != nil {
+			return nil, fmt.Errorf("create remote execution client: %w", err)
+		}
+	}
 
 	if err := executor.applyBundle(bundle); err != nil {
 		return nil, err
@@ -120,7 +147,7 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	}, nil
 }
 
-func loadBundle(bundlePath string) (*hydrate.Bundle, error) {
+func LoadBundle(bundlePath string) (*hydrate.Bundle, error) {
 	manifestPath := filepath.Join(bundlePath, hydrate.BundleFileName)
 
 	var bundle hydrate.Bundle
@@ -177,6 +204,12 @@ func (e *bundleExecutor) applyDefaults() {
 	if e.waitTimeout <= 0 {
 		e.waitTimeout = defaultApplyWaitTimeout
 	}
+	if e.topology == nil {
+		e.topology = fallbackLocalExecutionTopology(e.clusterName)
+	}
+	if e.stagedBundleRoots == nil {
+		e.stagedBundleRoots = make(map[string]string)
+	}
 }
 
 func (e *bundleExecutor) applyBundle(bundle *hydrate.Bundle) error {
@@ -191,7 +224,7 @@ func (e *bundleExecutor) applyBundle(bundle *hydrate.Bundle) error {
 	}
 
 	for _, component := range bundle.Spec.Components {
-		if err := e.applyComponent(component); err != nil {
+		if err := e.applyComponent(bundle, component); err != nil {
 			return fmt.Errorf("apply component %q: %w", component.Name, err)
 		}
 	}
@@ -202,7 +235,26 @@ func (e *bundleExecutor) ensurePrivileges(bundle *hydrate.Bundle) error {
 	if bundle == nil {
 		return fmt.Errorf("bundle cannot be nil")
 	}
+	hasHostMutatingContent := false
+	for _, component := range bundle.Spec.Components {
+		for _, step := range component.Steps {
+			if step.Kind != hydrate.StepContent {
+				continue
+			}
+			switch step.ContentType {
+			case packageformat.ContentRootfs, packageformat.ContentFile:
+				hasHostMutatingContent = true
+			}
+		}
+	}
+
 	if e.hostRoot != string(os.PathSeparator) {
+		if hasHostMutatingContent && e.topology != nil && !e.topology.isSingleNode() {
+			return fmt.Errorf("custom host root %q is only supported for single-node sync apply", e.hostRoot)
+		}
+		return nil
+	}
+	if e.topology != nil && !e.topology.hasLocalExecutionHost() {
 		return nil
 	}
 
@@ -223,7 +275,7 @@ func (e *bundleExecutor) ensurePrivileges(bundle *hydrate.Bundle) error {
 	return nil
 }
 
-func (e *bundleExecutor) applyComponent(component hydrate.RenderedComponent) error {
+func (e *bundleExecutor) applyComponent(bundle *hydrate.Bundle, component hydrate.RenderedComponent) error {
 	files, hooks, err := classifyComponent(component)
 	if err != nil {
 		return err
@@ -238,9 +290,9 @@ func (e *bundleExecutor) applyComponent(component hydrate.RenderedComponent) err
 	case componentModeRuntimeRootfs:
 		return e.applyRuntimeRootfsComponent(component, files, hooks)
 	case componentModeBootstrapRootfs:
-		return e.applyBootstrapRootfsComponent(component, files, hooks)
+		return e.applyBootstrapRootfsComponent(bundle, component, files, hooks)
 	case componentModeClusterApplication:
-		return e.applyClusterApplicationComponent(component, files, hooks)
+		return e.applyClusterApplicationComponent(bundle, component, files, hooks)
 	default:
 		return fmt.Errorf("component %q uses unsupported single-node apply mode", component.Name)
 	}
@@ -576,50 +628,63 @@ func servicesForComponent(contents contentSet, bundlePath string) []string {
 }
 
 func (e *bundleExecutor) applyRuntimeRootfsComponent(component hydrate.RenderedComponent, files contentSet, hooks hookSet) error {
-	if err := e.runHooks(component, hooks.preflight); err != nil {
+	nodeHosts := e.nodeExecutionHosts()
+	provisioningHosts, err := e.provisioningHostsForComponent(component, nodeHosts)
+	if err != nil {
 		return err
 	}
-	if err := e.stopServices(files); err != nil {
+	if err := e.runHooksForHosts(component, hooks.preflight, provisioningHosts); err != nil {
 		return err
 	}
-	if err := e.applyMutableContent(files); err != nil {
+	if err := e.stopServices(provisioningHosts, files); err != nil {
 		return err
 	}
-	if err := e.runReloadIfNeeded(files, false); err != nil {
+	if err := e.applyMutableContent(provisioningHosts, files); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.bootstrap); err != nil {
+	if err := e.runReloadIfNeeded(provisioningHosts, files, false); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.configure); err != nil {
+	if err := e.runBootstrapHooksForHosts(component, files, hooks.bootstrap, provisioningHosts); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.install); err != nil {
+	if err := e.runHooksForHosts(component, hooks.configure, provisioningHosts); err != nil {
+		return err
+	}
+	if err := e.runHooksForHosts(component, hooks.install, provisioningHosts); err != nil {
 		return err
 	}
 	return e.runHooks(component, hooks.healthcheck)
 }
 
-func (e *bundleExecutor) applyBootstrapRootfsComponent(component hydrate.RenderedComponent, files contentSet, hooks hookSet) error {
-	if err := e.stopServices(files); err != nil {
+func (e *bundleExecutor) applyBootstrapRootfsComponent(bundle *hydrate.Bundle, component hydrate.RenderedComponent, files contentSet, hooks hookSet) error {
+	nodeHosts := e.nodeExecutionHosts()
+	provisioningHosts, err := e.provisioningHostsForComponent(component, nodeHosts)
+	if err != nil {
 		return err
 	}
-	if err := e.applyMutableContent(files); err != nil {
+	if err := e.stopServices(provisioningHosts, files); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.preflight); err != nil {
+	if err := e.applyMutableContent(provisioningHosts, files); err != nil {
 		return err
 	}
-	if err := e.runReloadIfNeeded(files, files.hasSysctl); err != nil {
+	if err := e.runHooksForHosts(component, hooks.preflight, provisioningHosts); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.bootstrap); err != nil {
+	if err := e.runReloadIfNeeded(provisioningHosts, files, files.hasSysctl); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.configure); err != nil {
+	if err := e.runBootstrapHooksForHosts(component, files, hooks.bootstrap, provisioningHosts); err != nil {
 		return err
 	}
-	if err := e.runHooks(component, hooks.install); err != nil {
+	if err := e.runHooksForHosts(component, hooks.configure, provisioningHosts); err != nil {
+		return err
+	}
+	if err := e.runHooksForHosts(component, hooks.install, provisioningHosts); err != nil {
+		return err
+	}
+	if err := e.applyLocalResources(bundle); err != nil {
 		return err
 	}
 	if err := e.applyManifestSteps(files.manifests); err != nil {
@@ -628,8 +693,11 @@ func (e *bundleExecutor) applyBootstrapRootfsComponent(component hydrate.Rendere
 	return e.runHooks(component, hooks.healthcheck)
 }
 
-func (e *bundleExecutor) applyClusterApplicationComponent(component hydrate.RenderedComponent, files contentSet, hooks hookSet) error {
+func (e *bundleExecutor) applyClusterApplicationComponent(bundle *hydrate.Bundle, component hydrate.RenderedComponent, files contentSet, hooks hookSet) error {
 	if err := e.runHooks(component, hooks.preflight); err != nil {
+		return err
+	}
+	if err := e.applyLocalResources(bundle); err != nil {
 		return err
 	}
 	if err := e.applyManifestSteps(files.manifests); err != nil {
@@ -644,50 +712,147 @@ func (e *bundleExecutor) applyClusterApplicationComponent(component hydrate.Rend
 	return e.runHooks(component, hooks.healthcheck)
 }
 
-func (e *bundleExecutor) stopServices(files contentSet) error {
-	for _, service := range servicesForComponent(files, e.bundlePath) {
-		if err := e.stopServiceIfActive(service); err != nil {
+func (e *bundleExecutor) applyLocalResources(bundle *hydrate.Bundle) error {
+	if e.localResourcesApplied || bundle == nil || len(bundle.Spec.LocalResources) == 0 {
+		return nil
+	}
+	if err := e.waitForFile(e.kubeconfigPath, e.waitTimeout); err != nil {
+		return err
+	}
+	if err := e.waitForAPI(e.waitTimeout); err != nil {
+		return err
+	}
+	if err := e.ensureClusterPrepared(); err != nil {
+		return err
+	}
+
+	for _, bundlePath := range bundle.Spec.LocalResources {
+		resourcePath, err := e.resolveBundlePath(bundlePath)
+		if err != nil {
 			return err
+		}
+		e.logf("applying local resource payload %q", bundlePath)
+		if err := e.runCommand(0, nil, "kubectl", "--kubeconfig", e.kubeconfigPath, "apply", "-f", resourcePath); err != nil {
+			return err
+		}
+	}
+	e.localResourcesApplied = true
+	return nil
+}
+
+func (e *bundleExecutor) provisioningHostsForComponent(component hydrate.RenderedComponent, hosts []string) ([]string, error) {
+	if len(hosts) == 0 || e.topology == nil || e.topology.isSingleNode() {
+		return slices.Clone(hosts), nil
+	}
+	if component.PackageName != "containerd-runtime" && component.Name != "containerd" &&
+		component.PackageName != "kubernetes-rootfs" && component.Name != "kubernetes" {
+		return slices.Clone(hosts), nil
+	}
+
+	provisioningHosts := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		joined, err := e.hostHasKubeletIdentity(host)
+		if err != nil {
+			return nil, err
+		}
+		if joined {
+			e.logf("skipping host-side reprovisioning for already joined host %q", host)
+			continue
+		}
+		provisioningHosts = append(provisioningHosts, host)
+	}
+	return provisioningHosts, nil
+}
+
+func (e *bundleExecutor) hostHasKubeletIdentity(host string) (bool, error) {
+	output, err := e.outputShellOnHost(host, `if [ -f /etc/kubernetes/kubelet.conf ] || [ -f /etc/kubernetes/admin.conf ]; then echo joined; else echo fresh; fi`)
+	if err != nil {
+		return false, fmt.Errorf("detect kubelet identity on %q: %w", host, err)
+	}
+	return strings.TrimSpace(output) == "joined", nil
+}
+
+func (e *bundleExecutor) stopServices(hosts []string, files contentSet) error {
+	for _, host := range hosts {
+		for _, service := range servicesForComponent(files, e.bundlePath) {
+			if err := e.stopServiceIfActiveOnHost(host, service); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func (e *bundleExecutor) applyMutableContent(files contentSet) error {
-	for _, step := range files.rootfs {
-		if err := e.applyRootfs(step); err != nil {
-			return err
+func (e *bundleExecutor) applyMutableContent(hosts []string, files contentSet) error {
+	for _, host := range hosts {
+		for _, step := range files.rootfs {
+			if err := e.applyRootfsToHost(host, step); err != nil {
+				return err
+			}
 		}
-	}
-	for _, step := range files.files {
-		if err := e.applyFile(step); err != nil {
-			return err
+		for _, step := range files.files {
+			if err := e.applyFileToHost(host, step); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func (e *bundleExecutor) runReloadIfNeeded(files contentSet, applySysctl bool) error {
-	if applySysctl {
-		if err := e.runIfPresent("sysctl", "--system"); err != nil {
-			return err
+func (e *bundleExecutor) runReloadIfNeeded(hosts []string, files contentSet, applySysctl bool) error {
+	for _, host := range hosts {
+		if applySysctl {
+			if err := e.runIfPresentOnHost(host, "sysctl", "--system"); err != nil {
+				return err
+			}
+		}
+		if len(files.rootfs) > 0 || len(files.files) > 0 {
+			if err := e.runIfPresentOnHost(host, "systemctl", "daemon-reload"); err != nil {
+				return err
+			}
 		}
 	}
-	if len(files.rootfs) > 0 || len(files.files) > 0 {
-		if err := e.runIfPresent("systemctl", "daemon-reload"); err != nil {
-			return err
+	return nil
+}
+
+func (e *bundleExecutor) runHooksForHosts(component hydrate.RenderedComponent, hooks []hydrate.RenderedStep, allNodeHosts []string) error {
+	for _, hook := range hooks {
+		switch hook.Target {
+		case packageformat.TargetCluster:
+			if err := e.runLocalHook(component, hook); err != nil {
+				return err
+			}
+		case packageformat.TargetAllNodes:
+			targetHosts := allNodeHosts
+			if targetHosts == nil {
+				var err error
+				targetHosts, err = e.resolveTargetHosts(hook.Target)
+				if err != nil {
+					return err
+				}
+			}
+			for _, host := range targetHosts {
+				if err := e.runHookOnHost(host, component, hook); err != nil {
+					return err
+				}
+			}
+		default:
+			targetHosts, err := e.resolveTargetHosts(hook.Target)
+			if err != nil {
+				return err
+			}
+			for _, host := range targetHosts {
+				if err := e.runHookOnHost(host, component, hook); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
 }
 
 func (e *bundleExecutor) runHooks(component hydrate.RenderedComponent, hooks []hydrate.RenderedStep) error {
-	for _, hook := range hooks {
-		if err := e.runHook(component, hook); err != nil {
-			return err
-		}
-	}
-	return nil
+	return e.runHooksForHosts(component, hooks, nil)
 }
 
 func (e *bundleExecutor) applyManifestSteps(steps []hydrate.RenderedStep) error {
@@ -700,7 +865,7 @@ func (e *bundleExecutor) applyManifestSteps(steps []hydrate.RenderedStep) error 
 	if err := e.waitForAPI(e.waitTimeout); err != nil {
 		return err
 	}
-	if err := e.ensureSingleNodeClusterPrepared(); err != nil {
+	if err := e.ensureClusterPrepared(); err != nil {
 		return err
 	}
 	for _, step := range steps {
@@ -711,12 +876,15 @@ func (e *bundleExecutor) applyManifestSteps(steps []hydrate.RenderedStep) error 
 	return nil
 }
 
-func (e *bundleExecutor) applyRootfs(step hydrate.RenderedStep) error {
+func (e *bundleExecutor) applyRootfsToHost(host string, step hydrate.RenderedStep) error {
+	if !isLocalExecutionHost(host) {
+		return e.applyRemoteRootfs(host, step)
+	}
 	if _, ok := trimStepPrefix(step.SourcePath, "rootfs"); !ok {
 		return fmt.Errorf("rootfs step %q path %q must stay under rootfs/", step.Name, step.SourcePath)
 	}
 
-	src, err := e.resolveBundleStepPath(step)
+	src, err := e.resolveBundleStepPathForHost(host, step)
 	if err != nil {
 		return err
 	}
@@ -759,13 +927,16 @@ func (e *bundleExecutor) applyRootfs(step hydrate.RenderedStep) error {
 	})
 }
 
-func (e *bundleExecutor) applyFile(step hydrate.RenderedStep) error {
+func (e *bundleExecutor) applyFileToHost(host string, step hydrate.RenderedStep) error {
+	if !isLocalExecutionHost(host) {
+		return e.applyRemoteFile(host, step)
+	}
 	hostRel, ok := trimStepPrefix(step.SourcePath, "files/")
 	if !ok {
 		return fmt.Errorf("file step %q path %q must stay under files/", step.Name, step.SourcePath)
 	}
 
-	src, err := e.resolveBundleStepPath(step)
+	src, err := e.resolveBundleStepPathForHost(host, step)
 	if err != nil {
 		return err
 	}
@@ -788,7 +959,7 @@ func (e *bundleExecutor) applyFile(step hydrate.RenderedStep) error {
 }
 
 func (e *bundleExecutor) applyManifest(step hydrate.RenderedStep) error {
-	stepPath, err := e.resolveBundleStepPath(step)
+	stepPath, err := e.resolveBundleStepPathForHost(localExecutionHost, step)
 	if err != nil {
 		return err
 	}
@@ -796,8 +967,8 @@ func (e *bundleExecutor) applyManifest(step hydrate.RenderedStep) error {
 	return e.runCommand(step.TimeoutSeconds, nil, "kubectl", "--kubeconfig", e.kubeconfigPath, "apply", "-f", stepPath)
 }
 
-func (e *bundleExecutor) runHook(component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
-	hookPath, err := e.resolveBundleStepPath(step)
+func (e *bundleExecutor) runLocalHook(component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
+	hookPath, err := e.resolveBundleStepPathForHost(localExecutionHost, step)
 	if err != nil {
 		return err
 	}
@@ -814,25 +985,46 @@ func (e *bundleExecutor) runHook(component hydrate.RenderedComponent, step hydra
 		}
 	}
 
-	componentRoot, err := e.resolveBundlePath(component.RootPath)
+	componentRoot, err := e.resolveComponentRootForHost(localExecutionHost, component)
 	if err != nil {
 		return err
 	}
 
-	env := []string{
-		"COMPONENT_ROOT=" + componentRoot,
-		"BUNDLE_DIR=" + e.bundlePath,
-		"CLUSTER_NAME=" + e.clusterName,
-		"KUBECONFIG=" + e.kubeconfigPath,
-		"HOST_ROOT=" + e.hostRoot,
-	}
-
+	env := e.hookEnvironment(localExecutionHost, componentRoot, e.bundlePath)
 	e.logf("running hook %q for component %q", step.Name, component.Name)
 	args := append([]string{hookPath}, step.Args...)
 	return e.runCommand(step.TimeoutSeconds, env, args[0], args[1:]...)
 }
 
-func (e *bundleExecutor) stopServiceIfActive(service string) error {
+func (e *bundleExecutor) runHookOnHost(host string, component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
+	if isLocalExecutionHost(host) {
+		return e.runLocalHook(component, step)
+	}
+
+	hookPath, err := e.resolveBundleStepPathForHost(host, step)
+	if err != nil {
+		return err
+	}
+	componentRoot, err := e.resolveComponentRootForHost(host, component)
+	if err != nil {
+		return err
+	}
+
+	env := e.hookEnvironment(host, componentRoot, e.remoteBundleRoot(host))
+	e.logf("running hook %q for component %q on host %q", step.Name, component.Name, host)
+	args := append([]string{hookPath}, step.Args...)
+	return e.runCommandOnHost(host, step.TimeoutSeconds, env, args[0], args[1:]...)
+}
+
+func (e *bundleExecutor) stopServiceIfActiveOnHost(host, service string) error {
+	if !isLocalExecutionHost(host) {
+		if err := e.runShellOnHost(host, 0, nil, "systemctl is-active --quiet "+shellQuote(service)); err != nil {
+			return nil
+		}
+		e.logf("stopping service %q on host %q before updating host binaries", service, host)
+		return e.runCommandOnHost(host, 0, nil, "systemctl", "stop", service)
+	}
+
 	systemctlPath, err := exec.LookPath("systemctl")
 	if err != nil {
 		return nil
@@ -849,7 +1041,12 @@ func (e *bundleExecutor) stopServiceIfActive(service string) error {
 	return e.runCommand(0, nil, systemctlPath, "stop", service)
 }
 
-func (e *bundleExecutor) runIfPresent(name string, args ...string) error {
+func (e *bundleExecutor) runIfPresentOnHost(host, name string, args ...string) error {
+	if !isLocalExecutionHost(host) {
+		e.logf("running %s %s on host %q", name, strings.Join(args, " "), host)
+		return e.runShellOnHost(host, 0, nil, "command -v "+shellQuote(name)+" >/dev/null 2>&1 || exit 0\n"+shellCommand(name, args...))
+	}
+
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return nil
@@ -887,7 +1084,7 @@ func (e *bundleExecutor) waitForAPI(timeout time.Duration) error {
 	}
 }
 
-func (e *bundleExecutor) ensureSingleNodeClusterPrepared() error {
+func (e *bundleExecutor) ensureClusterPrepared() error {
 	if e.untaintAttempted {
 		return nil
 	}
@@ -899,7 +1096,7 @@ func (e *bundleExecutor) ensureSingleNodeClusterPrepared() error {
 	}
 	nodes := strings.Fields(strings.TrimSpace(output))
 	if len(nodes) != 1 {
-		return fmt.Errorf("sync apply only supports single-node clusters, found %d nodes", len(nodes))
+		return nil
 	}
 
 	node := nodes[0]
@@ -913,12 +1110,102 @@ func (e *bundleExecutor) ensureSingleNodeClusterPrepared() error {
 	return nil
 }
 
-func (e *bundleExecutor) resolveBundleStepPath(step hydrate.RenderedStep) (string, error) {
-	return e.resolveBundlePath(step.BundlePath)
+func (e *bundleExecutor) resolveBundleStepPathForHost(host string, step hydrate.RenderedStep) (string, error) {
+	if hostScoped, ok, err := e.resolveHostScopedInputStepPath(host, step); err != nil {
+		return "", err
+	} else if ok {
+		return hostScoped, nil
+	}
+	bundleRoot, err := e.bundleRootForHost(host)
+	if err != nil {
+		return "", err
+	}
+	return resolveBundleRelativePath(bundleRoot, step.BundlePath)
+}
+
+func (e *bundleExecutor) resolveComponentRootForHost(host string, component hydrate.RenderedComponent) (string, error) {
+	bundleRoot, err := e.bundleRootForHost(host)
+	if err != nil {
+		return "", err
+	}
+	return resolveBundleRelativePath(bundleRoot, component.RootPath)
 }
 
 func (e *bundleExecutor) resolveBundlePath(bundleRel string) (string, error) {
 	return resolveBundleRelativePath(e.bundlePath, bundleRel)
+}
+
+func (e *bundleExecutor) resolveHostScopedInputStepPath(host string, step hydrate.RenderedStep) (string, bool, error) {
+	if e.bundle == nil || step.Kind != hydrate.StepContent || step.ContentType != packageformat.ContentFile {
+		return "", false, nil
+	}
+	if _, ok := trimStepPrefix(step.SourcePath, "files/"); !ok {
+		return "", false, nil
+	}
+
+	for _, component := range e.bundle.Spec.Components {
+		if !componentHasRenderedStep(component, step) {
+			continue
+		}
+		inputName, ok := localInputNameForSourcePath(component, step.SourcePath)
+		if !ok {
+			return "", false, nil
+		}
+		hostBindings, ok := component.HostInputBindings[inputName]
+		if !ok || len(hostBindings) == 0 {
+			return "", false, nil
+		}
+		normalizedHost := normalizeExecutionHost(host)
+		bundleRel, ok := hostBindings[normalizedHost]
+		if !ok {
+			return "", false, nil
+		}
+		bundleRoot, err := e.bundleRootForHost(host)
+		if err != nil {
+			return "", false, err
+		}
+		resolved, err := resolveBundleRelativePath(bundleRoot, bundleRel)
+		if err != nil {
+			return "", false, err
+		}
+		return resolved, true, nil
+	}
+	return "", false, nil
+}
+
+func componentHasRenderedStep(component hydrate.RenderedComponent, step hydrate.RenderedStep) bool {
+	for _, renderedStep := range component.Steps {
+		if renderedStep.Name == step.Name &&
+			renderedStep.Kind == step.Kind &&
+			renderedStep.BundlePath == step.BundlePath &&
+			renderedStep.SourcePath == step.SourcePath {
+			return true
+		}
+	}
+	return false
+}
+
+func localInputNameForSourcePath(component hydrate.RenderedComponent, sourcePath string) (string, bool) {
+	for _, input := range component.Inputs {
+		if input.Path == sourcePath {
+			return input.Name, true
+		}
+	}
+	return "", false
+}
+
+func normalizeExecutionHost(host string) string {
+	trimmed := strings.TrimSpace(host)
+	if trimmed == "" {
+		return ""
+	}
+	if normalized := iputils.GetHostIP(trimmed); normalized != "" {
+		return normalized
+	}
+	if base, _, found := strings.Cut(trimmed, ":"); found {
+		trimmed = strings.TrimSpace(base)
+	}
+	return trimmed
 }
 
 func resolveBundleRelativePath(bundleRoot, bundleRel string) (string, error) {
@@ -961,6 +1248,37 @@ func (e *bundleExecutor) runCommand(timeoutSeconds int32, extraEnv []string, nam
 	return nil
 }
 
+func (e *bundleExecutor) runCommandOnHost(host string, timeoutSeconds int32, extraEnv []string, name string, args ...string) error {
+	if isLocalExecutionHost(host) {
+		return e.runCommand(timeoutSeconds, extraEnv, name, args...)
+	}
+	return e.runShellOnHost(host, timeoutSeconds, extraEnv, shellCommand(name, args...))
+}
+
+func (e *bundleExecutor) runShellOnHost(host string, timeoutSeconds int32, extraEnv []string, command string) error {
+	if isLocalExecutionHost(host) {
+		return e.runCommand(timeoutSeconds, extraEnv, "/bin/bash", "-lc", command)
+	}
+	if e.remoteExec == nil {
+		return fmt.Errorf("remote execution client is not configured for host %q", host)
+	}
+
+	ctx := context.Background()
+	if timeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		defer cancel()
+	}
+
+	if err := e.remoteExec.CmdAsyncWithContext(ctx, host, wrapShellCommand(command, extraEnv)); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("command on host %q timed out: %w", host, ctx.Err())
+		}
+		return fmt.Errorf("run on host %q: %w", host, err)
+	}
+	return nil
+}
+
 func (e *bundleExecutor) outputCommand(timeoutSeconds int32, extraEnv []string, name string, args ...string) (string, error) {
 	ctx := context.Background()
 	if timeoutSeconds > 0 {
@@ -982,6 +1300,108 @@ func (e *bundleExecutor) outputCommand(timeoutSeconds int32, extraEnv []string, 
 	return string(output), nil
 }
 
+func (e *bundleExecutor) resolveTargetHosts(target packageformat.ExecutionTarget) ([]string, error) {
+	if e.topology == nil {
+		return fallbackLocalExecutionTopology(e.clusterName).resolveHostTarget(target)
+	}
+	return e.topology.resolveHostTarget(target)
+}
+
+func (e *bundleExecutor) nodeExecutionHosts() []string {
+	if e.topology == nil {
+		return []string{localExecutionHost}
+	}
+	return e.topology.nodeExecutionHosts()
+}
+
+func (e *bundleExecutor) hookEnvironment(host, componentRoot, bundleRoot string) []string {
+	env := []string{
+		"COMPONENT_ROOT=" + componentRoot,
+		"BUNDLE_DIR=" + bundleRoot,
+		"CLUSTER_NAME=" + e.clusterName,
+		"KUBECONFIG=" + e.kubeconfigPath,
+		"HOST_ROOT=" + e.hostRoot,
+	}
+	if strings.TrimSpace(host) != "" {
+		env = append(env,
+			"TARGET_HOST="+host,
+			"TARGET_HOST_IP="+iputils.GetHostIP(host),
+		)
+		if e.topology != nil {
+			env = append(env,
+				"TARGET_IS_FIRST_MASTER="+strconv.FormatBool(e.topology.isFirstMaster(host)),
+				"TARGET_NODE_ROLES="+strings.Join(e.topology.rolesForHost(host), ","),
+			)
+		}
+	}
+	return env
+}
+
+func (e *bundleExecutor) bundleRootForHost(host string) (string, error) {
+	if isLocalExecutionHost(host) {
+		return e.bundlePath, nil
+	}
+	if root, ok := e.stagedBundleRoots[host]; ok {
+		return root, nil
+	}
+	if e.remoteExec == nil {
+		return "", fmt.Errorf("remote execution client is not configured for host %q", host)
+	}
+
+	remoteRoot := e.remoteBundleRoot(host)
+	e.logf("staging bundle for host %q at %q", host, remoteRoot)
+	if err := e.remoteExec.Copy(host, e.bundlePath, remoteRoot); err != nil {
+		return "", fmt.Errorf("stage bundle on host %q: %w", host, err)
+	}
+	e.stagedBundleRoots[host] = remoteRoot
+	return remoteRoot, nil
+}
+
+func (e *bundleExecutor) remoteBundleRoot(host string) string {
+	if root, ok := e.stagedBundleRoots[host]; ok && root != "" {
+		return root
+	}
+	stageID := strings.ReplaceAll(e.desiredStateDigest, ":", "-")
+	if strings.TrimSpace(stageID) == "" {
+		stageID = "current"
+	}
+	return filepath.Join(BundleStorePath(e.clusterName), "staged", stageID)
+}
+
+func (e *bundleExecutor) applyRemoteRootfs(host string, step hydrate.RenderedStep) error {
+	if _, ok := trimStepPrefix(step.SourcePath, "rootfs"); !ok {
+		return fmt.Errorf("rootfs step %q path %q must stay under rootfs/", step.Name, step.SourcePath)
+	}
+	src, err := e.resolveBundleStepPathForHost(host, step)
+	if err != nil {
+		return err
+	}
+	script := fmt.Sprintf(
+		"src=%s\ndst=%s\nmkdir -p \"$dst\"\ncd \"$src\"\nfind . -mindepth 1 | while IFS= read -r rel; do\n  rel=${rel#./}\n  from=\"$src/$rel\"\n  to=\"$dst/$rel\"\n  if [ -d \"$from\" ] && [ ! -L \"$from\" ]; then\n    mkdir -p \"$to\"\n    continue\n  fi\n  mkdir -p \"$(dirname \"$to\")\"\n  if [ -L \"$from\" ]; then\n    link_target=\"$(readlink \"$from\")\"\n    if [ -L \"$to\" ] && [ \"$(readlink \"$to\")\" = \"$link_target\" ]; then\n      continue\n    fi\n    rm -rf \"$to\"\n    ln -s \"$link_target\" \"$to\"\n    continue\n  fi\n  if [ -f \"$from\" ]; then\n    if [ -f \"$to\" ] && cmp -s \"$from\" \"$to\"; then\n      continue\n    fi\n    cp -a \"$from\" \"$to\"\n    continue\n  fi\n  echo \"unsupported rootfs entry type: $from\" >&2\n  exit 1\ndone\n",
+		shellQuote(src),
+		shellQuote(e.hostRoot),
+	)
+	return e.runShellOnHost(host, step.TimeoutSeconds, nil, script)
+}
+
+func (e *bundleExecutor) applyRemoteFile(host string, step hydrate.RenderedStep) error {
+	hostRel, ok := trimStepPrefix(step.SourcePath, "files/")
+	if !ok {
+		return fmt.Errorf("file step %q path %q must stay under files/", step.Name, step.SourcePath)
+	}
+	src, err := e.resolveBundleStepPathForHost(host, step)
+	if err != nil {
+		return err
+	}
+	dst := filepath.Join(e.hostRoot, filepath.FromSlash(hostRel))
+	script := fmt.Sprintf(
+		"src=%s\ndst=%s\nif [ -L \"$src\" ] || [ -f \"$src\" ]; then\n  mkdir -p \"$(dirname \"$dst\")\"\n  cp -a \"$src\" \"$dst\"\nelif [ -d \"$src\" ]; then\n  mkdir -p \"$dst\"\n  cp -a \"$src\"/. \"$dst\"/\nelse\n  echo \"unsupported file payload type: $src\" >&2\n  exit 1\nfi\n",
+		shellQuote(src),
+		shellQuote(dst),
+	)
+	return e.runShellOnHost(host, step.TimeoutSeconds, nil, script)
+}
+
 func (e *bundleExecutor) logf(format string, args ...interface{}) {
 	fmt.Fprintf(e.stderr, "==> "+format+"\n", args...)
 }
@@ -998,6 +1418,39 @@ func trimStepPrefix(path, prefix string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func shellCommand(name string, args ...string) string {
+	quoted := make([]string, 0, 1+len(args))
+	quoted = append(quoted, shellQuote(name))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func wrapShellCommand(command string, extraEnv []string) string {
+	if len(extraEnv) == 0 {
+		return command
+	}
+	var builder strings.Builder
+	for _, env := range extraEnv {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		builder.WriteString("export ")
+		builder.WriteString(parts[0])
+		builder.WriteString("=")
+		builder.WriteString(shellQuote(parts[1]))
+		builder.WriteString("\n")
+	}
+	builder.WriteString(command)
+	return builder.String()
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func copyDir(src, dst string) error {

@@ -1,0 +1,64 @@
+oldPolicyPath: /path/to/old-local-patch-policy.yaml
+newPolicyPath: /path/to/new-local-patch-policy.yaml
+localRepo: docs/examples/sync-drift-minimal/local-repo
+approvalFile: docs/examples/sync-drift-minimal/local-repo/policy/local-patch-policy-approval.approved-example.yaml
+gate:
+  passed: true
+  config:
+    failOnWidening: true
+    failOnIncompatiblePatches: true
+    approvalExpiryWarningDays: 30
+    failOnApprovalExpiresSoon: true
+  approvalSummary:
+    approvalProvided: true
+    approvalApplied: true
+    owner: platform-sre
+    approvedBy: reviewer@example.com
+    changeRef: OPS-1234
+    expiresAt: "2099-12-31T00:00:00Z"
+    followUpAction: removeApprovalAfterChangeRefResolved
+    approvedViolationCodes:
+      - incompatiblePatches
+      - wideningChange
+  approvedViolations:
+    - code: wideningChange
+      message: candidate LocalPatchPolicy widens cluster-local override surface
+      reason: allow a narrow ConfigMap annotation expansion during this migration window
+      count: 1
+      impact:
+        addedAllowedPrefixes:
+          - kind: ConfigMap
+            path: metadata.annotations
+    - code: incompatiblePatches
+      message: candidate LocalPatchPolicy would reject existing local patches
+      reason: migrate the legacy grafana image patch in the same rollout
+      count: 1
+      impact:
+        incompatiblePatches:
+          - component: grafana
+            relativePath: grafana-image.patch.yaml
+  warnings:
+    - widening change was explicitly approved: allow a narrow ConfigMap annotation expansion during this migration window
+    - incompatible existing patches were explicitly approved: migrate the legacy grafana image patch in the same rollout
+    - approval file was used to pass the gate; remove it after changeRef "OPS-1234" is resolved
+report:
+  old:
+    name: custom-local-patch-policy
+    scope: clusterLocal
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  new:
+    name: custom-local-patch-policy
+    scope: clusterLocal
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  hasWideningChanges: true
+  hasNarrowingChanges: false
+  impact:
+    addedAllowedPrefixes:
+      - kind: ConfigMap
+        path: metadata.annotations
+  compatibility:
+    validPatchCount: 1
+    invalidPatches:
+      - component: grafana
+        relativePath: grafana-image.patch.yaml
+        reason: patch path "spec.template.spec.containers[name=grafana].image" is outside the allowed cluster-local surface

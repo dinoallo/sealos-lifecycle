@@ -1,0 +1,196 @@
+clusterName: demo
+bomName: minimal-single-node
+revision: rev-poc-001
+channel: alpha
+bundlePath: docs/examples/sync-drift-minimal/bundle
+appliedRevisionPath: /path/to/runtime-root/demo/distribution/applied-revision.yaml
+localPatchPolicy:
+  source: localRepo
+  scope: clusterLocal
+  name: custom-local-patch-policy
+  path: policy/local-patch-policy.yaml
+  digest: sha256:0a8dd714794d507db7ef8f9c7369965692acf8b46c756be7c9beeb22fed875c2
+currentState: Orphan
+headline: state=Orphan; dirtyObjects=1; orphanObjects=1; dirtyHostPaths=1; orphanHostPaths=1; directCommitEligible=2; directRevertEligible=2; bundleMatchRequired=2; policyEligibleOrphanObjects=1
+operatorActionSummary:
+  directCommitEligible: 2
+  directRevertEligible: 2
+  bundleMatchRequired: 2
+observationPersisted: true
+persistedObservedSummary:
+  lastObservedTime: "2026-05-09T12:05:00Z"
+  total: 5
+  present: 5
+  missing: 0
+  matched: 1
+  drifted: 4
+  clean: 1
+  dirty: 2
+  orphan: 2
+  mixedOwnershipObject: 1
+  directCommitEligible: 2
+  directRevertEligible: 2
+  bundleMatchRequired: 2
+recordedRevision:
+  desiredStateDigest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  localRepoRevision: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  localPatchRevision: patch-rev-1
+  state: Orphan
+  observedSummary:
+    lastObservedTime: "2026-05-09T12:05:00Z"
+    total: 5
+    present: 5
+    missing: 0
+    matched: 1
+    drifted: 4
+    clean: 1
+    dirty: 2
+    orphan: 2
+    mixedOwnershipObject: 1
+    directCommitEligible: 2
+    directRevertEligible: 2
+    bundleMatchRequired: 2
+  lastAppliedTime: "2026-05-09T12:00:00Z"
+policyEligibleOrphanObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: kube-system
+    name: cilium-config
+    operatorAction: promoteToLocalPatch
+    operatorActionMetadata:
+      allowsDirectCommit: false
+      allowsDirectRevert: false
+      requiresBundleMatch: false
+    paths:
+      - data.enable-hubble
+    remediation:
+      action: reviewDistributionBaselineForAppliedObject
+      changeOwner: globalBaseline
+      policyName: custom-local-patch-policy
+      policyEligiblePaths:
+        - data.enable-hubble
+currentCompare:
+  summary:
+    total: 5
+    present: 5
+    missing: 0
+    matched: 1
+    drifted: 4
+    clean: 1
+    dirty: 2
+    orphan: 2
+  objects:
+    - tracked:
+        apiVersion: v1
+        kind: ConfigMap
+        namespace: default
+        name: grafana-settings
+      presence: present
+      comparison: drifted
+      state: Dirty
+      mismatches:
+        - path: data.adminUser
+          reason: valueMismatch
+          ownership: local
+          state: Dirty
+          policyName: custom-local-patch-policy
+          policyEligible: true
+      remediation:
+        action: reviewLocalObjectOverlayAndCommitOrReapply
+        changeOwner: localOverlay
+        allowedCommands:
+          - sync diff
+          - sync status
+          - sync commit
+          - sync revert
+        commandGuidance:
+          - command: sync commit
+            preconditions:
+              - bundleMatchesRecordedDesiredStateDigest
+            availability: available
+          - command: sync revert
+            preconditions:
+              - bundleMatchesRecordedDesiredStateDigest
+            availability: available
+    - tracked:
+        apiVersion: v1
+        kind: ConfigMap
+        namespace: kube-system
+        name: cilium-config
+      presence: present
+      comparison: drifted
+      state: Orphan
+      mismatches:
+        - path: data.enable-hubble
+          reason: valueMismatch
+          ownership: global
+          state: Orphan
+          policyName: custom-local-patch-policy
+          policyEligible: true
+      remediation:
+        action: reviewDistributionBaselineForAppliedObject
+        changeOwner: globalBaseline
+        policyName: custom-local-patch-policy
+        policyEligiblePaths:
+          - data.enable-hubble
+        allowedCommands:
+          - sync diff
+          - sync status
+          - sync render
+          - sync package build
+  hostPaths:
+    - tracked:
+        hostPath: /etc/kubernetes/kubeadm.yaml
+        component: kubernetes
+        source: localInput
+        ownership: local
+        type: regularFile
+        projectionClass: direct
+        inputName: kubeadm-cluster-config
+      presence: present
+      comparison: drifted
+      state: Dirty
+      mismatches:
+        - reason: contentMismatch
+      remediation:
+        action: reviewLocalHostInputAndCommitOrReapply
+        changeOwner: localInput
+        allowedCommands:
+          - sync diff
+          - sync status
+          - sync commit
+          - sync revert
+        commandGuidance:
+          - command: sync commit
+            preconditions:
+              - bundleMatchesRecordedDesiredStateDigest
+            availability: available
+          - command: sync revert
+            preconditions:
+              - bundleMatchesRecordedDesiredStateDigest
+            availability: available
+    - tracked:
+        hostPath: /etc/kubernetes/manifests/kube-apiserver.yaml
+        component: kubernetes
+        source: generatedHook
+        ownership: global
+        type: regularFile
+        projectionClass: generated
+      presence: present
+      comparison: drifted
+      state: Orphan
+      mismatches:
+        - reason: semanticMismatch
+      remediation:
+        action: reviewDistributionBaselineForGeneratedProjection
+        changeOwner: globalBaseline
+        allowedCommands:
+          - sync diff
+          - sync status
+          - sync render
+          - sync apply
+        commandGuidance:
+          - command: sync apply
+            preconditions:
+              - bundleMatchesRecordedDesiredStateDigest
+            availability: available

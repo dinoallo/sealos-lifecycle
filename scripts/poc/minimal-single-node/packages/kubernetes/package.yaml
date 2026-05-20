@@ -46,9 +46,9 @@ spec:
   hooks:
     - name: preflight
       phase: bootstrap
-      target: firstMaster
+      target: allNodes
       path: hooks/preflight.sh
-      timeoutSeconds: 120
+      timeoutSeconds: 240
     - name: bootstrap
       phase: bootstrap
       target: allNodes

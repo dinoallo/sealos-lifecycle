@@ -1,0 +1,57 @@
+name: E2E Sync Drift Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      go_version:
+        description: "Go version used to build and run the smoke"
+        required: false
+        default: "1.25"
+        type: string
+      timeout_minutes:
+        description: "Job timeout in minutes"
+        required: false
+        default: 20
+        type: number
+      upload_debug_artifacts:
+        description: "Upload preserved smoke temp directories when the job fails"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/e2e_sync_drift_smoke.yml"
+      - ".github/workflows/e2e_sync_drift_smoke_reusable.yml"
+      - "cmd/sealos/cmd/**"
+      - "pkg/distribution/**"
+      - "pkg/constants/pathresolver.go"
+      - "test/e2e/sync_drift_smoke*.go"
+      - "test/e2e/testhelper/fakekubectl/**"
+      - "docs/examples/sync-drift-minimal/**"
+  pull_request:
+    branches: ["*"]
+    paths:
+      - ".github/workflows/e2e_sync_drift_smoke.yml"
+      - ".github/workflows/e2e_sync_drift_smoke_reusable.yml"
+      - "cmd/sealos/cmd/**"
+      - "pkg/distribution/**"
+      - "pkg/constants/pathresolver.go"
+      - "test/e2e/sync_drift_smoke*.go"
+      - "test/e2e/testhelper/fakekubectl/**"
+      - "docs/examples/sync-drift-minimal/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-sync-drift-smoke-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  call-sync-drift-smoke:
+    uses: ./.github/workflows/e2e_sync_drift_smoke_reusable.yml
+    with:
+      go_version: ${{ inputs.go_version || '1.25' }}
+      timeout_minutes: ${{ inputs.timeout_minutes || 20 }}
+      upload_debug_artifacts: ${{ inputs.upload_debug_artifacts || false }}

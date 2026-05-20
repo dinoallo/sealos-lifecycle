@@ -1,0 +1,120 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: HydratedBundle
+metadata:
+  name: minimal-sync-drift
+  labels:
+    distribution.sealos.io/bom-name: minimal-single-node
+    distribution.sealos.io/revision: rev-poc-001
+    distribution.sealos.io/channel: alpha
+spec:
+  bomName: minimal-single-node
+  revision: rev-poc-001
+  channel: alpha
+  localPatchPolicySource: localRepo
+  localPatchPolicyScope: clusterLocal
+  localPatchPolicyName: custom-local-patch-policy
+  localPatchPolicyPath: policy/local-patch-policy.yaml
+  localPatchPolicyDigest: sha256:0a8dd714794d507db7ef8f9c7369965692acf8b46c756be7c9beeb22fed875c2
+  localResources:
+    - local-resources/secrets/grafana-admin-credentials.yaml
+  trackedK8sObjects:
+    - apiVersion: v1
+      kind: Secret
+      namespace: default
+      name: grafana-admin-credentials
+      path: local-resources/secrets/grafana-admin-credentials.yaml
+      source: localResource
+      ownership: local
+    - apiVersion: v1
+      kind: ConfigMap
+      namespace: default
+      name: grafana-settings
+      path: components/grafana/files/manifests/grafana-settings.yaml
+      component: grafana
+      source: packageManifest
+      ownership: global
+    - apiVersion: v1
+      kind: ConfigMap
+      namespace: default
+      name: grafana-settings
+      path: components/grafana/local-patches/grafana-settings.patch.yaml
+      component: grafana
+      source: localPatch
+      ownership: local
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      namespace: kube-system
+      name: cilium
+      path: components/cilium/files/manifests/cilium.yaml
+      component: cilium
+      source: packageManifest
+      ownership: global
+  trackedHostPaths:
+    - hostPath: /usr/bin/kubelet
+      bundlePath: components/kubernetes/files/rootfs/usr/bin/kubelet
+      component: kubernetes
+      source: packageManifest
+      ownership: global
+      type: regularFile
+    - hostPath: /etc/kubernetes/kubeadm.yaml
+      bundlePath: components/kubernetes/files/files/etc/kubernetes/kubeadm.yaml
+      component: kubernetes
+      source: localInput
+      ownership: local
+      type: regularFile
+      inputName: kubeadm-cluster-config
+  components:
+    - name: kubernetes
+      packageName: kubernetes-rootfs
+      version: v1.30.3
+      class: rootfs
+      artifact: registry.example.io/sealos/kubernetes-rootfs:v1.30.3
+      inputs:
+        - name: kubeadm-cluster-config
+          type: configFile
+          path: files/etc/kubernetes/kubeadm.yaml
+          format: yaml
+          required: true
+      inputBindings:
+        kubeadm-cluster-config: /ABSOLUTE/PATH/TO/local-repo/inputs/kubernetes/kubeadm-cluster-config.yaml
+      manifestPath: components/kubernetes/package.yaml
+      rootPath: components/kubernetes/files
+      steps:
+        - name: kubelet-binary
+          kind: content
+          bundlePath: components/kubernetes/files/rootfs/usr/bin/kubelet
+          sourcePath: rootfs/usr/bin/kubelet
+          contentType: rootfs
+        - name: kubeadm-cluster-config
+          kind: content
+          bundlePath: components/kubernetes/files/files/etc/kubernetes/kubeadm.yaml
+          sourcePath: files/etc/kubernetes/kubeadm.yaml
+          contentType: file
+    - name: grafana
+      packageName: grafana
+      version: v10.4.0
+      class: application
+      artifact: registry.example.io/sealos/grafana:v10.4.0
+      localPatches:
+        - components/grafana/local-patches/grafana-settings.patch.yaml
+      manifestPath: components/grafana/package.yaml
+      rootPath: components/grafana/files
+      steps:
+        - name: grafana-settings
+          kind: content
+          bundlePath: components/grafana/files/manifests/grafana-settings.yaml
+          sourcePath: manifests/grafana-settings.yaml
+          contentType: manifest
+    - name: cilium
+      packageName: cilium-cni
+      version: v1.15.0
+      class: application
+      artifact: registry.example.io/sealos/cilium-cni:v1.15.0
+      manifestPath: components/cilium/package.yaml
+      rootPath: components/cilium/files
+      steps:
+        - name: cilium-manifest
+          kind: content
+          bundlePath: components/cilium/files/manifests/cilium.yaml
+          sourcePath: manifests/cilium.yaml
+          contentType: manifest

@@ -1,0 +1,27 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicy
+metadata:
+  name: custom-configmap-policy
+spec:
+  scope: packageBaseline
+  forbiddenExactPaths:
+    - status
+    - spec.selector
+  forbiddenMetadataKeys:
+    - uid
+    - resourceVersion
+    - generation
+    - creationTimestamp
+    - managedFields
+    - ownerReferences
+    - finalizers
+    - generateName
+    - selfLink
+    - deletionTimestamp
+    - deletionGracePeriodSeconds
+  forbiddenContainerFields:
+    - image
+  kindRules:
+    - kind: ConfigMap
+      allowedPrefixes:
+        - data

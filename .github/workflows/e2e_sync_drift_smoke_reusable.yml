@@ -1,0 +1,116 @@
+name: E2E Sync Drift Smoke Reusable
+
+on:
+  workflow_call:
+    inputs:
+      go_version:
+        required: false
+        type: string
+        default: "1.25"
+      timeout_minutes:
+        required: false
+        type: number
+        default: 20
+      upload_debug_artifacts:
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync-drift-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    env:
+      GO_VERSION: ${{ inputs.go_version }}
+      SYNC_DRIFT_ARTIFACT_NAME: sync-drift-smoke-debug-${{ github.run_id }}
+      SEALOS_E2E_SYNC_SMOKE: "true"
+      SEALOS_E2E_SYNC_SMOKE_KEEP_TMP: ${{ inputs.upload_debug_artifacts && 'true' || 'false' }}
+      SEALOS_E2E_TEST_SEALOS_BIN_PATH: ${{ github.workspace }}/bin/linux_amd64/sealos
+      SYNC_DRIFT_SMOKE_INPUT_GO_VERSION: ${{ inputs.go_version }}
+      SYNC_DRIFT_SMOKE_INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+      SYNC_DRIFT_SMOKE_INPUT_UPLOAD_DEBUG_ARTIFACTS: ${{ inputs.upload_debug_artifacts && 'true' || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Golang with cache
+        uses: magnetikonline/action-golang-cache@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install build dependencies
+        run: sudo apt update && sudo apt install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
+
+      - name: Build sealos
+        run: make build BINS=sealos
+
+      - name: Verify fake kubectl helper
+        run: go test ./test/e2e/testhelper/fakekubectl
+
+      - name: Run sync drift smoke
+        working-directory: test/e2e
+        env:
+          SEALOS_E2E_SYNC_SMOKE_ARTIFACT_DIR: ${{ inputs.upload_debug_artifacts && format('{0}/sync-drift-artifacts', runner.temp) || '' }}
+        run: go test . -run TestSealosTest -count=1 -args --ginkgo.focus=E2E_sealos_sync_drift_smoke_test
+
+      - name: Upload sync drift debug artifacts
+        id: upload_debug_artifacts_step
+        if: ${{ failure() && inputs.upload_debug_artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SYNC_DRIFT_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/sync-drift-artifacts
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Write sync drift job summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+          UPLOAD_DEBUG_ARTIFACTS: ${{ inputs.upload_debug_artifacts && 'true' || 'false' }}
+          UPLOAD_OUTCOME: ${{ steps.upload_debug_artifacts_step.outcome || 'skipped' }}
+          SEALOS_E2E_SYNC_SMOKE_ARTIFACT_DIR: ${{ inputs.upload_debug_artifacts && format('{0}/sync-drift-artifacts', runner.temp) || '' }}
+        run: |
+          {
+            echo "## Sync drift smoke"
+            echo
+            echo "- Result: \`${JOB_STATUS}\`"
+            echo "- Go version: \`${GO_VERSION}\`"
+            echo "- Timeout: \`${{ inputs.timeout_minutes }}\` minutes"
+            echo "- upload_debug_artifacts: \`${UPLOAD_DEBUG_ARTIFACTS}\`"
+            echo
+
+            if [[ "${JOB_STATUS}" == "success" ]]; then
+              echo "Smoke completed successfully."
+              exit 0
+            fi
+
+            if [[ "${UPLOAD_DEBUG_ARTIFACTS}" != "true" ]]; then
+              echo "Debug artifacts were not preserved for this run."
+              echo "See the test log output for the failure summary printed by the smoke spec."
+              exit 0
+            fi
+
+            echo "### Debug artifact"
+            echo "- Upload step outcome: \`${UPLOAD_OUTCOME}\`"
+            echo "- Artifact name: \`${SYNC_DRIFT_ARTIFACT_NAME}\`"
+            echo "- Artifact root on runner: \`${SEALOS_E2E_SYNC_SMOKE_ARTIFACT_DIR}\`"
+            echo
+
+            summary_file="$(find "${SEALOS_E2E_SYNC_SMOKE_ARTIFACT_DIR}" -name failure-summary.yaml -print -quit 2>/dev/null || true)"
+            if [[ -z "${summary_file}" ]]; then
+              echo "No preserved \`failure-summary.yaml\` was found under the artifact root."
+              echo "See the test log output for additional failure context."
+              exit 0
+            fi
+
+            echo "### failure-summary.yaml"
+            echo
+            echo '```yaml'
+            cat "${summary_file}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

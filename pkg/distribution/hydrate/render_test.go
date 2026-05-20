@@ -87,6 +87,7 @@ func TestRenderPlan(t *testing.T) {
 
 	for _, rel := range []string{
 		"bundle.yaml",
+		"policy/local-patch-policy.yaml",
 		"components/kubernetes/package.yaml",
 		"components/kubernetes/files/rootfs/README",
 		"components/kubernetes/files/manifests/bootstrap.yaml",
@@ -103,6 +104,21 @@ func TestRenderPlan(t *testing.T) {
 	}
 	if got, want := onDisk.Spec.Revision, plan.Revision; got != want {
 		t.Fatalf("bundle revision = %q, want %q", got, want)
+	}
+	if got, want := onDisk.Spec.LocalPatchPolicyName, "defaultLocalPatchPolicy"; got != want {
+		t.Fatalf("bundle localPatchPolicyName = %q, want %q", got, want)
+	}
+	if got, want := string(onDisk.Spec.LocalPatchPolicySource), "builtInDefault"; got != want {
+		t.Fatalf("bundle localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := string(onDisk.Spec.LocalPatchPolicyScope), "clusterLocal"; got != want {
+		t.Fatalf("bundle localPatchPolicyScope = %q, want %q", got, want)
+	}
+	if got, want := onDisk.Spec.LocalPatchPolicyPath, "policy/local-patch-policy.yaml"; got != want {
+		t.Fatalf("bundle localPatchPolicyPath = %q, want %q", got, want)
+	}
+	if got := onDisk.Spec.LocalPatchPolicyDigest; got == "" {
+		t.Fatal("bundle localPatchPolicyDigest = empty, want sha256 digest")
 	}
 }
 
@@ -170,6 +186,7 @@ func TestRenderPlanWithMountedArtifactSourceProvider(t *testing.T) {
 
 	for _, rel := range []string{
 		"bundle.yaml",
+		"policy/local-patch-policy.yaml",
 		"components/kubernetes/package.yaml",
 		"components/kubernetes/files/rootfs/README",
 		"components/kubernetes/files/manifests/bootstrap.yaml",
@@ -197,6 +214,80 @@ func TestRenderPlanMissingSource(t *testing.T) {
 
 	if _, err := RenderPlan(plan, SourceMap{}, t.TempDir()); err == nil {
 		t.Fatal("RenderPlan() error = nil, want error")
+	}
+}
+
+func TestRenderPlanPreservesHostInputBindings(t *testing.T) {
+	t.Parallel()
+
+	localRepoRoot := t.TempDir()
+	defaultInputPath := filepath.Join(localRepoRoot, "inputs", "kubernetes", "kubeadm-config.yaml")
+	hostInputPath := filepath.Join(localRepoRoot, "inputs", "kubernetes", "hosts", "10.0.0.11", "kubeadm-config.yaml")
+	for _, item := range []struct {
+		path    string
+		content string
+	}{
+		{path: defaultInputPath, content: "apiVersion: kubeadm.k8s.io/v1beta4\nkind: InitConfiguration\n"},
+		{path: hostInputPath, content: "apiVersion: kubeadm.k8s.io/v1beta4\nkind: JoinConfiguration\n"},
+	} {
+		if err := os.MkdirAll(filepath.Dir(item.path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(item.path), err)
+		}
+		if err := os.WriteFile(item.path, []byte(item.content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", item.path, err)
+		}
+	}
+
+	plan := &Plan{
+		BOMName:  "default-platform",
+		Revision: "rev-20240423",
+		Channel:  bom.ChannelBeta,
+		Components: []ComponentPlan{
+			{
+				Name:        "kubernetes",
+				PackageName: "kubernetes-rootfs",
+				Version:     "v1.30.3",
+				Class:       packageformat.ClassRootfs,
+				Artifact:    "registry.example.io/sealos/kubernetes-rootfs:v1.30.3@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+				Inputs: []packageformat.Input{
+					{Name: "kubeadm-config", Path: "files/etc/kubeadm-config.yaml"},
+				},
+				InputBindings: map[string]string{
+					"kubeadm-config": defaultInputPath,
+				},
+				HostInputBindings: map[string]map[string]string{
+					"kubeadm-config": {
+						"10.0.0.11": hostInputPath,
+					},
+				},
+				Steps: []Step{
+					{
+						Name:        "kubeadm-config",
+						Kind:        StepContent,
+						Path:        "files/etc/kubeadm-config.yaml",
+						ContentType: packageformat.ContentFile,
+					},
+				},
+			},
+		},
+	}
+
+	root := filepath.Join("..", "packageformat", "testdata", "kubernetes-rootfs")
+	out := t.TempDir()
+	rendered, err := RenderPlan(plan, SourceMap{"kubernetes": root}, out)
+	if err != nil {
+		t.Fatalf("RenderPlan() error = %v", err)
+	}
+
+	component := rendered.Spec.Components[0]
+	if got, want := component.InputBindings["kubeadm-config"], defaultInputPath; got != want {
+		t.Fatalf("component.InputBindings[kubeadm-config] = %q, want %q", got, want)
+	}
+	if got, want := component.HostInputBindings["kubeadm-config"]["10.0.0.11"], "components/kubernetes/host-inputs/10.0.0.11/files/etc/kubeadm-config.yaml"; got != want {
+		t.Fatalf("component.HostInputBindings[kubeadm-config][10.0.0.11] = %q, want %q", got, want)
+	}
+	if !exists(filepath.Join(out, component.HostInputBindings["kubeadm-config"]["10.0.0.11"])) {
+		t.Fatalf("expected rendered host-scoped input %q to exist", component.HostInputBindings["kubeadm-config"]["10.0.0.11"])
 	}
 }
 

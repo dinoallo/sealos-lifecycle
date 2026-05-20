@@ -1,0 +1,12 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: cilium-cni
+spec:
+  component: cilium
+  version: v1.15.0
+  class: application
+  contents:
+    - name: cilium-manifest
+      type: manifest
+      path: manifests/cilium.yaml

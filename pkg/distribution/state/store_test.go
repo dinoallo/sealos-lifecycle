@@ -25,6 +25,7 @@ func TestPersistSuccessfulApply(t *testing.T) {
 		"cluster-a",
 		ref,
 		"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"local-rev-1",
 	)
 	if err != nil {
@@ -58,6 +59,9 @@ func TestPersistSuccessfulApply(t *testing.T) {
 	if got, want := loaded.Spec.LocalPatchRevision, "local-rev-1"; got != want {
 		t.Fatalf("spec.localPatchRevision = %q, want %q", got, want)
 	}
+	if got, want := loaded.Spec.LocalRepoRevision, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; got != want {
+		t.Fatalf("spec.localRepoRevision = %q, want %q", got, want)
+	}
 }
 
 func TestPersistRenderedState(t *testing.T) {
@@ -78,6 +82,7 @@ func TestPersistRenderedState(t *testing.T) {
 		"cluster-a",
 		ref,
 		"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"local-rev-1",
 	)
 	if err != nil {
@@ -115,11 +120,11 @@ func TestPersistRenderedStateKeepsCleanStatusForNoopRender(t *testing.T) {
 	}
 	desiredStateDigest := "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
-	if _, err := PersistSuccessfulApply("cluster-a", ref, desiredStateDigest, "local-rev-1"); err != nil {
+	if _, err := PersistSuccessfulApply("cluster-a", ref, desiredStateDigest, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "local-rev-1"); err != nil {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
 
-	doc, err := PersistRenderedState("cluster-a", ref, desiredStateDigest, "local-rev-2")
+	doc, err := PersistRenderedState("cluster-a", ref, desiredStateDigest, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "local-rev-2")
 	if err != nil {
 		t.Fatalf("PersistRenderedState() error = %v", err)
 	}
@@ -153,11 +158,11 @@ func TestPersistRenderedStatePreservesLastSuccessfulRevision(t *testing.T) {
 	lastSuccessfulDigest := "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	nextDesiredDigest := "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
-	if _, err := PersistSuccessfulApply("cluster-a", ref, lastSuccessfulDigest, "local-rev-1"); err != nil {
+	if _, err := PersistSuccessfulApply("cluster-a", ref, lastSuccessfulDigest, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "local-rev-1"); err != nil {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
 
-	doc, err := PersistRenderedState("cluster-a", ref, nextDesiredDigest, "local-rev-2")
+	doc, err := PersistRenderedState("cluster-a", ref, nextDesiredDigest, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "local-rev-2")
 	if err != nil {
 		t.Fatalf("PersistRenderedState() error = %v", err)
 	}
@@ -196,6 +201,7 @@ func TestMarkSuccessfulApply(t *testing.T) {
 		"cluster-a",
 		ref,
 		"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"local-rev-1",
 	); err != nil {
 		t.Fatalf("PersistRenderedState() error = %v", err)
@@ -234,5 +240,122 @@ func TestLoadAppliedRevisionMissingFile(t *testing.T) {
 
 	if _, err := LoadAppliedRevision("cluster-a"); err == nil {
 		t.Fatal("LoadAppliedRevision() error = nil, want error")
+	}
+}
+
+func TestPersistObservedState(t *testing.T) {
+	previousRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRoot
+	})
+
+	ref := BOMReference{
+		Name:     "default-platform",
+		Revision: "rev-20240423",
+		Channel:  "beta",
+		Digest:   "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+	}
+	desiredStateDigest := "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	if _, err := PersistSuccessfulApply("cluster-a", ref, desiredStateDigest, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "local-rev-1"); err != nil {
+		t.Fatalf("PersistSuccessfulApply() error = %v", err)
+	}
+
+	doc, updated, err := PersistObservedState("cluster-a", desiredStateDigest, StateOrphan, &ObservedSummary{
+		Total:                3,
+		Present:              2,
+		Missing:              1,
+		Matched:              1,
+		Drifted:              1,
+		Clean:                1,
+		Dirty:                1,
+		Orphan:               1,
+		MixedOwnershipObject: 1,
+		DirectCommitEligible: 1,
+		DirectRevertEligible: 2,
+		BundleMatchRequired:  2,
+	}, "global drift detected while diffing tracked objects")
+	if err != nil {
+		t.Fatalf("PersistObservedState() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("PersistObservedState() updated = false, want true")
+	}
+	if got, want := doc.Status.State, StateOrphan; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
+	}
+	if len(doc.Status.Conditions) != 2 {
+		t.Fatalf("len(status.conditions) = %d, want 2", len(doc.Status.Conditions))
+	}
+	var observed *Condition
+	for i := range doc.Status.Conditions {
+		if doc.Status.Conditions[i].Type == ConditionTypeObserved {
+			observed = &doc.Status.Conditions[i]
+			break
+		}
+	}
+	if observed == nil {
+		t.Fatal("observed condition missing")
+	}
+	if got, want := observed.Reason, "GlobalOwnershipDriftDetected"; got != want {
+		t.Fatalf("observed.reason = %q, want %q", got, want)
+	}
+	if got, want := observed.Message, "global drift detected while diffing tracked objects"; got != want {
+		t.Fatalf("observed.message = %q, want %q", got, want)
+	}
+	if doc.Status.ObservedSummary == nil {
+		t.Fatal("status.observedSummary = nil, want value")
+	}
+	if got, want := doc.Status.ObservedSummary.Orphan, 1; got != want {
+		t.Fatalf("status.observedSummary.orphan = %d, want %d", got, want)
+	}
+	if got, want := doc.Status.ObservedSummary.MixedOwnershipObject, 1; got != want {
+		t.Fatalf("status.observedSummary.mixedOwnershipObject = %d, want %d", got, want)
+	}
+	if got, want := doc.Status.ObservedSummary.DirectCommitEligible, 1; got != want {
+		t.Fatalf("status.observedSummary.directCommitEligible = %d, want %d", got, want)
+	}
+	if got, want := doc.Status.ObservedSummary.DirectRevertEligible, 2; got != want {
+		t.Fatalf("status.observedSummary.directRevertEligible = %d, want %d", got, want)
+	}
+	if got, want := doc.Status.ObservedSummary.BundleMatchRequired, 2; got != want {
+		t.Fatalf("status.observedSummary.bundleMatchRequired = %d, want %d", got, want)
+	}
+}
+
+func TestPersistObservedStateSkipsMismatchedDigest(t *testing.T) {
+	previousRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRoot
+	})
+
+	ref := BOMReference{
+		Name:     "default-platform",
+		Revision: "rev-20240423",
+		Channel:  "beta",
+		Digest:   "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+	}
+	desiredStateDigest := "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	if _, err := PersistSuccessfulApply("cluster-a", ref, desiredStateDigest, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "local-rev-1"); err != nil {
+		t.Fatalf("PersistSuccessfulApply() error = %v", err)
+	}
+
+	doc, updated, err := PersistObservedState("cluster-a", "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", StateDirty, &ObservedSummary{
+		Dirty: 1,
+	}, "local drift")
+	if err != nil {
+		t.Fatalf("PersistObservedState() error = %v", err)
+	}
+	if updated {
+		t.Fatal("PersistObservedState() updated = true, want false")
+	}
+	if got, want := doc.Status.State, StateClean; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
+	}
+	if doc.Status.ObservedSummary != nil {
+		t.Fatalf("status.observedSummary = %#v, want nil", doc.Status.ObservedSummary)
 	}
 }

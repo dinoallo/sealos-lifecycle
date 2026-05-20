@@ -1,0 +1,12 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: grafana
+spec:
+  component: grafana
+  version: v10.4.0
+  class: application
+  contents:
+    - name: grafana-settings
+      type: manifest
+      path: manifests/grafana-settings.yaml

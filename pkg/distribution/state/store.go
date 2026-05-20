@@ -30,6 +30,8 @@ import (
 const (
 	StoreDirName            = "distribution"
 	AppliedRevisionFileName = "applied-revision.yaml"
+	ConditionTypeApplied    = "Applied"
+	ConditionTypeObserved   = "Observed"
 )
 
 func CurrentAppliedRevisionName(clusterName string) string {
@@ -77,8 +79,9 @@ func SaveAppliedRevision(doc *AppliedRevision) error {
 	return nil
 }
 
-func PersistRenderedState(clusterName string, ref BOMReference, desiredStateDigest, localPatchRevision string) (*AppliedRevision, error) {
+func PersistRenderedState(clusterName string, ref BOMReference, desiredStateDigest, localRepoRevision, localPatchRevision string) (*AppliedRevision, error) {
 	doc := NewAppliedRevision(CurrentAppliedRevisionName(clusterName), clusterName, ref, desiredStateDigest)
+	doc.Spec.LocalRepoRevision = localRepoRevision
 	doc.Spec.LocalPatchRevision = localPatchRevision
 
 	existing, err := LoadAppliedRevision(clusterName)
@@ -99,8 +102,9 @@ func PersistRenderedState(clusterName string, ref BOMReference, desiredStateDige
 		doc.Status = existing.Status
 	} else {
 		doc.Status.State = StateDirty
+		doc.Status.ObservedSummary = nil
 		doc.Status.Conditions = []Condition{
-			NewCondition("Applied", corev1.ConditionFalse, "DesiredStateRendered", "desired revision rendered but not yet applied"),
+			NewCondition(ConditionTypeApplied, corev1.ConditionFalse, "DesiredStateRendered", "desired revision rendered but not yet applied"),
 		}
 	}
 
@@ -110,20 +114,23 @@ func PersistRenderedState(clusterName string, ref BOMReference, desiredStateDige
 	return doc, nil
 }
 
-func PersistSuccessfulApply(clusterName string, ref BOMReference, desiredStateDigest, localPatchRevision string) (*AppliedRevision, error) {
+func PersistSuccessfulApply(clusterName string, ref BOMReference, desiredStateDigest, localRepoRevision, localPatchRevision string) (*AppliedRevision, error) {
 	doc := NewAppliedRevision(CurrentAppliedRevisionName(clusterName), clusterName, ref, desiredStateDigest)
+	doc.Spec.LocalRepoRevision = localRepoRevision
 	doc.Spec.LocalPatchRevision = localPatchRevision
 
 	now := metav1.Now()
 	doc.Status.State = StateClean
 	doc.Status.LastAppliedTime = &now
+	doc.Status.ObservedSummary = nil
 	doc.Status.LastSuccessfulRevision = &RevisionSnapshot{
 		BOM:                ref,
+		LocalRepoRevision:  localRepoRevision,
 		LocalPatchRevision: localPatchRevision,
 		DesiredStateDigest: desiredStateDigest,
 	}
 	doc.Status.Conditions = []Condition{
-		NewCondition("Applied", corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
+		NewCondition(ConditionTypeApplied, corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
 	}
 
 	if err := SaveAppliedRevision(doc); err != nil {
@@ -141,17 +148,96 @@ func MarkSuccessfulApply(clusterName string) (*AppliedRevision, error) {
 	now := metav1.Now()
 	doc.Status.State = StateClean
 	doc.Status.LastAppliedTime = &now
+	doc.Status.ObservedSummary = nil
 	doc.Status.LastSuccessfulRevision = &RevisionSnapshot{
 		BOM:                doc.Spec.BOM,
+		LocalRepoRevision:  doc.Spec.LocalRepoRevision,
 		LocalPatchRevision: doc.Spec.LocalPatchRevision,
 		DesiredStateDigest: doc.Spec.DesiredStateDigest,
 	}
 	doc.Status.Conditions = []Condition{
-		NewCondition("Applied", corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
+		NewCondition(ConditionTypeApplied, corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
 	}
 
 	if err := SaveAppliedRevision(doc); err != nil {
 		return nil, err
 	}
 	return doc, nil
+}
+
+func PersistObservedState(clusterName, desiredStateDigest string, observedState ClusterState, observedSummary *ObservedSummary, message string) (*AppliedRevision, bool, error) {
+	if err := observedState.Validate(); err != nil {
+		return nil, false, err
+	}
+	if observedSummary != nil {
+		if err := observedSummary.Validate(); err != nil {
+			return nil, false, err
+		}
+	}
+
+	doc, err := LoadAppliedRevision(clusterName)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if desiredStateDigest != "" && doc.Spec.DesiredStateDigest != desiredStateDigest {
+		return doc, false, nil
+	}
+
+	doc.Status.State = observedState
+	doc.Status.ObservedSummary = cloneObservedSummary(observedSummary)
+	if doc.Status.ObservedSummary != nil && doc.Status.ObservedSummary.LastObservedTime == nil {
+		now := metav1.Now()
+		doc.Status.ObservedSummary.LastObservedTime = &now
+	}
+	doc.Status.Conditions = upsertCondition(doc.Status.Conditions, observedStateCondition(observedState, message))
+	if err := SaveAppliedRevision(doc); err != nil {
+		return nil, false, err
+	}
+	return doc, true, nil
+}
+
+func observedStateCondition(observedState ClusterState, message string) Condition {
+	switch observedState {
+	case StateClean:
+		return NewCondition(ConditionTypeObserved, corev1.ConditionFalse, "LiveStateMatchesDesired", observedMessage(message, "live tracked state matches desired ownership state"))
+	case StateDirty:
+		return NewCondition(ConditionTypeObserved, corev1.ConditionTrue, "LocalOwnershipDriftDetected", observedMessage(message, "local-owned drift detected"))
+	case StateOrphan:
+		return NewCondition(ConditionTypeObserved, corev1.ConditionTrue, "GlobalOwnershipDriftDetected", observedMessage(message, "global-owned drift detected"))
+	default:
+		return NewCondition(ConditionTypeObserved, corev1.ConditionUnknown, "ObservationIncomplete", observedMessage(message, "live ownership state could not be fully determined"))
+	}
+}
+
+func observedMessage(message, fallback string) string {
+	if message == "" {
+		return fallback
+	}
+	return message
+}
+
+func upsertCondition(conditions []Condition, condition Condition) []Condition {
+	for i, existing := range conditions {
+		if existing.Type != condition.Type {
+			continue
+		}
+		conditions[i] = condition
+		return conditions
+	}
+	return append(conditions, condition)
+}
+
+func cloneObservedSummary(summary *ObservedSummary) *ObservedSummary {
+	if summary == nil {
+		return nil
+	}
+	cloned := *summary
+	if summary.LastObservedTime != nil {
+		timestamp := *summary.LastObservedTime
+		cloned.LastObservedTime = &timestamp
+	}
+	return &cloned
 }

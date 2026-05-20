@@ -1,0 +1,154 @@
+name: Local Patch Policy Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/local_patch_policy_gate.yml"
+      - "Makefile"
+      - "cmd/sealos/**"
+      - "docs/examples/sync-drift-minimal/local-repo/policy/**"
+      - "pkg/distribution/ownership/**"
+      - "pkg/distribution/hydrate/**"
+      - "pkg/distribution/localrepo/**"
+      - "pkg/distribution/policyreport/**"
+      - "pkg/distribution/reconcile/**"
+      - "pkg/distribution/compare/**"
+      - "pkg/distribution/commit/**"
+      - "scripts/local-patch-policy-base/**"
+      - "scripts/local-patch-policy-approval-summary/**"
+  pull_request:
+    branches: ["*"]
+    paths:
+      - ".github/workflows/local_patch_policy_gate.yml"
+      - "Makefile"
+      - "cmd/sealos/**"
+      - "docs/examples/sync-drift-minimal/local-repo/policy/**"
+      - "pkg/distribution/ownership/**"
+      - "pkg/distribution/hydrate/**"
+      - "pkg/distribution/localrepo/**"
+      - "pkg/distribution/policyreport/**"
+      - "pkg/distribution/reconcile/**"
+      - "pkg/distribution/compare/**"
+      - "pkg/distribution/commit/**"
+      - "scripts/local-patch-policy-base/**"
+      - "scripts/local-patch-policy-approval-summary/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-patch-policy-gate-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  verify-local-patch-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Golang with cache
+        uses: magnetikonline/action-golang-cache@v5
+        with:
+          go-version: "1.25"
+
+      - name: Verify local patch policy
+        run: make verify-local-patch-policy
+
+      - name: Generate local patch policy impact report
+        if: ${{ always() }}
+        shell: bash
+        env:
+          POLICY_PATH: docs/examples/sync-drift-minimal/local-repo/policy/local-patch-policy.yaml
+          APPROVAL_PATH: docs/examples/sync-drift-minimal/local-repo/policy/local-patch-policy-approval.yaml
+          LOCAL_REPO_ROOT: docs/examples/sync-drift-minimal/local-repo
+          REPORT_PATH: ${{ runner.temp }}/local-patch-policy-report.yaml
+          APPROVAL_EXPIRY_WARNING_DAYS: "30"
+          FAIL_WHEN_APPROVAL_EXPIRES_SOON: "1"
+        run: |
+          set -euo pipefail
+
+          old_policy="$(mktemp)"
+          set +e
+          go run ./scripts/local-patch-policy-base \
+            --event-name "${{ github.event_name }}" \
+            --pr-base-sha "${{ github.event.pull_request.base.sha }}" \
+            --before-sha "${{ github.event.before }}" \
+            --policy-path "${POLICY_PATH}" \
+            --output "${old_policy}"
+          resolve_status=$?
+          set -e
+          if [[ "${resolve_status}" -eq 2 ]]; then
+            {
+              echo "skipped: true"
+              echo "reason: no base commit was available for comparison"
+            } > "${REPORT_PATH}"
+            exit 0
+          fi
+          if [[ "${resolve_status}" -ne 0 ]]; then
+            exit "${resolve_status}"
+          fi
+
+          make_args=(
+            verify-local-patch-policy-gate
+            "OLD_POLICY=${old_policy}"
+            "NEW_POLICY=${POLICY_PATH}"
+            "LOCAL_REPO=${LOCAL_REPO_ROOT}"
+            "APPROVAL_EXPIRY_WARNING_DAYS=${APPROVAL_EXPIRY_WARNING_DAYS}"
+            "FAIL_WHEN_APPROVAL_EXPIRES_SOON=${FAIL_WHEN_APPROVAL_EXPIRES_SOON}"
+          )
+          if [[ -f "${APPROVAL_PATH}" ]]; then
+            make_args+=("APPROVAL_FILE=${APPROVAL_PATH}")
+          fi
+
+          set +e
+          make "${make_args[@]}" > "${REPORT_PATH}"
+          status=$?
+          set -e
+          if [[ ! -s "${REPORT_PATH}" ]]; then
+            {
+              echo "skipped: true"
+              echo "reason: policy gate failed before producing a report"
+            } > "${REPORT_PATH}"
+          fi
+          exit "${status}"
+
+      - name: Write local patch policy report summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          REPORT_PATH: ${{ runner.temp }}/local-patch-policy-report.yaml
+        run: |
+          {
+            echo "## Local patch policy report"
+            echo
+            if [[ ! -f "${REPORT_PATH}" ]]; then
+              echo "No report file was produced."
+              exit 0
+            fi
+            echo '```yaml'
+            cat "${REPORT_PATH}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Write local patch policy approval follow-up summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          REPORT_PATH: ${{ runner.temp }}/local-patch-policy-report.yaml
+        run: |
+          if [[ ! -f "${REPORT_PATH}" ]]; then
+            {
+              echo "## Approval follow-up"
+              echo
+              echo "- No report file was produced."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          go run ./scripts/local-patch-policy-approval-summary --report "${REPORT_PATH}" >> "${GITHUB_STEP_SUMMARY}"

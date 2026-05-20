@@ -1,0 +1,10 @@
+apiVersion: distribution.sealos.io/v1alpha1
+kind: HydratedBundle
+metadata:
+  name: digest-mismatch-fixture
+spec:
+  localPatchPolicySource: localRepo
+  localPatchPolicyScope: clusterLocal
+  localPatchPolicyName: fixture-local-policy
+  localPatchPolicyPath: policy/local-patch-policy.yaml
+  localPatchPolicyDigest: sha256:1111111111111111111111111111111111111111111111111111111111111111

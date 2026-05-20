@@ -2,7 +2,7 @@
 
 ## 状态
 
-设计说明
+带当前单节点 MVP 说明的设计文档
 
 ## 概述
 
@@ -12,9 +12,10 @@
 - 它和 `spec.inputs` 的关系是什么
 - Secret 正确的初始化方式应该是什么
 
-它明确是设计说明，不是在描述一个已经完整实现的代码路径。当前仓库里还没有
-完成版的 `pkg/distribution/localrepo` 包，因此下面的布局应该理解成推荐方向，
-适用于 MVP 和后续演进。
+它仍然首先是一份设计说明，而不是在宣称整套最终模型都已经落地。当前仓库已经
+有一个可工作的单节点 `pkg/distribution/localrepo` MVP，支持 `inputs/`、
+`resources/` 和 `patches/`，但下面的布局依然应该理解成面向 MVP 以后演进的
+推荐方向。
 
 ## 相关文档
 
@@ -22,6 +23,10 @@
   [sealos-multi-cluster-distribution-and-config-sync-design.md](./sealos-multi-cluster-distribution-and-config-sync-design.md)
 - ownership 与 reconcile：
   [sealos-multi-cluster-reconcile-and-ownership-model.md](./sealos-multi-cluster-reconcile-and-ownership-model.md)
+- rendered file、object 和 generated output 的追踪模型：
+  [sealos-materialization-tracking-and-drift-detection-model.md](./sealos-materialization-tracking-and-drift-detection-model.md)
+- Local patch policy 的 source、scope 与 provenance：
+  [sealos-local-patch-policy-design.md](./sealos-local-patch-policy-design.md)
 - 包格式与 `spec.inputs`：
   [sealos-component-package-format-design.md](./sealos-component-package-format-design.md)
 - Grafana + 数据库示例：
@@ -86,11 +91,20 @@ local-repo/
   repo.yaml
   revisions/
     current.yaml
+  policy/
+    local-patch-policy.yaml
   inputs/
     grafana/
       grafana-values.yaml
     grafana-db/
       grafana-db-values.yaml
+    kubernetes/
+      kubeadm-config.yaml
+      hosts/
+        192.168.0.240/
+          kubeadm-config.yaml
+        192.168.0.238/
+          kubeadm-config.yaml
   resources/
     secrets/
       grafana-admin-credentials.yaml
@@ -106,8 +120,91 @@ local-repo/
 要点是：
 
 - `inputs/` 保存绑定到 `spec.inputs` 的 payload
+- 对多节点建模来说，`inputs/<component>/hosts/<host>/...` 现在也是一个受支持
+  的 host-scoped input provenance 目录约定
+- `policy/local-patch-policy.yaml` 是当前单节点 MVP 下一个可选的显式
+  policy artifact。只要它存在，render 就会把它复制进 bundle；之后 local
+  patch validator、drift compare 和 `sync commit` 都会统一消费这份已经渲染
+  出来的 policy
 - `resources/` 保存 local-owned 的 Kubernetes 对象，尤其是带 Secret 的资源
+- 在当前单节点 MVP 里，`resources/` 的相对目录结构会在 render 后继续保留。
+  例如 `resources/secrets/grafana-admin-credentials.yaml` 会变成
+  `local-resources/secrets/grafana-admin-credentials.yaml`
 - `patches/` 只能用来修改被允许的 local-owned surface，不是通用 override 层
+- 在当前单节点 MVP 里，`patches/` 是按 component 分目录的：
+  `patches/<component>/**/*.yaml`
+- 每个 patch 文档都是一个 partial Kubernetes object overlay，通过
+  `apiVersion`、`kind`、`metadata.name`，以及通常还需要的
+  `metadata.namespace` 来绑定目标对象
+- 这些 patch 文档会在 render 时 merge 到匹配的 package manifest object 上，
+  而不是被当成独立 live resource 直接 apply
+- 当前 ownership validator 只放行一小组 local patch surface：
+  这组规则现在已经被收成一个带 schema 的 `LocalPatchPolicy` artifact，
+  不再只是零散的 allowlist 备注
+  `ConfigMap.data`、`ConfigMap.binaryData`、workload placement 字段
+
+当前 host-scoped input 的边界：
+
+- render 和 bundle 现在会把这类按 host 细分的 binding 作为显式 provenance
+  保留下来，字段名是 `hostInputBindings`
+- 这些 `hostInputBindings` 现在会指向 bundle 内部渲染出来的副本路径，
+  例如 `components/<component>/host-inputs/<host>/...`，这样即使原始 local repo
+  路径不可见，bundle 仍然是自描述的
+- 但今天 render 真正会自动 overlay 的，仍然只有默认的
+  `inputs/<component>/<file>` payload
+- multi-node `sync apply` 现在会在 local-input-backed direct `file` content
+  上消费 host-scoped input payload；其他 content type 仍然使用默认 rendered
+  payload
+- `sync commit --host <host>` 会沿用同一份 provenance：如果被选中的 host
+  有 `hostInputBindings` 条目，commit 会把 live file 回写到
+  `inputs/<component>/hosts/<host>/<input-file>`，并同步更新 bundle 里的
+  `components/<component>/host-inputs/<host>/...` 副本；它不会覆盖其他 host
+  继续使用的默认 input
+- 如果被选中的 host 没有 host-scoped input，并且多个 host 的 live 内容已经
+  分叉，commit 会拒绝把这个 host 的值写进默认 input；应先初始化对应的
+  host-scoped input，或者把目标值统一成所有 host 共用的值
+- `sync diff/status` 会在 tracked host-path 摘要里暴露这层 provenance：
+  命中 host-scoped payload 的条目会带 `usesHostScopedInput` 和
+  `hostInputBindingPath`，split 摘要也会列出哪些分叉 host 已经有 scoped
+  payload，哪些还没有
+  （例如 `nodeSelector` / `tolerations` / `affinity`）、少量 secret-name
+  binding，以及 ingress / service 暴露相关字段（例如 `spec.rules`、
+  `spec.tls` 和部分 metadata annotations）
+- 如果 `local-repo/policy/local-patch-policy.yaml` 缺失，render 仍然会把一份
+  显式的默认 policy 写进 bundle，这样 compare、commit 和 remediation 在
+  当前 rendered revision 上就会共享同一个 policy source of truth
+- 所以当前这套 ownership 模型现在已经是显式的：
+  package 和 BOM 目前都还不负责定义 local-patch policy
+  render 后的 bundle 会把 policy provenance 标成下面两者之一：
+  `localPatchPolicySource: localRepo`
+  或
+  `localPatchPolicySource: builtInDefault`
+- 这份 policy artifact 本身现在也会显式带上 `spec.scope: clusterLocal`，
+  无论它来自 `localRepo` 还是内置默认值；当前还不支持 package/BOM-scoped 的
+  local-patch policy
+- 如果 bundle 声称来自其他 source，或者它记录下来的 policy
+  name/path/digest 和渲染出来的 artifact 对不上，当前 policy consumer
+  会直接拒绝这个 bundle，而不是猜测应该用哪份规则
+- 当前单节点 MVP 已经支持一条很窄的
+  `sealos sync commit --local-repo ...` 路径：
+  它可以把已经被 tracked `localPatch` fragment 覆盖的 `Dirty` live drift
+  持久化回已有的 `patches/` 文件
+- 它现在也能把“纯 local-owned resource object”的 `Dirty` drift
+  持久化回原始 `resources/` 文件
+- 它现在也能把一类 tracked local-owned host file 的 `Dirty` drift
+  持久化回 local repo：前提是这个 host file 来自已声明的 local input
+  binding。当前 MVP 只支持 regular file，并且会把 live file 的内容同时回写到
+  绑定的默认或 host-scoped `inputs/` payload，以及 bundle 里的渲染副本
+- 它仍然不会自动提交 `Orphan` drift、package + resource 混合对象、基于
+  symlink 的本地 host path，或任意 input 变化
+- 在当前 `sync diff` / `sync status` 输出里，这种 local repo 的分工现在也会
+  体现成 remediation ownership：
+  `changeOwner=localOverlay` 一般会指回 `patches/` 或 `resources/`，
+  而 `changeOwner=localInput` 会指回绑定某个 direct host-side file 的
+  `inputs/` payload
+- 同时，`sync diff` / `sync status` 现在也会在顶层额外暴露
+  `localPatchPolicy`，把当前 rendered bundle 实际生效的 policy source、name、
+  path 和 digest 直接带出来
 - `repo.yaml` 和 `revisions/current.yaml` 只是推荐元数据文件，不代表今天已经定
   死 schema
 
@@ -288,13 +385,120 @@ spec:
 正确的运维流程应该是：
 
 1. 先选定 BOM revision，或者 `distribution line + DistributionChannel`。
-2. 为这个集群生成或初始化 local repo skeleton。
+2. 根据 BOM 和 package input contract 为这个集群初始化 local repo skeleton。
 3. 在 `inputs/` 下填非 Secret 的 input 值。
 4. 在 `resources/` 下创建需要的 Secret 资源或 Secret 引用。
 5. 在 hydrate 前先校验所有 required input 和 required secret reference 都存在。
 6. 用 `BOM + local repo` hydrate 成最终 desired state。
-7. 如果 Secret 属于 local-owned resource set，就先 apply Secret，再 apply 依赖
+7. 用 `sync plan` 预览 rendered apply 意图，包括 target 解析、local resource 和
+   Secret object 摘要。
+8. 如果 Secret 属于 local-owned resource set，就先 apply Secret，再 apply 依赖
    它的 package content。
+
+当前 CLI 初始化入口是：
+
+```bash
+sealos sync local-repo init \
+  --file bom.yaml \
+  --package-source grafana=./packages/grafana \
+  --package-source grafana-db=./packages/grafana-db \
+  --output-dir ./local-repo \
+  --output yaml
+```
+
+initializer 会创建 `inputs/` 模板、`resources/` 和 `patches/` 目录、
+`policy/local-patch-policy.yaml`，以及最小 local repo 元数据。它不会生成真实
+Secret 字节。看起来像 Secret 的 input 会使用私有文件权限写出，并在输出里作为
+hint 提醒运维去 `resources/` 下创建对应的 Secret manifest 或 external-secret
+reference。
+
+运维填完 local repo 之后，先跑 local repo doctor，再进入更宽的 validate：
+
+```bash
+sealos sync local-repo doctor \
+  --file bom.yaml \
+  --package-source grafana=./packages/grafana \
+  --package-source grafana-db=./packages/grafana-db \
+  --local-repo ./local-repo \
+  --output yaml
+```
+
+doctor 同样是只读命令，但它聚焦 local repo 自身。它会报告未替换的
+`local-repo init` 模板、缺失的 required input、`inputs/` 或 `patches/` 下的
+stale component 目录、缺失的 `policy/local-patch-policy.yaml`、`resources/`
+下的非 manifest 文件，以及看起来像 Secret 的文件是否存在 kind 或权限问题。
+它只输出文件路径和修复建议，不会打印 input 或 Secret payload 内容。
+
+如果需要在 render 前给 CI 或运维脚本一个单命令 gate，可以使用 source
+preflight：
+
+```bash
+sealos sync preflight \
+  --cluster default \
+  --file bom.yaml \
+  --package-source grafana=./packages/grafana \
+  --package-source grafana-db=./packages/grafana-db \
+  --local-repo ./local-repo \
+  --output yaml
+```
+
+带 `--file` 时，preflight 会在设置了 `--local-repo` 的情况下先跑 local-repo
+doctor，然后再跑更宽的 `sync validate` 契约检查。通过时，输出里会带下一步应
+执行的 `sealos sync render ...` 命令。不带 `--file` 时，同一个
+`sync preflight` 仍然保持 rendered-bundle 模式，用来检查 `--bundle-dir` 是否
+能通过 apply gate。这个 rendered-bundle 模式会检查 topology/render-input
+freshness 和本机 runtime readiness，包括 host mutation 权限、systemd 是否
+可用、swap、已有 Kubernetes node 状态、bootstrap 端口、已存在的 runtime
+binary、kubeconfig/client 可用性，以及受管 service 状态。runtime warning
+只会出现在结构化输出的 `runtimeStatus` 下；blocking runtime check 会阻止
+`sync apply`。
+
+现在 `sealos sync render` 默认也会在 materialize bundle 之前运行同一套 source
+preflight。source 侧存在 blocking issue 时，render 会停止，并在结构化
+`sourcePreflight` 输出里返回具体问题。`--skip-source-preflight` 只建议用于开发
+或调试，也就是你明确想用不完整或不安全的 source input 强制 render 的场景。
+成功 render 后，rendered bundle 还会写入一份经过脱敏的
+`spec.sourcePreflight` 摘要。它只记录状态、blocking reason、聚合计数以及
+doctor/validate 两个阶段的结果；不会把 input 或 Secret payload 内容复制进
+bundle metadata。
+
+当前 CLI 校验入口是：
+
+```bash
+sealos sync validate \
+  --cluster default \
+  --file bom.yaml \
+  --package-source grafana=./packages/grafana \
+  --package-source grafana-db=./packages/grafana-db \
+  --local-repo ./local-repo \
+  --output yaml
+```
+
+这个 validator 是只读的。它在 render/apply 前检查 BOM、package 和 local repo
+之间的契约，包括 package source 是否有效、required input 是否已经绑定、
+host-scoped input 里的 host 是否属于当前 cluster inventory、local patch policy
+是否兼容、target 是否能解析，以及明显的 Secret manifest 文件权限问题。
+在测试和脚本化 smoke 场景里，可以加 `--runtime-root <dir>` 指向特定的
+Clusterfile inventory。
+
+render 之后，用 `sync plan` 作为只读的运维 review 步骤：
+
+```bash
+sealos sync plan \
+  --cluster default \
+  --bundle-dir <rendered-bundle-dir> \
+  --output yaml
+```
+
+plan 输出会解析 `allNodes`、`firstMaster` 和 `cluster` target，并汇总 component
+steps、local resources、tracked Kubernetes objects 和 tracked host paths。
+Secret object 只会以 sensitive object summary 出现；命令不会打印 `data` 或
+`stringData` 这类 Secret payload 字段。如果旧 bundle 没有
+`spec.sourcePreflight` metadata，`sync plan`、`sync apply`、`sync diff` 和
+`sync status` 都会在输出里给出 warning，让运维知道这份 bundle 没有记录
+render 时的 source readiness 结果。`sync diff` 和 `sync status` 也会把记录的
+`sourcePreflight` 摘要放在 live drift summary 旁边，方便把现场变化和生成这份
+rendered bundle 时通过的 source check 对起来看。
 
 关键点是：
 
