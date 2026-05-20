@@ -169,6 +169,107 @@ func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
 	}
 }
 
+func TestSyncRenderCmdWithDistributionChannel(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
+	doc := testSyncBOM()
+	doc.Spec.Channel = bom.ChannelAlpha
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	channelPath := filepath.Join(filepath.Dir(bomPath), "channel.yaml")
+	channel := bom.NewDistributionChannel("test-platform-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "bom.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"render",
+		"--distribution-channel", channelPath,
+		"--cluster", "cluster-channel",
+		"--package-source", "kubernetes=" + syncFixtureRoot(),
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+
+	var out syncRenderOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.Channel, string(bom.ChannelStable); got != want {
+		t.Fatalf("out.Channel = %q, want %q", got, want)
+	}
+	absChannelPath, err := filepath.Abs(channelPath)
+	if err != nil {
+		t.Fatalf("Abs(channelPath) error = %v", err)
+	}
+	if got, want := out.RenderProvenance.DistributionChannelPath, absChannelPath; got != want {
+		t.Fatalf("renderProvenance.distributionChannelPath = %q, want %q", got, want)
+	}
+	if got, want := out.RenderProvenance.DistributionLine, doc.Metadata.Name; got != want {
+		t.Fatalf("renderProvenance.distributionLine = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(out.RenderProvenance.DistributionChannelDigest, "sha256:") {
+		t.Fatalf("renderProvenance.distributionChannelDigest = %q, want sha256 digest", out.RenderProvenance.DistributionChannelDigest)
+	}
+	if out.SourcePreflight == nil {
+		t.Fatal("sourcePreflight = nil, want source preflight output")
+	}
+	if got, want := out.SourcePreflight.DistributionChannelPath, channelPath; got != want {
+		t.Fatalf("sourcePreflight.distributionChannelPath = %q, want %q", got, want)
+	}
+	if !strings.Contains(out.SourcePreflight.RenderCommand, "--distribution-channel") {
+		t.Fatalf("sourcePreflight.renderCommand = %q, want --distribution-channel", out.SourcePreflight.RenderCommand)
+	}
+
+	loadedBundle, err := reconcile.LoadBundle(out.BundlePath)
+	if err != nil {
+		t.Fatalf("LoadBundle(rendered) error = %v", err)
+	}
+	if got, want := loadedBundle.Spec.Channel, bom.ChannelStable; got != want {
+		t.Fatalf("bundle spec.channel = %q, want %q", got, want)
+	}
+	if got, want := loadedBundle.Spec.RenderProvenance.DistributionChannelPath, absChannelPath; got != want {
+		t.Fatalf("bundle renderProvenance.distributionChannelPath = %q, want %q", got, want)
+	}
+}
+
+func TestSyncRenderCmdRejectsAmbiguousTarget(t *testing.T) {
+	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	channelPath := filepath.Join(filepath.Dir(bomPath), "channel.yaml")
+	doc := testSyncBOM()
+	channel := bom.NewDistributionChannel("test-platform-alpha", doc.Metadata.Name, bom.ChannelAlpha, doc.Spec.Revision, "bom.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"render",
+		"--file", bomPath,
+		"--distribution-channel", channelPath,
+		"--package-source", "kubernetes=" + syncFixtureRoot(),
+	})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("Execute() error = nil, want ambiguous target error")
+	}
+}
+
 func TestSyncApplyCmdWithRuntimeRootOverride(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	defaultRuntimeRoot := t.TempDir()
@@ -2226,6 +2327,87 @@ func TestSyncRenderCmdRejectsInvalidPackageSource(t *testing.T) {
 
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("Execute() error = nil, want error")
+	}
+}
+
+func TestRunSyncValidateWithDistributionChannel(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	root := t.TempDir()
+	bomPath := filepath.Join(root, "bom.yaml")
+	doc := testSyncBOM()
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	channelPath := filepath.Join(root, "channel.yaml")
+	channel := bom.NewDistributionChannel("test-platform-beta", doc.Metadata.Name, bom.ChannelBeta, doc.Spec.Revision, "bom.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	out := runSyncValidate(syncValidateOptions{
+		ClusterName:             "default",
+		DistributionChannelPath: channelPath,
+		PackageSources:          []string{"kubernetes=" + syncFixtureRoot()},
+	})
+	if !out.Passed {
+		t.Fatalf("validate passed = false, issues=%#v", out.Issues)
+	}
+	if got, want := out.BOMPath, bomPath; got != want {
+		t.Fatalf("validate bomPath = %q, want %q", got, want)
+	}
+	if got, want := out.DistributionChannelPath, channelPath; got != want {
+		t.Fatalf("validate distributionChannelPath = %q, want %q", got, want)
+	}
+}
+
+func TestSyncRenderInputStatusDetectsDistributionChannelDrift(t *testing.T) {
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channel.yaml")
+	if err := os.WriteFile(channelPath, []byte("revision: one\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(channel) error = %v", err)
+	}
+	channelData, err := os.ReadFile(channelPath)
+	if err != nil {
+		t.Fatalf("ReadFile(channel) error = %v", err)
+	}
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := os.WriteFile(bomPath, []byte("revision: one\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(bom) error = %v", err)
+	}
+	bomData, err := os.ReadFile(bomPath)
+	if err != nil {
+		t.Fatalf("ReadFile(bom) error = %v", err)
+	}
+
+	bundle := &hydrate.Bundle{
+		Spec: hydrate.BundleSpec{
+			RenderProvenance: hydrate.RenderProvenance{
+				DistributionChannelPath:   channelPath,
+				DistributionChannelDigest: digest.Canonical.FromBytes(channelData).String(),
+				BOMPath:                   bomPath,
+				BOMDigest:                 digest.Canonical.FromBytes(bomData).String(),
+			},
+		},
+	}
+	if err := os.WriteFile(channelPath, []byte("revision: two\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(channel drift) error = %v", err)
+	}
+
+	status := syncRenderInputStatusForBundle(bundle)
+	if got, want := status.State, syncRenderInputStateStale; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
+	}
+	change, ok := syncRenderInputChangeByName(status.ChangedInputs, "distributionChannel")
+	if !ok {
+		t.Fatalf("distributionChannel change missing: %#v", status.ChangedInputs)
+	}
+	if got, want := change.Path, channelPath; got != want {
+		t.Fatalf("distributionChannel change path = %q, want %q", got, want)
 	}
 }
 

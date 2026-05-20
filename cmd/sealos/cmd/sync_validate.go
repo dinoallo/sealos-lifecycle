@@ -55,16 +55,17 @@ type syncValidatePackageOutput struct {
 }
 
 type syncValidateOutput struct {
-	Passed            bool                        `json:"passed" yaml:"passed"`
-	ClusterName       string                      `json:"clusterName" yaml:"clusterName"`
-	BOMPath           string                      `json:"bomPath" yaml:"bomPath"`
-	LocalRepo         string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	ExecutionTopology hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
-	Summary           syncValidateSummary         `json:"summary" yaml:"summary"`
-	Packages          []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
-	Issues            []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
-	LocalPolicy       string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
-	LocalRepoRev      string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
+	Passed                  bool                        `json:"passed" yaml:"passed"`
+	ClusterName             string                      `json:"clusterName" yaml:"clusterName"`
+	BOMPath                 string                      `json:"bomPath" yaml:"bomPath"`
+	DistributionChannelPath string                      `json:"distributionChannelPath,omitempty" yaml:"distributionChannelPath,omitempty"`
+	LocalRepo               string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
+	ExecutionTopology       hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
+	Summary                 syncValidateSummary         `json:"summary" yaml:"summary"`
+	Packages                []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
+	Issues                  []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
+	LocalPolicy             string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
+	LocalRepoRev            string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
 }
 
 type syncValidateAccumulator struct {
@@ -117,11 +118,12 @@ func (a *syncValidateAccumulator) finalize() syncValidateOutput {
 
 func newSyncValidateCmd() *cobra.Command {
 	var flags struct {
-		clusterName    string
-		bomFile        string
-		localRepo      string
-		packageSources []string
-		output         string
+		clusterName             string
+		bomFile                 string
+		distributionChannelFile string
+		localRepo               string
+		packageSources          []string
+		output                  string
 	}
 
 	cmd := &cobra.Command{
@@ -131,10 +133,11 @@ func newSyncValidateCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := runSyncValidate(syncValidateOptions{
-				ClusterName:    flags.clusterName,
-				BOMPath:        flags.bomFile,
-				LocalRepoPath:  flags.localRepo,
-				PackageSources: flags.packageSources,
+				ClusterName:             flags.clusterName,
+				BOMPath:                 flags.bomFile,
+				DistributionChannelPath: flags.distributionChannelFile,
+				LocalRepoPath:           flags.localRepo,
+				PackageSources:          flags.packageSources,
 			})
 			if err := writeSyncOutput(cmd, out, flags.output, "validate result"); err != nil {
 				return err
@@ -146,21 +149,19 @@ func newSyncValidateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose inventory should be used for topology validation")
-	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file to validate")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.distributionChannelFile, "path to the BOM file to validate")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "optional cluster-local repo root to validate against package inputs and local patch policy")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local validation")
 	addSyncOutputFlag(cmd, &flags.output)
-	if err := cmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 	return cmd
 }
 
 type syncValidateOptions struct {
-	ClusterName    string
-	BOMPath        string
-	LocalRepoPath  string
-	PackageSources []string
+	ClusterName             string
+	BOMPath                 string
+	DistributionChannelPath string
+	LocalRepoPath           string
+	PackageSources          []string
 }
 
 func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
@@ -170,6 +171,7 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 		acc.out.ClusterName = "default"
 	}
 	acc.out.BOMPath = strings.TrimSpace(opts.BOMPath)
+	acc.out.DistributionChannelPath = strings.TrimSpace(opts.DistributionChannelPath)
 	acc.out.LocalRepo = strings.TrimSpace(opts.LocalRepoPath)
 
 	topology, err := loadSyncExecutionTopology(acc.out.ClusterName)
@@ -180,10 +182,18 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 		acc.out.Summary.Hosts = len(acc.out.ExecutionTopology.AllNodes)
 	}
 
-	doc, err := bom.LoadFile(opts.BOMPath)
+	target, err := resolveSyncTarget(syncTargetOptions{
+		BOMPath:                 opts.BOMPath,
+		DistributionChannelPath: opts.DistributionChannelPath,
+	})
 	if err != nil {
-		acc.error("bomInvalid", "", opts.BOMPath, err.Error())
+		acc.error("bomInvalid", "", strings.TrimSpace(opts.BOMPath), err.Error())
 		return acc.finalize()
+	}
+	doc := target.BOM
+	acc.out.BOMPath = target.BOMPath
+	if strings.TrimSpace(target.DistributionChannelPath) != "" {
+		acc.out.DistributionChannelPath = strings.TrimSpace(target.DistributionChannelPath)
 	}
 	acc.out.Summary.Components = len(doc.Spec.Components)
 

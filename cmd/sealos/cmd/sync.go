@@ -86,6 +86,54 @@ var outputSyncKubectl = defaultSyncKubectlOutput
 var runSyncApply = reconcile.Apply
 var repairSyncGeneratedControlPlaneHost = reconcile.RepairGeneratedControlPlaneHost
 
+type syncTargetOptions struct {
+	BOMPath                 string
+	DistributionChannelPath string
+}
+
+type syncResolvedTarget struct {
+	BOM                     *bom.BOM
+	BOMPath                 string
+	DistributionChannel     *bom.DistributionChannel
+	DistributionChannelPath string
+}
+
+func addSyncTargetFlags(cmd *cobra.Command, bomPath, distributionChannelPath *string, bomUsage string) {
+	cmd.Flags().StringVarP(bomPath, "file", "f", "", bomUsage)
+	cmd.Flags().StringVar(distributionChannelPath, "distribution-channel", "", "path to a DistributionChannel file to resolve before loading the target BOM")
+}
+
+func resolveSyncTarget(opts syncTargetOptions) (*syncResolvedTarget, error) {
+	bomPath := strings.TrimSpace(opts.BOMPath)
+	channelPath := strings.TrimSpace(opts.DistributionChannelPath)
+	switch {
+	case bomPath == "" && channelPath == "":
+		return nil, fmt.Errorf("one of --file or --distribution-channel is required")
+	case bomPath != "" && channelPath != "":
+		return nil, fmt.Errorf("use either --file or --distribution-channel, not both")
+	case channelPath != "":
+		resolved, err := bom.ResolveDistributionChannelFile(channelPath)
+		if err != nil {
+			return nil, err
+		}
+		return &syncResolvedTarget{
+			BOM:                     resolved.BOM,
+			BOMPath:                 resolved.BOMPath,
+			DistributionChannel:     resolved.Channel,
+			DistributionChannelPath: channelPath,
+		}, nil
+	default:
+		doc, err := bom.LoadFile(bomPath)
+		if err != nil {
+			return nil, err
+		}
+		return &syncResolvedTarget{
+			BOM:     doc,
+			BOMPath: bomPath,
+		}, nil
+	}
+}
+
 func addSyncRuntimeRootFlag(cmd *cobra.Command) {
 	var runtimeRoot string
 	cmd.Flags().StringVar(&runtimeRoot, "runtime-root", "", "override the cluster runtime root used to resolve sync state, bundles, and inventory")
@@ -343,13 +391,14 @@ func newSyncPolicyGateCmd() *cobra.Command {
 
 func newSyncRenderCmd() *cobra.Command {
 	var flags struct {
-		bomFile             string
-		clusterName         string
-		localRepo           string
-		localPatchRevision  string
-		packageSources      []string
-		skipSourcePreflight bool
-		output              string
+		bomFile                 string
+		distributionChannelFile string
+		clusterName             string
+		localRepo               string
+		localPatchRevision      string
+		packageSources          []string
+		skipSourcePreflight     bool
+		output                  string
 	}
 
 	cmd := &cobra.Command{
@@ -365,13 +414,22 @@ components when iterating on package directories in-tree.
 `),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveSyncTarget(syncTargetOptions{
+				BOMPath:                 flags.bomFile,
+				DistributionChannelPath: flags.distributionChannelFile,
+			})
+			if err != nil {
+				return err
+			}
+
 			var sourcePreflight *syncSourcePreflightOutput
 			if !flags.skipSourcePreflight {
 				out := runSyncSourcePreflight(syncSourcePreflightOptions{
-					ClusterName:    flags.clusterName,
-					BOMPath:        flags.bomFile,
-					LocalRepoPath:  flags.localRepo,
-					PackageSources: flags.packageSources,
+					ClusterName:             flags.clusterName,
+					BOMPath:                 flags.bomFile,
+					DistributionChannelPath: flags.distributionChannelFile,
+					LocalRepoPath:           flags.localRepo,
+					PackageSources:          flags.packageSources,
 				})
 				sourcePreflight = &out
 				if out.Blocked {
@@ -387,12 +445,7 @@ components when iterating on package directories in-tree.
 				}
 			}
 
-			doc, err := bom.LoadFile(flags.bomFile)
-			if err != nil {
-				return err
-			}
-
-			opts, err := newSyncMaterializeOptions(doc, flags.clusterName, flags.bomFile, flags.localRepo, flags.localPatchRevision, flags.packageSources)
+			opts, err := newSyncMaterializeOptions(target, flags.clusterName, flags.localRepo, flags.localPatchRevision, flags.packageSources)
 			if err != nil {
 				return err
 			}
@@ -400,7 +453,7 @@ components when iterating on package directories in-tree.
 				opts.SourcePreflight = syncSourcePreflightBundleSummary(*sourcePreflight)
 			}
 
-			result, err := reconcile.Materialize(doc, opts)
+			result, err := reconcile.Materialize(target.BOM, opts)
 			if err != nil {
 				return err
 			}
@@ -428,16 +481,13 @@ components when iterating on package directories in-tree.
 			return writeSyncOutput(cmd, out, flags.output, "render result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file to render")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.distributionChannelFile, "path to the BOM file to render")
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to materialize desired state for")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "path to a cluster-local repo that provides input bindings during render")
 	cmd.Flags().StringVar(&flags.localPatchRevision, "local-patch-revision", "", "optional local patch revision recorded in applied state")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local development")
 	cmd.Flags().BoolVar(&flags.skipSourcePreflight, "skip-source-preflight", false, "skip source readiness preflight before render; intended only for development or debugging")
 	addSyncOutputFlag(cmd, &flags.output)
-	if err := cmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 	return cmd
 }
 
@@ -462,16 +512,17 @@ type syncPolicyApprovalScanOutput struct {
 
 func newSyncPreflightCmd() *cobra.Command {
 	var flags struct {
-		clusterName            string
-		bomFile                string
-		localRepo              string
-		bundleDir              string
-		kubeconfigPath         string
-		hostRoot               string
-		packageSources         []string
-		allowStaleTopology     bool
-		allowStaleRenderInputs bool
-		output                 string
+		clusterName             string
+		bomFile                 string
+		distributionChannelFile string
+		localRepo               string
+		bundleDir               string
+		kubeconfigPath          string
+		hostRoot                string
+		packageSources          []string
+		allowStaleTopology      bool
+		allowStaleRenderInputs  bool
+		output                  string
 	}
 
 	cmd := &cobra.Command{
@@ -487,15 +538,16 @@ would pass sync apply freshness and runtime readiness gates.
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(flags.bomFile) != "" {
+			if strings.TrimSpace(flags.bomFile) != "" || strings.TrimSpace(flags.distributionChannelFile) != "" {
 				if strings.TrimSpace(flags.bundleDir) != "" {
-					return errors.New("use either --file for source preflight or --bundle-dir for rendered bundle preflight, not both")
+					return errors.New("use either --file/--distribution-channel for source preflight or --bundle-dir for rendered bundle preflight, not both")
 				}
 				out := runSyncSourcePreflight(syncSourcePreflightOptions{
-					ClusterName:    flags.clusterName,
-					BOMPath:        flags.bomFile,
-					LocalRepoPath:  flags.localRepo,
-					PackageSources: flags.packageSources,
+					ClusterName:             flags.clusterName,
+					BOMPath:                 flags.bomFile,
+					DistributionChannelPath: flags.distributionChannelFile,
+					LocalRepoPath:           flags.localRepo,
+					PackageSources:          flags.packageSources,
 				})
 				if err := writeSyncOutput(cmd, out, flags.output, "source preflight result"); err != nil {
 					return err
@@ -535,7 +587,7 @@ would pass sync apply freshness and runtime readiness gates.
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to preflight desired state for")
-	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file for source preflight")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.distributionChannelFile, "path to the BOM file for source preflight")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "cluster-local repo root for source preflight")
 	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
 	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for rendered bundle runtime preflight")
@@ -565,10 +617,11 @@ type syncPreflightOutput struct {
 }
 
 type syncSourcePreflightOptions struct {
-	ClusterName    string
-	BOMPath        string
-	LocalRepoPath  string
-	PackageSources []string
+	ClusterName             string
+	BOMPath                 string
+	DistributionChannelPath string
+	LocalRepoPath           string
+	PackageSources          []string
 }
 
 type syncSourcePreflightSummary struct {
@@ -584,18 +637,19 @@ type syncSourcePreflightSummary struct {
 }
 
 type syncSourcePreflightOutput struct {
-	ClusterName       string                         `json:"clusterName" yaml:"clusterName"`
-	BOMPath           string                         `json:"bomPath" yaml:"bomPath"`
-	LocalRepo         string                         `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	State             syncPreflightState             `json:"state" yaml:"state"`
-	Summary           string                         `json:"summary" yaml:"summary"`
-	RecommendedAction syncPreflightRecommendedAction `json:"recommendedAction" yaml:"recommendedAction"`
-	RenderCommand     string                         `json:"renderCommand,omitempty" yaml:"renderCommand,omitempty"`
-	Blocked           bool                           `json:"blocked" yaml:"blocked"`
-	BlockedReasons    []string                       `json:"blockedReasons,omitempty" yaml:"blockedReasons,omitempty"`
-	Counts            syncSourcePreflightSummary     `json:"counts" yaml:"counts"`
-	LocalRepoDoctor   *syncLocalRepoDoctorOutput     `json:"localRepoDoctor,omitempty" yaml:"localRepoDoctor,omitempty"`
-	Validate          syncValidateOutput             `json:"validate" yaml:"validate"`
+	ClusterName             string                         `json:"clusterName" yaml:"clusterName"`
+	BOMPath                 string                         `json:"bomPath" yaml:"bomPath"`
+	DistributionChannelPath string                         `json:"distributionChannelPath,omitempty" yaml:"distributionChannelPath,omitempty"`
+	LocalRepo               string                         `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
+	State                   syncPreflightState             `json:"state" yaml:"state"`
+	Summary                 string                         `json:"summary" yaml:"summary"`
+	RecommendedAction       syncPreflightRecommendedAction `json:"recommendedAction" yaml:"recommendedAction"`
+	RenderCommand           string                         `json:"renderCommand,omitempty" yaml:"renderCommand,omitempty"`
+	Blocked                 bool                           `json:"blocked" yaml:"blocked"`
+	BlockedReasons          []string                       `json:"blockedReasons,omitempty" yaml:"blockedReasons,omitempty"`
+	Counts                  syncSourcePreflightSummary     `json:"counts" yaml:"counts"`
+	LocalRepoDoctor         *syncLocalRepoDoctorOutput     `json:"localRepoDoctor,omitempty" yaml:"localRepoDoctor,omitempty"`
+	Validate                syncValidateOutput             `json:"validate" yaml:"validate"`
 }
 
 func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflightOutput {
@@ -604,17 +658,19 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 		clusterName = "default"
 	}
 	out := syncSourcePreflightOutput{
-		ClusterName: clusterName,
-		BOMPath:     strings.TrimSpace(opts.BOMPath),
-		LocalRepo:   strings.TrimSpace(opts.LocalRepoPath),
+		ClusterName:             clusterName,
+		BOMPath:                 strings.TrimSpace(opts.BOMPath),
+		DistributionChannelPath: strings.TrimSpace(opts.DistributionChannelPath),
+		LocalRepo:               strings.TrimSpace(opts.LocalRepoPath),
 	}
 
 	if strings.TrimSpace(opts.LocalRepoPath) != "" {
 		doctor := runSyncLocalRepoDoctor(syncLocalRepoDoctorOptions{
-			ClusterName:    clusterName,
-			BOMPath:        opts.BOMPath,
-			LocalRepoPath:  opts.LocalRepoPath,
-			PackageSources: opts.PackageSources,
+			ClusterName:             clusterName,
+			BOMPath:                 opts.BOMPath,
+			DistributionChannelPath: opts.DistributionChannelPath,
+			LocalRepoPath:           opts.LocalRepoPath,
+			PackageSources:          opts.PackageSources,
 		})
 		out.LocalRepoDoctor = &doctor
 		out.LocalRepo = doctor.LocalRepo
@@ -626,12 +682,19 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 	}
 
 	validate := runSyncValidate(syncValidateOptions{
-		ClusterName:    clusterName,
-		BOMPath:        opts.BOMPath,
-		LocalRepoPath:  opts.LocalRepoPath,
-		PackageSources: opts.PackageSources,
+		ClusterName:             clusterName,
+		BOMPath:                 opts.BOMPath,
+		DistributionChannelPath: opts.DistributionChannelPath,
+		LocalRepoPath:           opts.LocalRepoPath,
+		PackageSources:          opts.PackageSources,
 	})
 	out.Validate = validate
+	if strings.TrimSpace(validate.BOMPath) != "" {
+		out.BOMPath = validate.BOMPath
+	}
+	if strings.TrimSpace(validate.DistributionChannelPath) != "" {
+		out.DistributionChannelPath = validate.DistributionChannelPath
+	}
 	if out.LocalRepo == "" {
 		out.LocalRepo = validate.LocalRepo
 	}
@@ -666,7 +729,12 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 }
 
 func syncSourcePreflightRenderCommand(clusterName string, opts syncSourcePreflightOptions) string {
-	args := []string{"sealos", "sync", "render", "--cluster", clusterName, "--file", strings.TrimSpace(opts.BOMPath)}
+	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
+	if strings.TrimSpace(opts.DistributionChannelPath) != "" {
+		args = append(args, "--distribution-channel", strings.TrimSpace(opts.DistributionChannelPath))
+	} else {
+		args = append(args, "--file", strings.TrimSpace(opts.BOMPath))
+	}
 	if strings.TrimSpace(opts.LocalRepoPath) != "" {
 		args = append(args, "--local-repo", strings.TrimSpace(opts.LocalRepoPath))
 	}
@@ -2597,7 +2665,11 @@ func persistSyncCommittedState(clusterName string, bundle *hydrate.Bundle, resul
 	return state.PersistRenderedState(clusterName, ref, result.DesiredStateDigest, result.LocalRepoRevision, localPatchRevision)
 }
 
-func newSyncMaterializeOptions(doc *bom.BOM, clusterName, bomPath, localRepoPath, localPatchRevision string, packageSources []string) (reconcile.Options, error) {
+func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRepoPath, localPatchRevision string, packageSources []string) (reconcile.Options, error) {
+	if target == nil || target.BOM == nil {
+		return reconcile.Options{}, fmt.Errorf("sync target cannot be nil")
+	}
+	doc := target.BOM
 	localRootsByComponent, localPackagesByArtifact, err := resolveSyncPackageSources(doc, packageSources)
 	if err != nil {
 		return reconcile.Options{}, err
@@ -2625,7 +2697,7 @@ func newSyncMaterializeOptions(doc *bom.BOM, clusterName, bomPath, localRepoPath
 		}
 	}
 
-	provenance, err := syncRenderProvenance(bomPath, localRepoAbsPath, repo, localPatchRevision, localRootsByComponent)
+	provenance, err := syncRenderProvenance(target, localRepoAbsPath, repo, localPatchRevision, localRootsByComponent)
 	if err != nil {
 		return reconcile.Options{}, err
 	}
@@ -2646,15 +2718,30 @@ func newSyncMaterializeOptions(doc *bom.BOM, clusterName, bomPath, localRepoPath
 	}, nil
 }
 
-func syncRenderProvenance(bomPath, localRepoPath string, repo *localrepo.Repo, localPatchRevision string, packageSources map[string]string) (hydrate.RenderProvenance, error) {
+func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo *localrepo.Repo, localPatchRevision string, packageSources map[string]string) (hydrate.RenderProvenance, error) {
 	provenance := hydrate.RenderProvenance{
 		LocalRepoPath:      strings.TrimSpace(localRepoPath),
 		LocalPatchRevision: strings.TrimSpace(localPatchRevision),
 	}
-	if strings.TrimSpace(bomPath) != "" {
-		absBOMPath, err := filepath.Abs(bomPath)
+	if target != nil && target.DistributionChannel != nil {
+		provenance.DistributionLine = strings.TrimSpace(target.DistributionChannel.Spec.Line)
+	}
+	if target != nil && strings.TrimSpace(target.DistributionChannelPath) != "" {
+		absChannelPath, err := filepath.Abs(target.DistributionChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", bomPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf("resolve DistributionChannel path %q: %w", target.DistributionChannelPath, err)
+		}
+		provenance.DistributionChannelPath = absChannelPath
+		data, err := os.ReadFile(absChannelPath)
+		if err != nil {
+			return hydrate.RenderProvenance{}, fmt.Errorf("read DistributionChannel path %q: %w", absChannelPath, err)
+		}
+		provenance.DistributionChannelDigest = digest.Canonical.FromBytes(data).String()
+	}
+	if target != nil && strings.TrimSpace(target.BOMPath) != "" {
+		absBOMPath, err := filepath.Abs(target.BOMPath)
+		if err != nil {
+			return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.BOMPath, err)
 		}
 		provenance.BOMPath = absBOMPath
 		data, err := os.ReadFile(absBOMPath)

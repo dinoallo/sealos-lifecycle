@@ -167,6 +167,35 @@ func syncRenderInputStatusForBundle(bundle *hydrate.Bundle) syncRenderInputStatu
 	}
 
 	var changes []syncRenderInputChange
+	if strings.TrimSpace(provenance.DistributionChannelPath) != "" || strings.TrimSpace(provenance.DistributionChannelDigest) != "" {
+		switch {
+		case strings.TrimSpace(provenance.DistributionChannelPath) == "" || strings.TrimSpace(provenance.DistributionChannelDigest) == "":
+			changes = append(changes, syncRenderInputChange{
+				Name:   "distributionChannel",
+				Path:   provenance.DistributionChannelPath,
+				Reason: "missing DistributionChannel provenance",
+			})
+		default:
+			data, err := os.ReadFile(provenance.DistributionChannelPath)
+			if err != nil {
+				changes = append(changes, syncRenderInputChange{
+					Name:     "distributionChannel",
+					Path:     provenance.DistributionChannelPath,
+					Expected: provenance.DistributionChannelDigest,
+					Reason:   err.Error(),
+				})
+			} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.DistributionChannelDigest {
+				changes = append(changes, syncRenderInputChange{
+					Name:     "distributionChannel",
+					Path:     provenance.DistributionChannelPath,
+					Expected: provenance.DistributionChannelDigest,
+					Current:  current,
+					Reason:   "digest mismatch",
+				})
+			}
+		}
+	}
+
 	if strings.TrimSpace(provenance.BOMPath) == "" || strings.TrimSpace(provenance.BOMDigest) == "" {
 		changes = append(changes, syncRenderInputChange{
 			Name:   "bom",
@@ -269,7 +298,12 @@ func syncTopologyRefreshCommand(clusterName string, provenance *hydrate.RenderPr
 	if provenance != nil && strings.TrimSpace(provenance.BOMPath) != "" {
 		bomPath = provenance.BOMPath
 	}
-	args := []string{"sealos", "sync", "render", "--cluster", clusterName, "--file", bomPath}
+	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
+	if provenance != nil && strings.TrimSpace(provenance.DistributionChannelPath) != "" {
+		args = append(args, "--distribution-channel", provenance.DistributionChannelPath)
+	} else {
+		args = append(args, "--file", bomPath)
+	}
 	if provenance != nil {
 		if strings.TrimSpace(provenance.LocalRepoPath) != "" {
 			args = append(args, "--local-repo", provenance.LocalRepoPath)

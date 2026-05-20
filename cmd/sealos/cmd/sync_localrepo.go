@@ -19,17 +19,18 @@ import (
 )
 
 type syncLocalRepoInitOutput struct {
-	LocalRepo    string                        `json:"localRepo" yaml:"localRepo"`
-	BOMPath      string                        `json:"bomPath" yaml:"bomPath"`
-	BOMName      string                        `json:"bomName" yaml:"bomName"`
-	Revision     string                        `json:"revision" yaml:"revision"`
-	Components   int                           `json:"components" yaml:"components"`
-	Summary      syncLocalRepoInitSummary      `json:"summary" yaml:"summary"`
-	Inputs       []syncLocalRepoInitInput      `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	SecretHints  []syncLocalRepoInitSecretHint `json:"secretHints,omitempty" yaml:"secretHints,omitempty"`
-	WrittenFiles []string                      `json:"writtenFiles,omitempty" yaml:"writtenFiles,omitempty"`
-	SkippedFiles []string                      `json:"skippedFiles,omitempty" yaml:"skippedFiles,omitempty"`
-	NextSteps    []string                      `json:"nextSteps" yaml:"nextSteps"`
+	LocalRepo               string                        `json:"localRepo" yaml:"localRepo"`
+	BOMPath                 string                        `json:"bomPath" yaml:"bomPath"`
+	DistributionChannelPath string                        `json:"distributionChannelPath,omitempty" yaml:"distributionChannelPath,omitempty"`
+	BOMName                 string                        `json:"bomName" yaml:"bomName"`
+	Revision                string                        `json:"revision" yaml:"revision"`
+	Components              int                           `json:"components" yaml:"components"`
+	Summary                 syncLocalRepoInitSummary      `json:"summary" yaml:"summary"`
+	Inputs                  []syncLocalRepoInitInput      `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	SecretHints             []syncLocalRepoInitSecretHint `json:"secretHints,omitempty" yaml:"secretHints,omitempty"`
+	WrittenFiles            []string                      `json:"writtenFiles,omitempty" yaml:"writtenFiles,omitempty"`
+	SkippedFiles            []string                      `json:"skippedFiles,omitempty" yaml:"skippedFiles,omitempty"`
+	NextSteps               []string                      `json:"nextSteps" yaml:"nextSteps"`
 }
 
 type syncLocalRepoInitSummary struct {
@@ -57,19 +58,21 @@ type syncLocalRepoInitSecretHint struct {
 }
 
 type syncLocalRepoInitOptions struct {
-	ClusterName    string
-	BOMPath        string
-	OutputDir      string
-	PackageSources []string
-	Overwrite      bool
-	CreatedAt      time.Time
+	ClusterName             string
+	BOMPath                 string
+	DistributionChannelPath string
+	OutputDir               string
+	PackageSources          []string
+	Overwrite               bool
+	CreatedAt               time.Time
 }
 
 type syncLocalRepoDoctorOptions struct {
-	ClusterName    string
-	BOMPath        string
-	LocalRepoPath  string
-	PackageSources []string
+	ClusterName             string
+	BOMPath                 string
+	DistributionChannelPath string
+	LocalRepoPath           string
+	PackageSources          []string
 }
 
 type syncLocalRepoInitWriter struct {
@@ -97,12 +100,21 @@ func newSyncLocalRepoCmd() *cobra.Command {
 func runSyncLocalRepoDoctor(opts syncLocalRepoDoctorOptions) syncLocalRepoDoctorOutput {
 	acc := syncLocalRepoDoctorAccumulator{}
 	acc.out.BOMPath = strings.TrimSpace(opts.BOMPath)
+	acc.out.DistributionChannelPath = strings.TrimSpace(opts.DistributionChannelPath)
 	acc.out.LocalRepo = strings.TrimSpace(opts.LocalRepoPath)
 
-	doc, resolved, err := resolveSyncLocalRepoBOMPackages(opts.ClusterName, opts.BOMPath, opts.PackageSources)
+	target, resolved, err := resolveSyncLocalRepoBOMPackages(opts.ClusterName, syncTargetOptions{
+		BOMPath:                 opts.BOMPath,
+		DistributionChannelPath: opts.DistributionChannelPath,
+	}, opts.PackageSources)
 	if err != nil {
 		acc.error("packageContractInvalid", "", "", opts.BOMPath, err.Error(), "Fix the BOM or package-source flags, then rerun local-repo doctor.")
 		return acc.finalize()
+	}
+	doc := target.BOM
+	acc.out.BOMPath = target.BOMPath
+	if strings.TrimSpace(target.DistributionChannelPath) != "" {
+		acc.out.DistributionChannelPath = strings.TrimSpace(target.DistributionChannelPath)
 	}
 	acc.out.BOMName = doc.Metadata.Name
 	acc.out.Revision = doc.Spec.Revision
@@ -136,11 +148,12 @@ func runSyncLocalRepoDoctor(opts syncLocalRepoDoctorOptions) syncLocalRepoDoctor
 	return acc.finalize()
 }
 
-func resolveSyncLocalRepoBOMPackages(clusterName, bomPath string, packageSources []string) (*bom.BOM, map[string]*packageformat.ComponentPackage, error) {
-	doc, err := bom.LoadFile(bomPath)
+func resolveSyncLocalRepoBOMPackages(clusterName string, targetOpts syncTargetOptions, packageSources []string) (*syncResolvedTarget, map[string]*packageformat.ComponentPackage, error) {
+	target, err := resolveSyncTarget(targetOpts)
 	if err != nil {
 		return nil, nil, err
 	}
+	doc := target.BOM
 	localRoots, localPackages, err := resolveSyncPackageSources(doc, packageSources)
 	if err != nil {
 		return nil, nil, err
@@ -159,7 +172,7 @@ func resolveSyncLocalRepoBOMPackages(clusterName, bomPath string, packageSources
 	if err != nil {
 		return nil, nil, err
 	}
-	return doc, resolved, nil
+	return target, resolved, nil
 }
 
 func (a *syncLocalRepoDoctorAccumulator) issue(severity syncLocalRepoDoctorSeverity, code, component, input, path, message, suggestedFix string) {
@@ -566,14 +579,15 @@ type syncLocalRepoDoctorSummary struct {
 }
 
 type syncLocalRepoDoctorOutput struct {
-	Passed    bool                       `json:"passed" yaml:"passed"`
-	LocalRepo string                     `json:"localRepo" yaml:"localRepo"`
-	BOMPath   string                     `json:"bomPath" yaml:"bomPath"`
-	BOMName   string                     `json:"bomName" yaml:"bomName"`
-	Revision  string                     `json:"revision" yaml:"revision"`
-	Summary   syncLocalRepoDoctorSummary `json:"summary" yaml:"summary"`
-	Issues    []syncLocalRepoDoctorIssue `json:"issues,omitempty" yaml:"issues,omitempty"`
-	Suggested []string                   `json:"suggested,omitempty" yaml:"suggested,omitempty"`
+	Passed                  bool                       `json:"passed" yaml:"passed"`
+	LocalRepo               string                     `json:"localRepo" yaml:"localRepo"`
+	BOMPath                 string                     `json:"bomPath" yaml:"bomPath"`
+	DistributionChannelPath string                     `json:"distributionChannelPath,omitempty" yaml:"distributionChannelPath,omitempty"`
+	BOMName                 string                     `json:"bomName" yaml:"bomName"`
+	Revision                string                     `json:"revision" yaml:"revision"`
+	Summary                 syncLocalRepoDoctorSummary `json:"summary" yaml:"summary"`
+	Issues                  []syncLocalRepoDoctorIssue `json:"issues,omitempty" yaml:"issues,omitempty"`
+	Suggested               []string                   `json:"suggested,omitempty" yaml:"suggested,omitempty"`
 }
 
 type syncLocalRepoDoctorAccumulator struct {
@@ -582,11 +596,12 @@ type syncLocalRepoDoctorAccumulator struct {
 
 func newSyncLocalRepoDoctorCmd() *cobra.Command {
 	var flags struct {
-		clusterName    string
-		bomFile        string
-		localRepo      string
-		packageSources []string
-		output         string
+		clusterName             string
+		bomFile                 string
+		distributionChannelFile string
+		localRepo               string
+		packageSources          []string
+		output                  string
 	}
 
 	cmd := &cobra.Command{
@@ -596,10 +611,11 @@ func newSyncLocalRepoDoctorCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := runSyncLocalRepoDoctor(syncLocalRepoDoctorOptions{
-				ClusterName:    flags.clusterName,
-				BOMPath:        flags.bomFile,
-				LocalRepoPath:  flags.localRepo,
-				PackageSources: flags.packageSources,
+				ClusterName:             flags.clusterName,
+				BOMPath:                 flags.bomFile,
+				DistributionChannelPath: flags.distributionChannelFile,
+				LocalRepoPath:           flags.localRepo,
+				PackageSources:          flags.packageSources,
 			})
 			if err := writeSyncOutput(cmd, out, flags.output, "local repo doctor result"); err != nil {
 				return err
@@ -611,13 +627,10 @@ func newSyncLocalRepoDoctorCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose runtime package cache should be used")
-	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file used to discover package input contracts")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.distributionChannelFile, "path to the BOM file used to discover package input contracts")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "local repo directory to inspect")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local repo inspection")
 	addSyncOutputFlag(cmd, &flags.output)
-	if err := cmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 	if err := cmd.MarkFlagRequired("local-repo"); err != nil {
 		panic(err)
 	}
@@ -626,12 +639,13 @@ func newSyncLocalRepoDoctorCmd() *cobra.Command {
 
 func newSyncLocalRepoInitCmd() *cobra.Command {
 	var flags struct {
-		clusterName    string
-		bomFile        string
-		outputDir      string
-		packageSources []string
-		overwrite      bool
-		output         string
+		clusterName             string
+		bomFile                 string
+		distributionChannelFile string
+		outputDir               string
+		packageSources          []string
+		overwrite               bool
+		output                  string
 	}
 
 	cmd := &cobra.Command{
@@ -641,12 +655,13 @@ func newSyncLocalRepoInitCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out, err := runSyncLocalRepoInit(syncLocalRepoInitOptions{
-				ClusterName:    flags.clusterName,
-				BOMPath:        flags.bomFile,
-				OutputDir:      flags.outputDir,
-				PackageSources: flags.packageSources,
-				Overwrite:      flags.overwrite,
-				CreatedAt:      time.Now().UTC(),
+				ClusterName:             flags.clusterName,
+				BOMPath:                 flags.bomFile,
+				DistributionChannelPath: flags.distributionChannelFile,
+				OutputDir:               flags.outputDir,
+				PackageSources:          flags.packageSources,
+				Overwrite:               flags.overwrite,
+				CreatedAt:               time.Now().UTC(),
 			})
 			if err != nil {
 				return err
@@ -655,14 +670,11 @@ func newSyncLocalRepoInitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose runtime package cache should be used")
-	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file used to discover package input contracts")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.distributionChannelFile, "path to the BOM file used to discover package input contracts")
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "local repo directory to create or update")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local initialization")
 	cmd.Flags().BoolVar(&flags.overwrite, "overwrite", false, "overwrite generated skeleton files that already exist")
 	addSyncOutputFlag(cmd, &flags.output)
-	if err := cmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 	if err := cmd.MarkFlagRequired("output-dir"); err != nil {
 		panic(err)
 	}
@@ -670,10 +682,14 @@ func newSyncLocalRepoInitCmd() *cobra.Command {
 }
 
 func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutput, error) {
-	doc, resolved, err := resolveSyncLocalRepoBOMPackages(opts.ClusterName, opts.BOMPath, opts.PackageSources)
+	target, resolved, err := resolveSyncLocalRepoBOMPackages(opts.ClusterName, syncTargetOptions{
+		BOMPath:                 opts.BOMPath,
+		DistributionChannelPath: opts.DistributionChannelPath,
+	}, opts.PackageSources)
 	if err != nil {
 		return syncLocalRepoInitOutput{}, err
 	}
+	doc := target.BOM
 
 	root, err := filepath.Abs(opts.OutputDir)
 	if err != nil {
@@ -698,11 +714,12 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 	}
 
 	out := syncLocalRepoInitOutput{
-		LocalRepo:  root,
-		BOMPath:    opts.BOMPath,
-		BOMName:    doc.Metadata.Name,
-		Revision:   doc.Spec.Revision,
-		Components: len(doc.Spec.Components),
+		LocalRepo:               root,
+		BOMPath:                 target.BOMPath,
+		DistributionChannelPath: strings.TrimSpace(target.DistributionChannelPath),
+		BOMName:                 doc.Metadata.Name,
+		Revision:                doc.Spec.Revision,
+		Components:              len(doc.Spec.Components),
 	}
 	if err := writer.writeYAML("repo.yaml", syncLocalRepoMetadata(doc, opts.CreatedAt)); err != nil {
 		return syncLocalRepoInitOutput{}, err
