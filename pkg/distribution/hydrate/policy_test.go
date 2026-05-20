@@ -175,6 +175,37 @@ func TestLoadBundleLocalPatchPolicyFixtureRejectsDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestLoadPackageLocalPatchPolicySkipsSourceWhenNoPackagePolicy(t *testing.T) {
+	t.Parallel()
+
+	doc, err := LoadPackageLocalPatchPolicy(&Plan{
+		Components: []ComponentPlan{{Name: "runtime"}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("LoadPackageLocalPatchPolicy() error = %v", err)
+	}
+	if doc != nil {
+		t.Fatalf("LoadPackageLocalPatchPolicy() = %#v, want nil", doc)
+	}
+}
+
+func TestLoadPackageLocalPatchPolicyRejectsMultipleBeforeSourceLookup(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadPackageLocalPatchPolicy(&Plan{
+		Components: []ComponentPlan{
+			{Name: "runtime", LocalPatchPolicy: "policy/runtime.yaml"},
+			{Name: "network", LocalPatchPolicy: "policy/network.yaml"},
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("LoadPackageLocalPatchPolicy() error = nil, want multiple package policy error")
+	}
+	if !strings.Contains(err.Error(), "multiple component packages declare local patch policies") {
+		t.Fatalf("LoadPackageLocalPatchPolicy() error = %v, want multiple package policy error", err)
+	}
+}
+
 func testLocalPatchPolicyYAML(name string, allowedPrefixes ...string) []byte {
 	prefixLines := make([]string, 0, len(allowedPrefixes))
 	for _, prefix := range allowedPrefixes {
