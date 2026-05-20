@@ -256,6 +256,7 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport) []bom.Distr
 			Message: fmt.Sprintf("status=%s exitCode=%d", strings.TrimSpace(report.Spec.Status), report.Spec.ExitCode),
 		},
 	}
+	signals = append(signals, syncHealthProofContractSignals(report)...)
 	signals = append(signals, bom.DistributionHealthSignal{
 		Name:    "source-preflight",
 		Passed:  syncHealthProofPreflightPassed(report.Spec.SourcePreflightState),
@@ -311,6 +312,59 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport) []bom.Distr
 			Name:    "stage/" + strings.TrimSpace(stage.Name),
 			Passed:  passed,
 			Message: message,
+		})
+	}
+	return signals
+}
+
+func syncHealthProofContractSignals(report *syncHealthProofAcceptanceReport) []bom.DistributionHealthSignal {
+	stageStatuses := make(map[string]string, len(report.Spec.Stages))
+	for _, stage := range report.Spec.Stages {
+		stageStatuses[strings.TrimSpace(stage.Name)] = strings.TrimSpace(stage.Status)
+	}
+	required := []string{
+		"package-inspect-containerd",
+		"package-inspect-kubernetes",
+		"package-inspect-cilium",
+		"local-repo-init",
+		"fill-local-repo-inputs",
+		"local-repo-doctor",
+		"validate",
+		"source-preflight",
+		"render",
+		"verify-sourcePreflight-metadata",
+		"runtime-preflight",
+		"plan",
+		"apply",
+		"status",
+		"diff",
+		"validate-cluster",
+	}
+	if report.Spec.RevertCheck {
+		required = append(required,
+			"revert-check-drift-inject",
+			"revert-check-drift-diff",
+			"revert-check-revert",
+			"revert-check-clean-diff",
+			"validate-cluster-after-revert",
+		)
+	}
+
+	signals := make([]bom.DistributionHealthSignal, 0, len(required))
+	for _, name := range required {
+		status, ok := stageStatuses[name]
+		if !ok || strings.TrimSpace(status) == "" {
+			signals = append(signals, bom.DistributionHealthSignal{
+				Name:    "contract/" + name,
+				Passed:  false,
+				Message: "stage=<missing>",
+			})
+			continue
+		}
+		signals = append(signals, bom.DistributionHealthSignal{
+			Name:    "contract/" + name,
+			Passed:  strings.EqualFold(status, "Passed"),
+			Message: "status=" + status,
 		})
 	}
 	return signals

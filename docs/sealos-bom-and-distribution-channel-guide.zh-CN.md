@@ -373,9 +373,10 @@ sealos sync health-proof \
 判定：只有 report 本身通过且 exit code 为 `0`、source/runtime preflight
 没有 blocking、确实跑过 mutating apply、post-apply state 是 `Clean`、
 `revertCheck: true` 时 post-revert state 也是 `Clean`，并且没有失败 stage，
-proof 才会是 `spec.passed: true`。只跑 safe smoke、没有 mutating apply 的
-report 仍然可以生成 evidence，但会得到 `spec.passed: false`，不应该满足
-beta/stable promotion policy。
+并且预期的 smoke/apply/revert acceptance stages 都存在且通过，proof 才会是
+`spec.passed: true`。只跑 safe smoke、没有 mutating apply 的 report 仍然可以
+生成 evidence，但会得到 `spec.passed: false`，不应该满足 beta/stable
+promotion policy。
 
 最小 health proof 形态如下：
 

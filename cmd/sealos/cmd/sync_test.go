@@ -532,11 +532,7 @@ func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
 		RuntimePreflightState: "Warning",
 		PostApplyState:        "Clean",
 		PostRevertState:       "Clean",
-		Stages: []syncHealthProofAcceptanceReportStage{
-			{Name: "render", Status: "Passed"},
-			{Name: "apply", Status: "Passed", Mutates: true},
-			{Name: "validate-cluster", Status: "Passed", Mutates: true},
-		},
+		Stages:                syncHealthProofTestStages(true),
 	})
 	proofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
 
@@ -583,6 +579,12 @@ func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
 	}
 	if !syncHealthProofTestSignalPassed(out, "mutating-apply") {
 		t.Fatal("mutating-apply signal did not pass")
+	}
+	if !syncHealthProofTestSignalPassed(out, "contract/apply") {
+		t.Fatal("contract/apply signal did not pass")
+	}
+	if !syncHealthProofTestSignalPassed(out, "contract/validate-cluster-after-revert") {
+		t.Fatal("contract/validate-cluster-after-revert signal did not pass")
 	}
 	if !syncHealthProofTestSignalPassed(out, "stage/apply") {
 		t.Fatal("stage/apply signal did not pass")
@@ -657,10 +659,7 @@ func TestSyncHealthProofCmdRequiresMutatingApplyEvidence(t *testing.T) {
 		ExitCode:              0,
 		SourcePreflightState:  "Ready",
 		RuntimePreflightState: "Ready",
-		Stages: []syncHealthProofAcceptanceReportStage{
-			{Name: "render", Status: "Passed"},
-			{Name: "apply", Status: "Skipped", Mutates: true},
-		},
+		Stages:                syncHealthProofTestStages(false),
 	})
 
 	buf := bytes.NewBuffer(nil)
@@ -688,6 +687,48 @@ func TestSyncHealthProofCmdRequiresMutatingApplyEvidence(t *testing.T) {
 	}
 }
 
+func TestSyncHealthProofCmdFailsWhenContractStageMissing(t *testing.T) {
+	root := t.TempDir()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		Status:                "Passed",
+		ExitCode:              0,
+		MutatingApply:         true,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Ready",
+		PostApplyState:        "Clean",
+		Stages:                []syncHealthProofAcceptanceReportStage{{Name: "apply", Status: "Passed", Mutates: true}},
+	})
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", bomPath,
+		"--acceptance-report", reportPath,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if out.Spec.Passed {
+		t.Fatal("spec.passed = true, want false")
+	}
+	if syncHealthProofTestSignalPassed(out, "contract/render") {
+		t.Fatal("contract/render signal passed, want failed")
+	}
+}
+
 func TestSyncHealthProofCmdFailsWhenPostApplyStateMissing(t *testing.T) {
 	root := t.TempDir()
 	bomPath := filepath.Join(root, "bom.yaml")
@@ -701,9 +742,7 @@ func TestSyncHealthProofCmdFailsWhenPostApplyStateMissing(t *testing.T) {
 		MutatingApply:         true,
 		SourcePreflightState:  "Ready",
 		RuntimePreflightState: "Ready",
-		Stages: []syncHealthProofAcceptanceReportStage{
-			{Name: "apply", Status: "Passed", Mutates: true},
-		},
+		Stages:                syncHealthProofTestStages(false),
 	})
 
 	buf := bytes.NewBuffer(nil)
@@ -9277,6 +9316,42 @@ func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthPr
 	if err := yamlutil.MarshalFile(path, report); err != nil {
 		t.Fatalf("MarshalFile(acceptance report) error = %v", err)
 	}
+}
+
+func syncHealthProofTestStages(revertCheck bool) []syncHealthProofAcceptanceReportStage {
+	stages := []syncHealthProofAcceptanceReportStage{
+		{Name: "package-inspect-containerd", Status: "Passed"},
+		{Name: "package-inspect-kubernetes", Status: "Passed"},
+		{Name: "package-inspect-cilium", Status: "Passed"},
+		{Name: "local-repo-init", Status: "Passed"},
+		{Name: "fill-local-repo-inputs", Status: "Passed"},
+		{Name: "local-repo-doctor", Status: "Passed"},
+		{Name: "validate", Status: "Passed"},
+		{Name: "source-preflight", Status: "Passed"},
+		{Name: "render", Status: "Passed"},
+		{Name: "verify-sourcePreflight-metadata", Status: "Passed"},
+		{Name: "runtime-preflight", Status: "Passed"},
+		{Name: "plan", Status: "Passed"},
+		{Name: "apply", Status: "Passed", Mutates: true},
+		{Name: "status", Status: "Passed"},
+		{Name: "diff", Status: "Passed"},
+		{Name: "validate-cluster", Status: "Passed", Mutates: true},
+		{Name: "revert-check-drift-inject", Status: "Skipped", Mutates: true},
+		{Name: "revert-check-drift-diff", Status: "Skipped"},
+		{Name: "revert-check-revert", Status: "Skipped", Mutates: true},
+		{Name: "revert-check-clean-diff", Status: "Skipped"},
+		{Name: "validate-cluster-after-revert", Status: "Skipped", Mutates: true},
+	}
+	if !revertCheck {
+		return stages
+	}
+	for i := range stages {
+		switch stages[i].Name {
+		case "revert-check-drift-inject", "revert-check-drift-diff", "revert-check-revert", "revert-check-clean-diff", "validate-cluster-after-revert":
+			stages[i].Status = "Passed"
+		}
+	}
+	return stages
 }
 
 func syncHealthProofTestSignalPassed(proof bom.DistributionHealthProof, name string) bool {

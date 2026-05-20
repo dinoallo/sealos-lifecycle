@@ -388,9 +388,10 @@ The generated proof targets the line and revision from the BOM passed with
 `--file`. It is conservative: the proof passes only when the report passed with
 exit code `0`, source and runtime preflight were non-blocking, mutating apply
 was exercised, post-apply state is `Clean`, post-revert state is `Clean` when
-`revertCheck: true`, and no recorded stage failed. Safe smoke reports that do
-not run a mutating apply still generate useful evidence, but they produce
-`spec.passed: false` and should not satisfy beta/stable promotion policy.
+`revertCheck: true`, and the expected smoke/apply/revert acceptance stages are
+present and passing. Safe smoke reports that do not run a mutating apply still
+generate useful evidence, but they produce `spec.passed: false` and should not
+satisfy beta/stable promotion policy.
 
 A minimal health proof looks like:
 
