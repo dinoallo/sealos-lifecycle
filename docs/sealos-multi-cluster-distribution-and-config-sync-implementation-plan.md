@@ -264,11 +264,17 @@ Primary packages:
 
 Tasks:
 
-- Define channel metadata for `Alpha`, `Beta`, and `Stable`.
-- Implement candidate revision metadata and history.
+- Define channel metadata for `Alpha`, `Beta`, and `Stable`. Implemented for
+  the local-file policy boundary in `pkg/distribution/promotion`.
+- Implement candidate revision metadata and history. Candidate source channel
+  and transition metadata are represented in the local promotion policy
+  decision; durable advancement history is recorded in
+  `DistributionChannel.spec.promotionHistory[]`.
 - Implement the upstream handoff path for `sealos sync commit --target=global`.
 - Prevent silent promotion of `Orphan` changes.
-- Record enough audit metadata to reconstruct why a promotion occurred.
+- Record enough audit metadata to reconstruct why a promotion occurred. The
+  local `sealos sync promote` path records reason, approver, timestamp, BOM
+  path, proof path/digest/summary, and returns the policy decision.
 
 Dependencies:
 

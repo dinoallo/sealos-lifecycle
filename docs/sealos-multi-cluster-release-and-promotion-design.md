@@ -88,6 +88,21 @@ Sealos should use staged release channels with increasing rollout confidence.
 Channels are not just labels. They imply different evidence thresholds and
 approval expectations.
 
+The current code boundary models these expectations in
+`pkg/distribution/promotion`. The default local-file policy treats a BOM's
+transitional `spec.channel` as the candidate source channel and evaluates it
+against the mutable `DistributionChannel.spec.channel` target:
+
+| Target channel | Allowed candidate source channels | Health proof |
+| --- | --- | --- |
+| `Alpha` | `Alpha` | Optional |
+| `Beta` | `Alpha`, `Beta` | Required |
+| `Stable` | `Beta`, `Stable` | Required |
+
+This is not a registry-backed release service. It is the first deterministic
+policy layer used by `sealos sync promote` before a local channel file is
+advanced.
+
 ## Promotion Flow
 
 Promotion should follow an explicit, auditable path:
@@ -162,6 +177,11 @@ Promotion must be constrained by explicit policy:
 
 These guardrails are what prevent local experimentation from becoming an
 untracked global fork.
+
+For the local-file implementation, `sealos sync promote` enforces the channel
+source and proof requirements before writing `DistributionChannel`. The command
+returns the promotion policy decision in structured output so automation can
+inspect the selected rule, evaluated transition, and proof requirement.
 
 ## Halt And Rollback Expectations
 

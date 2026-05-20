@@ -339,9 +339,11 @@ The command validates that:
 - the channel document is a valid `DistributionChannel`
 - the target BOM is a valid BOM
 - `DistributionChannel.spec.line` matches `BOM.metadata.name`
-- if `--health-proof` is set, the proof is a valid
-  `DistributionHealthProof`, targets the same line and BOM revision, and
-  reports `spec.passed: true` with no failed signals
+- the default promotion policy allows the target channel to advance to the
+  candidate BOM's source channel
+- if the target channel requires proof, `--health-proof` points to a valid
+  `DistributionHealthProof` that targets the same line and BOM revision,
+  reports `spec.passed: true`, and has no failed signals
 
 It then writes the updated channel file and appends
 `spec.promotionHistory[]` with:
@@ -353,6 +355,19 @@ It then writes the updated channel file and appends
 - the approver
 - the approval timestamp
 - the health proof path, digest, and summary when `--health-proof` is used
+
+The current local-file promotion policy is intentionally small and
+deterministic:
+
+| Target channel | Allowed candidate `BOM.spec.channel` | Health proof |
+| --- | --- | --- |
+| `alpha` | `alpha` | not required |
+| `beta` | `alpha`, `beta` | required |
+| `stable` | `beta`, `stable` | required |
+
+This blocks an unvalidated `alpha` candidate from skipping directly to
+`stable`, and it treats missing proof for `beta` or `stable` as a policy
+failure rather than an implicit approval.
 
 A minimal health proof looks like:
 
@@ -379,6 +394,11 @@ The generated `spec.bomPath` is relative to the channel file when possible.
 Existing render, validate, agent, and controller paths continue to consume the
 same channel file through `--distribution-channel` or
 `distributionChannelPath`.
+
+`sealos sync promote` also returns a `policyDecision` object in its structured
+output. The decision records the evaluated transition, target channel rule,
+health-proof requirement, and any warning or violation fields from the policy
+engine. Failed decisions block before the channel file is written.
 
 ## Day 1 To Day N Behavior
 
