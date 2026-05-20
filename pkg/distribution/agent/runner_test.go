@@ -237,6 +237,56 @@ func TestRunnerLoopStopsOnContextCancellation(t *testing.T) {
 	}
 }
 
+func TestRunnerForwardsRolloutStrategy(t *testing.T) {
+	withRuntimeRoot(t)
+	root := t.TempDir()
+	packageRoot := writeAgentPackage(t, root)
+	doc := agentBOM()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+
+	var gotBatchSize int
+	runner := Runner{
+		Materialize: func(*bom.BOM, reconcile.Options) (*reconcile.Result, error) {
+			return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
+		},
+		Apply: func(opts reconcile.ApplyOptions) (*reconcile.ApplyResult, error) {
+			gotBatchSize = opts.Rollout.BatchSize
+			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
+				Name:     doc.Metadata.Name,
+				Revision: doc.Spec.Revision,
+				Channel:  doc.Spec.Channel,
+			}, "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "", "")
+			if err != nil {
+				return nil, err
+			}
+			return &reconcile.ApplyResult{
+				BundlePath:         opts.BundlePath,
+				DesiredStateDigest: applied.Spec.DesiredStateDigest,
+				AppliedRevision:    applied,
+			}, nil
+		},
+	}
+
+	_, err := runner.Run(context.Background(), Options{
+		ClusterName:    "agent-rollout",
+		Target:         TargetOptions{BOMPath: bomPath},
+		PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
+		ApplyOptions: reconcile.ApplyOptions{
+			Rollout: reconcile.RolloutStrategy{BatchSize: 2},
+		},
+		Once: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := gotBatchSize, 2; got != want {
+		t.Fatalf("rollout batch size = %d, want %d", got, want)
+	}
+}
+
 func withRuntimeRoot(t *testing.T) {
 	t.Helper()
 	previous := constants.DefaultRuntimeRootDir

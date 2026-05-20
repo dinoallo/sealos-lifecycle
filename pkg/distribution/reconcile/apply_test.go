@@ -1776,6 +1776,128 @@ func TestProvisioningHostsForComponentSkipsJoinedNodes(t *testing.T) {
 	}
 }
 
+func TestRolloutHostBatches(t *testing.T) {
+	t.Parallel()
+
+	executor := &bundleExecutor{
+		rollout: RolloutStrategy{BatchSize: 2},
+	}
+	batches := executor.rolloutHostBatches([]string{"host-a", "host-b", "host-c"})
+	if got, want := len(batches), 2; got != want {
+		t.Fatalf("len(batches) = %d, want %d", got, want)
+	}
+	if got, want := strings.Join(batches[0], ","), "host-a,host-b"; got != want {
+		t.Fatalf("batch 0 = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(batches[1], ","), "host-c"; got != want {
+		t.Fatalf("batch 1 = %q, want %q", got, want)
+	}
+
+	executor.rollout.BatchSize = 0
+	batches = executor.rolloutHostBatches([]string{"host-a", "host-b"})
+	if got, want := len(batches), 1; got != want {
+		t.Fatalf("default len(batches) = %d, want %d", got, want)
+	}
+	if got, want := strings.Join(batches[0], ","), "host-a,host-b"; got != want {
+		t.Fatalf("default batch = %q, want %q", got, want)
+	}
+}
+
+func TestApplyRolloutBatchSizeLogsHostWaves(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	fakeRemote := &fakeApplyRemoteExecutor{}
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"},
+			firstMaster: "10.0.0.10:22",
+		}, nil
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	bundleDir := filepath.Join(t.TempDir(), "bundle")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	bundle := &hydrate.Bundle{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindHydratedBundle,
+		Spec: hydrate.BundleSpec{
+			BOMName:  "rollout-runtime",
+			Revision: "rev-1",
+			Channel:  bom.ChannelAlpha,
+			ExecutionTopology: hydrate.ExecutionTopology{
+				AllNodes:    []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"},
+				FirstMaster: "10.0.0.10:22",
+			},
+			Components: []hydrate.RenderedComponent{{
+				Name:        "runtime",
+				PackageName: "runtime-rootfs",
+				Version:     "v0.1.0",
+				Class:       packageformat.ClassRootfs,
+				RootPath:    "components/runtime/files",
+				Steps: []hydrate.RenderedStep{
+					{
+						Name:        "runtime-rootfs",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/runtime/files/rootfs",
+						SourcePath:  "rootfs/",
+						ContentType: packageformat.ContentRootfs,
+					},
+					{
+						Name:           "preflight",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/runtime/files/hooks/preflight.sh",
+						SourcePath:     "hooks/preflight.sh",
+						HookPhase:      packageformat.PhaseBootstrap,
+						Target:         packageformat.TargetAllNodes,
+						TimeoutSeconds: 5,
+					},
+				},
+			}},
+		},
+	}
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	persistRenderedStateForBundle(t, "rollout-cluster", bundleDir, bundle)
+
+	stderr := bytes.NewBuffer(nil)
+	if _, err := Apply(ApplyOptions{
+		ClusterName: "rollout-cluster",
+		BundlePath:  bundleDir,
+		Stderr:      stderr,
+		Rollout: RolloutStrategy{
+			BatchSize: 1,
+		},
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	logText := stderr.String()
+	first := strings.Index(logText, "running rollout batch 1/3")
+	second := strings.Index(logText, "running rollout batch 2/3")
+	third := strings.Index(logText, "running rollout batch 3/3")
+	if first < 0 || second < 0 || third < 0 {
+		t.Fatalf("rollout batch logs missing\nlog:\n%s", logText)
+	}
+	if !(first < second && second < third) {
+		t.Fatalf("rollout batch logs out of order\nlog:\n%s", logText)
+	}
+}
+
 func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, bundle *hydrate.Bundle) {
 	t.Helper()
 

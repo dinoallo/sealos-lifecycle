@@ -47,6 +47,7 @@ type ApplyOptions struct {
 	HostRoot       string
 	Stderr         io.Writer
 	WaitTimeout    time.Duration
+	Rollout        RolloutStrategy
 }
 
 type ApplyResult struct {
@@ -54,6 +55,10 @@ type ApplyResult struct {
 	BundlePath         string
 	DesiredStateDigest string
 	AppliedRevision    *state.AppliedRevision
+}
+
+type RolloutStrategy struct {
+	BatchSize int `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
 }
 
 type bundleExecutor struct {
@@ -65,6 +70,7 @@ type bundleExecutor struct {
 	hostRoot              string
 	stderr                io.Writer
 	waitTimeout           time.Duration
+	rollout               RolloutStrategy
 	topology              *clusterExecutionTopology
 	remoteExec            applyRemoteExecutor
 	stagedBundleRoots     map[string]string
@@ -120,6 +126,7 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 		hostRoot:           opts.HostRoot,
 		stderr:             opts.Stderr,
 		waitTimeout:        opts.WaitTimeout,
+		rollout:            opts.Rollout,
 		topology:           topology,
 	}
 	executor.applyDefaults()
@@ -780,46 +787,56 @@ func (e *bundleExecutor) hostHasKubeletIdentity(host string) (bool, error) {
 }
 
 func (e *bundleExecutor) stopServices(hosts []string, files contentSet) error {
-	for _, host := range hosts {
-		for _, service := range servicesForComponent(files, e.bundlePath) {
-			if err := e.stopServiceIfActiveOnHost(host, service); err != nil {
-				return err
+	services := servicesForComponent(files, e.bundlePath)
+	if len(services) == 0 {
+		return nil
+	}
+	return e.forEachHostBatch(hosts, func(batch []string) error {
+		for _, host := range batch {
+			for _, service := range services {
+				if err := e.stopServiceIfActiveOnHost(host, service); err != nil {
+					return err
+				}
 			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (e *bundleExecutor) applyMutableContent(hosts []string, files contentSet) error {
-	for _, host := range hosts {
-		for _, step := range files.rootfs {
-			if err := e.applyRootfsToHost(host, step); err != nil {
-				return err
+	return e.forEachHostBatch(hosts, func(batch []string) error {
+		for _, host := range batch {
+			for _, step := range files.rootfs {
+				if err := e.applyRootfsToHost(host, step); err != nil {
+					return err
+				}
+			}
+			for _, step := range files.files {
+				if err := e.applyFileToHost(host, step); err != nil {
+					return err
+				}
 			}
 		}
-		for _, step := range files.files {
-			if err := e.applyFileToHost(host, step); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (e *bundleExecutor) runReloadIfNeeded(hosts []string, files contentSet, applySysctl bool) error {
-	for _, host := range hosts {
-		if applySysctl {
-			if err := e.runIfPresentOnHost(host, "sysctl", "--system"); err != nil {
-				return err
+	return e.forEachHostBatch(hosts, func(batch []string) error {
+		for _, host := range batch {
+			if applySysctl {
+				if err := e.runIfPresentOnHost(host, "sysctl", "--system"); err != nil {
+					return err
+				}
+			}
+			if len(files.rootfs) > 0 || len(files.files) > 0 {
+				if err := e.runIfPresentOnHost(host, "systemctl", "daemon-reload"); err != nil {
+					return err
+				}
 			}
 		}
-		if len(files.rootfs) > 0 || len(files.files) > 0 {
-			if err := e.runIfPresentOnHost(host, "systemctl", "daemon-reload"); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (e *bundleExecutor) runHooksForHosts(component hydrate.RenderedComponent, hooks []hydrate.RenderedStep, allNodeHosts []string) error {
@@ -838,10 +855,15 @@ func (e *bundleExecutor) runHooksForHosts(component hydrate.RenderedComponent, h
 					return err
 				}
 			}
-			for _, host := range targetHosts {
-				if err := e.runHookOnHost(host, component, hook); err != nil {
-					return err
+			if err := e.forEachHostBatch(targetHosts, func(batch []string) error {
+				for _, host := range batch {
+					if err := e.runHookOnHost(host, component, hook); err != nil {
+						return err
+					}
 				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		default:
 			targetHosts, err := e.resolveTargetHosts(hook.Target)
@@ -1354,6 +1376,41 @@ func (e *bundleExecutor) nodeExecutionHosts() []string {
 		return []string{localExecutionHost}
 	}
 	return e.topology.nodeExecutionHosts()
+}
+
+func (e *bundleExecutor) forEachHostBatch(hosts []string, fn func([]string) error) error {
+	if len(hosts) == 0 {
+		return nil
+	}
+	if fn == nil {
+		return fmt.Errorf("host batch function cannot be nil")
+	}
+	batches := e.rolloutHostBatches(hosts)
+	for i, batch := range batches {
+		if len(batches) > 1 {
+			e.logf("running rollout batch %d/%d on hosts: %s", i+1, len(batches), strings.Join(batch, ","))
+		}
+		if err := fn(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *bundleExecutor) rolloutHostBatches(hosts []string) [][]string {
+	batchSize := e.rollout.BatchSize
+	if batchSize <= 0 || batchSize >= len(hosts) {
+		return [][]string{slices.Clone(hosts)}
+	}
+	var batches [][]string
+	for start := 0; start < len(hosts); start += batchSize {
+		end := start + batchSize
+		if end > len(hosts) {
+			end = len(hosts)
+		}
+		batches = append(batches, slices.Clone(hosts[start:end]))
+	}
+	return batches
 }
 
 func (e *bundleExecutor) hookEnvironment(host, componentRoot, bundleRoot string) []string {

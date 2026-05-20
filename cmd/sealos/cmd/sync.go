@@ -803,6 +803,7 @@ func newSyncApplyCmd() *cobra.Command {
 		bundleDir              string
 		kubeconfigPath         string
 		hostRoot               string
+		rolloutBatchSize       int
 		allowStaleTopology     bool
 		allowStaleRenderInputs bool
 		output                 string
@@ -846,6 +847,9 @@ func newSyncApplyCmd() *cobra.Command {
 				KubeconfigPath: flags.kubeconfigPath,
 				HostRoot:       flags.hostRoot,
 				Stderr:         cmd.ErrOrStderr(),
+				Rollout: reconcile.RolloutStrategy{
+					BatchSize: flags.rolloutBatchSize,
+				},
 			})
 			if err != nil {
 				return err
@@ -867,6 +871,7 @@ func newSyncApplyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory that matches the cluster rendered state; defaults to the cluster current bundle")
 	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for manifest and healthcheck steps")
 	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for rootfs and file projection during apply")
+	cmd.Flags().IntVar(&flags.rolloutBatchSize, "rollout-batch-size", 0, "maximum hosts to process per rollout batch for host-targeted steps; 0 means all hosts")
 	cmd.Flags().BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "allow applying a bundle whose executionTopology snapshot differs from the current Clusterfile topology")
 	cmd.Flags().BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "allow applying a bundle whose recorded render inputs differ from current local inputs")
 	addSyncOutputFlag(cmd, &flags.output)
