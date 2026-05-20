@@ -354,20 +354,26 @@ spec:
   clusterName: default
   distributionChannelPath: /var/lib/sealos/distribution/default-platform-stable.yaml
   localRepoPath: /var/lib/sealos/distribution/local-repo
-  kubeconfigPath: /etc/kubernetes/admin.conf
-  hostRoot: /
+  kubeconfigPath: /host/etc/kubernetes/admin.conf
+  hostRoot: /host
   requeueAfter: 1m
 ```
 
-Run the agent in controller mode with:
+Run the agent in controller mode directly with:
 
 ```bash
 sealos-agent --controller --controller-namespace sealos-system
 ```
 
-This mode currently supplies the watched API and status conditions only. CRD
-YAML, RBAC, install manifests, registry-backed channel lookup, and promotion
-automation are still outside the implemented surface.
+Or install the CRD, RBAC, and deployment manifests from
+[`deploy/distribution-controller/base`](../deploy/distribution-controller/base).
+See
+[`sealos-distribution-controller-install.md`](./sealos-distribution-controller-install.md)
+for the in-cluster installation workflow and sample targets.
+
+This mode currently supplies the watched API, status conditions, and installable
+manifests only. Registry-backed channel lookup, promotion automation, and
+durable rollout policy objects are still outside the implemented surface.
 
 ## Applied Revision State
 

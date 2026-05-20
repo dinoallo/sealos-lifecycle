@@ -343,20 +343,23 @@ spec:
   clusterName: default
   distributionChannelPath: /var/lib/sealos/distribution/default-platform-stable.yaml
   localRepoPath: /var/lib/sealos/distribution/local-repo
-  kubeconfigPath: /etc/kubernetes/admin.conf
-  hostRoot: /
+  kubeconfigPath: /host/etc/kubernetes/admin.conf
+  hostRoot: /host
   requeueAfter: 1m
 ```
 
-用 controller mode 启动 agent：
+直接用 controller mode 启动 agent：
 
 ```bash
 sealos-agent --controller --controller-namespace sealos-system
 ```
 
-这个模式目前只提供 watched API 和 status condition。CRD YAML、RBAC、
-安装 manifests、registry-backed channel lookup 和 promotion automation 仍然
-不在已实现范围内。
+也可以从 [`deploy/distribution-controller/base`](../deploy/distribution-controller/base)
+安装 CRD、RBAC 和 deployment manifests。集群内安装流程和 sample targets 见
+[`sealos-distribution-controller-install.zh-CN.md`](./sealos-distribution-controller-install.zh-CN.md)。
+
+这个模式目前提供 watched API、status condition 和可安装 manifests。registry-backed
+channel lookup、promotion automation 和持久 rollout policy object 仍然不在已实现范围内。
 
 ## Applied revision state
 

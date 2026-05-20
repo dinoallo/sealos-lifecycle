@@ -62,7 +62,7 @@ Read this matrix as an implementation snapshot, not as a long-term promise.
 | Orchestrate a rendered bundle across multiple cluster hosts | Ready with boundary | [pkg/distribution/reconcile/topology.go](../pkg/distribution/reconcile/topology.go), [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go), [pkg/distribution/reconcile/kubeadm_bootstrap.go](../pkg/distribution/reconcile/kubeadm_bootstrap.go) | The CLI-driven `sync apply` path resolves `allNodes`, `firstMaster`, and `cluster`, stages bundle payloads per remote host, handles kubeadm join configs, and fetches remote first-master kubeconfig for cluster-scoped steps. Package hooks/scripts still need to be multi-node-safe. |
 | Resolve a local file-backed `DistributionChannel` target | Ready with boundary | [pkg/distribution/bom/channel.go](../pkg/distribution/bom/channel.go), [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/agent/runner.go](../pkg/distribution/agent/runner.go) | `--distribution-channel` loads one local channel document, validates its `line` and `targetRevision` against `spec.bomPath`, then renders the resolved BOM. There is no registry/API-backed lookup by `line + channel` yet. |
 | Run a process-level distribution reconcile agent | Ready with boundary | [cmd/sealos-agent/main.go](../cmd/sealos-agent/main.go), [cmd/sealos-agent/cmd/root.go](../cmd/sealos-agent/cmd/root.go), [pkg/distribution/agent/runner.go](../pkg/distribution/agent/runner.go) | `sealos-agent` can run once or on an interval against a BOM or local `DistributionChannel`. This remains useful for direct host execution and debugging. |
-| Run a minimal Kubernetes controller reconcile loop | Ready with boundary | [pkg/distribution/controller](../pkg/distribution/controller), `--controller` in [cmd/sealos-agent/cmd/root.go](../cmd/sealos-agent/cmd/root.go) | `sealos-agent --controller` watches `DistributionTarget` objects and delegates each reconcile to the existing agent runner, with status conditions and optional leader election. The repo does not yet ship CRD manifests/RBAC, registry-backed channel lookup, promotion health automation, or durable rollout policy objects. |
+| Run a minimal Kubernetes controller reconcile loop | Ready with boundary | [pkg/distribution/controller](../pkg/distribution/controller), `--controller` in [cmd/sealos-agent/cmd/root.go](../cmd/sealos-agent/cmd/root.go), [deploy/distribution-controller/base](../deploy/distribution-controller/base), [sealos-distribution-controller-install.md](./sealos-distribution-controller-install.md) | `sealos-agent --controller` watches `DistributionTarget` objects and delegates each reconcile to the existing agent runner, with status conditions, optional leader election, and installable CRD/RBAC/deployment manifests. Registry-backed channel lookup, promotion health automation, and durable rollout policy objects are still not implemented. |
 | Batch host-targeted rendered-bundle rollout | Ready with boundary | `--rollout-batch-size` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go) and [cmd/sealos-agent/cmd/root.go](../cmd/sealos-agent/cmd/root.go), batching in [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | Batching applies to host-targeted all-node steps inside the rendered-bundle executor. It is not a durable rollout policy object with canary pauses, health gates, or automatic rollback. |
 | Commit a local input-backed host file from a selected multi-node host | Ready with boundary | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/commit/commit.go](../pkg/distribution/commit/commit.go) | Current multi-node commit support is intentionally narrow: it only covers local-input regular files, writes selected hosts back to host-scoped inputs when present, and rejects divergent selected-host commits that would overwrite the default input without host-scoped provenance. |
 | Track host files, Kubernetes objects, and some generated projections | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go), [pkg/distribution/compare/compare.go](../pkg/distribution/compare/compare.go) | Generated projection coverage is intentionally narrow. |
@@ -78,7 +78,6 @@ These are the main things users should **not** mistake as already done.
 | --- | --- | --- |
 | Direct “install this package” workflow without BOM/bundle mediation | Not implemented | The current deployment path is `package -> BOM -> render -> bundle -> apply`, not package-direct install. |
 | Controller-driven multi-node rollout policy | Not implemented | Host batching now exists for rendered-bundle apply, but there is still no background controller, durable rollout policy object, package-level safety model, health gate, or automatic rollback model for every multi-node workflow. |
-| Installable controller manifests and RBAC | Not implemented | The code now has a minimal watched `DistributionTarget` controller path, but the repository does not yet ship CRD YAML, RBAC, deployment manifests, or an installation workflow for running it in a cluster. |
 | Live `DistributionChannel` release lookup and promotion service | Not implemented | Local file-backed `DistributionChannel` resolution exists, but there is no registry/API-backed lookup by `distribution line + channel`, no channel advancement history, and no promotion service. |
 | Fully generalized generated-output drift management | Not implemented | The MVP tracks a narrow known set, not every possible generated artifact. |
 | Package/BOM-defined local patch policy source | Not implemented | Current policy sources are only `localRepo` and `builtInDefault`. |
@@ -94,7 +93,7 @@ The shortest accurate statement for the current repository is:
 - CLI-driven multi-node bundle orchestration is ready with a narrow boundary
 - local file-backed `DistributionChannel` selection is ready with a narrow boundary
 - `sealos-agent` process-level reconciliation is ready with a narrow boundary
-- `sealos-agent --controller` minimal watched reconciliation is ready with a narrow boundary
+- `sealos-agent --controller` minimal watched reconciliation and install manifests are ready with a narrow boundary
 - host rollout batching is ready with a narrow boundary
 - Kubernetes controller-driven rollout and release-system behavior are not ready yet
 
@@ -105,7 +104,7 @@ That means the repository is already strong enough for:
 - BOM-driven render/apply workflows
 - local `DistributionChannel` target selection
 - process-level agent reconciliation
-- minimal `DistributionTarget` controller reconciliation
+- minimal `DistributionTarget` controller reconciliation with installable manifests and RBAC
 - batched host apply waves for rendered bundles
 - drift and ownership experiments on the current CLI-driven path
 
@@ -113,7 +112,7 @@ But it is not yet the final shape of:
 
 - multi-cluster release management
 - Kubernetes controller-driven multi-node topology-aware deployment
-- installable controller manifests, RBAC, and promotion automation
+- promotion automation
 
 ## Related Documents
 
@@ -128,3 +127,5 @@ But it is not yet the final shape of:
   [sealos-sync-drift-walkthrough.md](./sealos-sync-drift-walkthrough.md)
 - BOM and `DistributionChannel` model, including the current local-file boundary:
   [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md)
+- Controller install guide:
+  [sealos-distribution-controller-install.md](./sealos-distribution-controller-install.md)
