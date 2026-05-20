@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,6 +239,78 @@ func TestRunnerLoopStopsOnContextCancellation(t *testing.T) {
 	}
 }
 
+func TestRunnerLoopRetriesAfterApplyFailure(t *testing.T) {
+	withRuntimeRoot(t)
+	root := t.TempDir()
+	packageRoot := writeAgentPackage(t, root)
+	doc := agentBOM()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var log bytes.Buffer
+	attempts := 0
+	runner := Runner{
+		Materialize: func(*bom.BOM, reconcile.Options) (*reconcile.Result, error) {
+			return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
+		},
+		Apply: func(opts reconcile.ApplyOptions) (*reconcile.ApplyResult, error) {
+			attempts++
+			if attempts == 1 {
+				if _, err := state.PersistRenderedState(opts.ClusterName, state.BOMReference{
+					Name:     doc.Metadata.Name,
+					Revision: doc.Spec.Revision,
+					Channel:  doc.Spec.Channel,
+				}, "sha256:1212121212121212121212121212121212121212121212121212121212121212", "", ""); err != nil {
+					return nil, err
+				}
+				return nil, fmt.Errorf("temporary apply failure")
+			}
+			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
+				Name:     doc.Metadata.Name,
+				Revision: doc.Spec.Revision,
+				Channel:  doc.Spec.Channel,
+			}, "sha256:1313131313131313131313131313131313131313131313131313131313131313", "", "")
+			if err != nil {
+				return nil, err
+			}
+			cancel()
+			return &reconcile.ApplyResult{
+				BundlePath:         opts.BundlePath,
+				DesiredStateDigest: applied.Spec.DesiredStateDigest,
+				AppliedRevision:    applied,
+			}, nil
+		},
+		Sleep: func(ctx context.Context, d time.Duration) error {
+			if attempts >= 2 {
+				return context.Canceled
+			}
+			return nil
+		},
+	}
+
+	result, err := runner.Run(ctx, Options{
+		ClusterName:    "agent-retry",
+		Target:         TargetOptions{BOMPath: bomPath},
+		PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
+		Interval:       time.Second,
+		Out:            &log,
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want context cancellation")
+	}
+	if got, want := attempts, 2; got != want {
+		t.Fatalf("attempts = %d, want %d", got, want)
+	}
+	if result == nil || result.Revision != doc.Spec.Revision {
+		t.Fatalf("result = %#v, want successful retry result", result)
+	}
+	if !strings.Contains(log.String(), "temporary apply failure") {
+		t.Fatalf("retry log = %q, want temporary failure", log.String())
+	}
+}
+
 func TestRunnerForwardsRolloutStrategy(t *testing.T) {
 	withRuntimeRoot(t)
 	root := t.TempDir()
@@ -284,6 +358,54 @@ func TestRunnerForwardsRolloutStrategy(t *testing.T) {
 	}
 	if got, want := gotBatchSize, 2; got != want {
 		t.Fatalf("rollout batch size = %d, want %d", got, want)
+	}
+}
+
+func TestRunnerMarksDegradedAfterPrepareFailure(t *testing.T) {
+	withRuntimeRoot(t)
+	clusterName := "agent-prepare-degraded"
+	root := t.TempDir()
+	doc := agentBOM()
+	doc.Spec.Components = append(doc.Spec.Components, bom.Component{
+		Name:    "storage",
+		Kind:    "infra",
+		Version: "v0.1.0",
+		Artifact: bom.ArtifactReference{
+			Name:   "storage-rootfs",
+			Image:  "registry.example.io/sealos/storage-rootfs:v0.1.0",
+			Digest: "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+		},
+	})
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	if _, err := state.PersistSuccessfulApply(clusterName, state.BOMReference{
+		Name:     doc.Metadata.Name,
+		Revision: doc.Spec.Revision,
+		Channel:  doc.Spec.Channel,
+	}, "sha256:1515151515151515151515151515151515151515151515151515151515151515", "", ""); err != nil {
+		t.Fatalf("PersistSuccessfulApply() error = %v", err)
+	}
+
+	_, err := (Runner{}).Run(context.Background(), Options{
+		ClusterName:    clusterName,
+		Target:         TargetOptions{BOMPath: bomPath},
+		PackageSources: []PackageSource{{Component: "runtime", Root: writeAgentPackage(t, root)}},
+		Once:           true,
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want prepare failure")
+	}
+	applied, err := state.LoadAppliedRevision(clusterName)
+	if err != nil {
+		t.Fatalf("LoadAppliedRevision() error = %v", err)
+	}
+	if got, want := applied.Status.State, state.StateDegraded; got != want {
+		t.Fatalf("status.state = %q, want %q", got, want)
+	}
+	if len(applied.Status.Conditions) == 0 || applied.Status.Conditions[0].Reason != "PrepareRenderFailed" {
+		t.Fatalf("conditions = %#v, want PrepareRenderFailed", applied.Status.Conditions)
 	}
 }
 

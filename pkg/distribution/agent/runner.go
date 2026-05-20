@@ -113,9 +113,19 @@ func (r Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	for {
 		result, err := r.runOnce(ctx, opts)
 		if err != nil {
-			return result, err
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return result, ctxErr
+			}
+			if isContextError(err) {
+				return result, err
+			}
+			if result != nil {
+				last = result
+			}
+			logReconcileError(opts.Out, err)
+		} else {
+			last = result
 		}
-		last = result
 		if err := sleepContext(r.Sleep, ctx, opts.Interval); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return last, err
@@ -131,11 +141,11 @@ func (r Runner) runOnce(ctx context.Context, opts Options) (*Result, error) {
 	}
 	target, err := resolveTarget(opts.Target)
 	if err != nil {
-		return nil, err
+		return nil, markDegraded(opts.ClusterName, "ResolveTargetFailed", err)
 	}
 	materializeOpts, err := materializeOptions(target, opts)
 	if err != nil {
-		return nil, err
+		return nil, markDegraded(opts.ClusterName, "PrepareRenderFailed", err)
 	}
 
 	materialize := r.Materialize
@@ -432,6 +442,9 @@ func resultFromApply(clusterName string, result *reconcile.ApplyResult) *Result 
 }
 
 func markDegraded(clusterName, reason string, err error) error {
+	if isContextError(err) {
+		return err
+	}
 	message := err.Error()
 	if _, _, stateErr := state.MarkDegraded(clusterName, reason, message); stateErr != nil {
 		return errors.Join(err, stateErr)
@@ -451,4 +464,15 @@ func sleepContext(sleep func(context.Context, time.Duration) error, ctx context.
 	case <-timer.C:
 		return nil
 	}
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func logReconcileError(out io.Writer, err error) {
+	if out == nil || err == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "reconcile failed: %v\n", err)
 }
