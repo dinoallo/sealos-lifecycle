@@ -401,9 +401,9 @@ sealos-agent --controller --controller-namespace sealos-system
 [`sealos-distribution-controller-install.zh-CN.md`](./sealos-distribution-controller-install.zh-CN.md)。
 
 这个模式目前提供 watched API、status condition 和可安装 manifests，也包含用于 host
-batch size 的持久 `DistributionRolloutPolicy` 对象。registry-backed channel lookup、
-health-gated promotion automation、canary pause、health gate 和自动 rollback 仍然
-不在已实现范围内。
+batch size 和可选逐批 health gate 的持久 `DistributionRolloutPolicy` 对象。
+registry-backed channel lookup、health-gated promotion automation、canary pause
+和自动 rollback 仍然不在已实现范围内。
 
 ## Applied revision state
 

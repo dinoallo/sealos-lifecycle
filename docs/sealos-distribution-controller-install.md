@@ -111,9 +111,11 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-cha
 The controller requires exactly one of `spec.bomPath` or
 `spec.distributionChannelPath`. Both paths must be readable inside the
 controller pod. The sample `DistributionRolloutPolicy` sets
-`spec.strategy.batchSize: 1`, which rolls eligible host-targeted steps one host
-at a time. If a target does not set `spec.rolloutPolicyRef`, it can still use
-the older inline `spec.rolloutBatchSize` fallback.
+`spec.strategy.batchSize: 1` and `spec.strategy.healthGate: true`, which rolls
+eligible host-targeted steps one host at a time and runs the component
+`healthcheck` hooks after each host batch before advancing. If a target does not
+set `spec.rolloutPolicyRef`, it can still use the older inline
+`spec.rolloutBatchSize` fallback.
 
 ## Check Status
 
@@ -130,7 +132,8 @@ revision, the desired state digest, and the applied revision path.
 ## Current Boundaries
 
 This is a minimal controller install path. `DistributionRolloutPolicy` currently
-persists the host rollout batch size used by the rendered-bundle executor. It
-does not add registry-backed `DistributionChannel` lookup, health-gated channel
-promotion, canary pauses, health-gated rollouts, or automatic rollback. The
-controller still delegates to the existing BOM-driven render/apply agent path.
+persists host rollout batch size and an optional per-batch health gate used by
+the rendered-bundle executor. It does not add registry-backed
+`DistributionChannel` lookup, health-gated channel promotion, canary pauses, or
+automatic rollback. The controller still delegates to the existing BOM-driven
+render/apply agent path.

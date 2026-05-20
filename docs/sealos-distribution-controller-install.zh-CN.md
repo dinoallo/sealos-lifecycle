@@ -102,8 +102,9 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-cha
 
 controller 要求 `spec.bomPath` 和 `spec.distributionChannelPath` 必须二选一，且不能同时设置。
 这两个路径都必须能在 controller pod 内读取。示例 `DistributionRolloutPolicy` 设置了
-`spec.strategy.batchSize: 1`，会让符合条件的 host-targeted steps 一次滚动一个 host。
-如果 target 没有设置 `spec.rolloutPolicyRef`，仍可使用旧的 inline
+`spec.strategy.batchSize: 1` 和 `spec.strategy.healthGate: true`，会让符合条件的
+host-targeted steps 一次滚动一个 host，并在进入下一批之前运行该 component 的
+`healthcheck` hooks。如果 target 没有设置 `spec.rolloutPolicyRef`，仍可使用旧的 inline
 `spec.rolloutBatchSize` fallback。
 
 ## 检查状态
@@ -121,7 +122,7 @@ desired state digest 和 applied revision path。
 ## 当前边界
 
 这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
-rendered-bundle executor 使用的 host rollout batch size。它还没有加入 registry-backed
-`DistributionChannel` lookup、带 health gate 的 channel promotion、canary pause、
-带 health gate 的 rollout 或自动 rollback。controller 仍然委托给现有 BOM 驱动的
-render/apply agent 路径。
+rendered-bundle executor 使用的 host rollout batch size，以及可选的逐批 health gate。
+它还没有加入 registry-backed `DistributionChannel` lookup、带 health gate 的
+channel promotion、canary pause 或自动 rollback。controller 仍然委托给现有 BOM
+驱动的 render/apply agent 路径。
