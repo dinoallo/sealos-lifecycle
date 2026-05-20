@@ -40,6 +40,7 @@ import (
 	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/policyreport"
+	promotionpolicy "github.com/labring/sealos/pkg/distribution/promotion"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
 	"github.com/labring/sealos/pkg/distribution/state"
 )
@@ -241,6 +242,7 @@ func newSyncPromoteCmd() *cobra.Command {
 				ToRevision:              result.ToRevision,
 				Changed:                 result.Changed,
 				Promotion:               result.Promotion,
+				PolicyDecision:          result.Decision,
 			}
 			return writeSyncOutput(cmd, out, flags.output, "promotion result")
 		},
@@ -276,6 +278,7 @@ type syncPromoteOutput struct {
 	ToRevision              string                       `json:"toRevision" yaml:"toRevision"`
 	Changed                 bool                         `json:"changed" yaml:"changed"`
 	Promotion               bom.DistributionPromotionRef `json:"promotion" yaml:"promotion"`
+	PolicyDecision          *promotionpolicy.Decision    `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
 }
 
 func newSyncPolicyApprovalScanCmd() *cobra.Command {

@@ -403,6 +403,84 @@ func TestPromoteDistributionChannelFileRejectsFailedHealthProof(t *testing.T) {
 	}
 }
 
+func TestPromoteDistributionChannelFileRejectsMissingHealthProofForStable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	targetBOM := validBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := NewDistributionChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	_, err := PromoteDistributionChannelFile(PromoteDistributionChannelOptions{
+		ChannelPath:   channelPath,
+		TargetBOMPath: targetBOMPath,
+		Reason:        "passed canary",
+		ApprovedBy:    "release-team",
+	})
+	if err == nil {
+		t.Fatal("PromoteDistributionChannelFile() error = nil, want missing health proof policy error")
+	}
+	if !strings.Contains(err.Error(), "healthProofRequired") {
+		t.Fatalf("PromoteDistributionChannelFile() error = %v, want missing proof policy violation", err)
+	}
+
+	loaded, loadErr := LoadDistributionChannelFile(channelPath)
+	if loadErr != nil {
+		t.Fatalf("LoadDistributionChannelFile() error = %v", loadErr)
+	}
+	if got, want := loaded.Spec.TargetRevision, "rev-20240423"; got != want {
+		t.Fatalf("targetRevision after blocked promotion = %q, want %q", got, want)
+	}
+	if got, want := len(loaded.Spec.PromotionHistory), 0; got != want {
+		t.Fatalf("len(promotionHistory) after blocked promotion = %d, want %d", got, want)
+	}
+}
+
+func TestPromoteDistributionChannelFileRejectsAlphaCandidateForStable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	targetBOM := validBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	targetBOM.Spec.Channel = ChannelAlpha
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := NewDistributionChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
+
+	_, err := PromoteDistributionChannelFile(PromoteDistributionChannelOptions{
+		ChannelPath:     channelPath,
+		TargetBOMPath:   targetBOMPath,
+		HealthProofPath: healthProofPath,
+		Reason:          "passed canary",
+		ApprovedBy:      "release-team",
+	})
+	if err == nil {
+		t.Fatal("PromoteDistributionChannelFile() error = nil, want source channel policy error")
+	}
+	if !strings.Contains(err.Error(), "sourceChannelBlocked") {
+		t.Fatalf("PromoteDistributionChannelFile() error = %v, want source channel policy violation", err)
+	}
+}
+
 func TestPromoteDistributionChannelFileRejectsMismatchedLine(t *testing.T) {
 	t.Parallel()
 

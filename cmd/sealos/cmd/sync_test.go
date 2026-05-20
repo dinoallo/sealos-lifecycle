@@ -354,6 +354,21 @@ func TestSyncPromoteCmd(t *testing.T) {
 	if !strings.HasPrefix(out.Promotion.HealthProofDigest, "sha256:") {
 		t.Fatalf("promotion.healthProofDigest = %q, want sha256 digest", out.Promotion.HealthProofDigest)
 	}
+	if out.PolicyDecision == nil {
+		t.Fatal("policyDecision = nil, want promotion policy decision")
+	}
+	if !out.PolicyDecision.Allowed {
+		t.Fatalf("policyDecision.allowed = false, violations=%#v", out.PolicyDecision.Violations)
+	}
+	if got, want := string(out.PolicyDecision.Transition.SourceChannel), string(bom.ChannelBeta); got != want {
+		t.Fatalf("policyDecision.transition.sourceChannel = %q, want %q", got, want)
+	}
+	if got, want := string(out.PolicyDecision.Transition.TargetChannel), string(bom.ChannelStable); got != want {
+		t.Fatalf("policyDecision.transition.targetChannel = %q, want %q", got, want)
+	}
+	if !out.PolicyDecision.Transition.HealthProofRequired {
+		t.Fatal("policyDecision.transition.healthProofRequired = false, want true")
+	}
 
 	loaded, err := bom.LoadDistributionChannelFile(channelPath)
 	if err != nil {
@@ -405,6 +420,77 @@ func TestSyncPromoteCmdRejectsFailedHealthProof(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "did not pass") {
 		t.Fatalf("Execute() error = %v, want health proof failure", err)
+	}
+}
+
+func TestSyncPromoteCmdRejectsMissingHealthProofForStable(t *testing.T) {
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	targetBOM := testSyncBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := bom.NewDistributionChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"promote",
+		"--distribution-channel", channelPath,
+		"--target-bom", targetBOMPath,
+		"--reason", "passed canary",
+		"--approved-by", "release-team",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want promotion policy error")
+	}
+	if !strings.Contains(err.Error(), "healthProofRequired") {
+		t.Fatalf("Execute() error = %v, want health proof policy violation", err)
+	}
+}
+
+func TestSyncPromoteCmdRejectsAlphaCandidateForStable(t *testing.T) {
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	targetBOM := testSyncBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	targetBOM.Spec.Channel = bom.ChannelAlpha
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := bom.NewDistributionChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
+
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"promote",
+		"--distribution-channel", channelPath,
+		"--target-bom", targetBOMPath,
+		"--health-proof", healthProofPath,
+		"--reason", "passed canary",
+		"--approved-by", "release-team",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want source channel policy error")
+	}
+	if !strings.Contains(err.Error(), "sourceChannelBlocked") {
+		t.Fatalf("Execute() error = %v, want source channel policy violation", err)
 	}
 }
 

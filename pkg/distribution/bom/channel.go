@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/distribution"
+	promotionpolicy "github.com/labring/sealos/pkg/distribution/promotion"
 	fileutil "github.com/labring/sealos/pkg/utils/file"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
@@ -81,6 +82,7 @@ type PromoteDistributionChannelResult struct {
 	Changed      bool
 	Promotion    DistributionPromotionRef
 	HealthProof  *DistributionHealthProof
+	Decision     *promotionpolicy.Decision
 }
 
 type DistributionHealthProofSpec struct {
@@ -322,6 +324,11 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	}
 
 	fromRevision := channel.Spec.TargetRevision
+	decision, err := evaluateDistributionPromotion(channel, targetBOM, healthProof)
+	if err != nil {
+		return nil, err
+	}
+
 	targetBOMPathForChannel := distributionChannelRelativePath(channelPath, targetBOMPath)
 	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
@@ -364,7 +371,62 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		Changed:      changed,
 		Promotion:    promotion,
 		HealthProof:  healthProof,
+		Decision:     decision,
 	}, nil
+}
+
+func evaluateDistributionPromotion(channel *DistributionChannel, targetBOM *BOM, healthProof *DistributionHealthProof) (*promotionpolicy.Decision, error) {
+	if channel == nil {
+		return nil, fmt.Errorf("distribution channel cannot be nil")
+	}
+	if targetBOM == nil {
+		return nil, fmt.Errorf("target BOM cannot be nil")
+	}
+	decision, err := promotionpolicy.EvaluateDefault(promotionpolicy.Request{
+		TargetChannel: promotionpolicy.Channel(channel.Spec.Channel),
+		Candidate: promotionpolicy.CandidateRevision{
+			Line:          targetBOM.Metadata.Name,
+			Revision:      targetBOM.Spec.Revision,
+			SourceChannel: promotionpolicy.Channel(targetBOM.Spec.Channel),
+			Replacing:     channel.Spec.TargetRevision,
+		},
+		HealthProof: distributionPromotionHealthProofSummary(healthProof),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("evaluate promotion policy: %w", err)
+	}
+	if !decision.Allowed {
+		return nil, fmt.Errorf("promotion policy blocked channel %q to revision %q: %s", channel.Metadata.Name, targetBOM.Spec.Revision, distributionPromotionViolationSummary(decision.Violations))
+	}
+	return decision, nil
+}
+
+func distributionPromotionHealthProofSummary(proof *DistributionHealthProof) promotionpolicy.HealthProofSummary {
+	if proof == nil {
+		return promotionpolicy.HealthProofSummary{}
+	}
+	failedSignals := make([]string, 0)
+	for _, signal := range proof.Spec.Signals {
+		if !signal.Passed {
+			failedSignals = append(failedSignals, signal.Name)
+		}
+	}
+	return promotionpolicy.HealthProofSummary{
+		Provided:      true,
+		Passed:        proof.Spec.Passed,
+		FailedSignals: failedSignals,
+	}
+}
+
+func distributionPromotionViolationSummary(violations []promotionpolicy.Violation) string {
+	if len(violations) == 0 {
+		return "no policy violation details"
+	}
+	parts := make([]string, 0, len(violations))
+	for _, violation := range violations {
+		parts = append(parts, fmt.Sprintf("%s: %s", violation.Code, violation.Message))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func distributionHealthProofForPromotion(path, channelPath string, targetBOM *BOM) (*DistributionHealthProof, string, error) {
