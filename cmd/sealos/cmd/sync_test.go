@@ -288,6 +288,12 @@ func TestSyncPromoteCmd(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof.Spec.Summary = "beta cohort passed"
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
 	channel := bom.NewDistributionChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, oldBOM.Spec.Revision, "../boms/rev-20240423.yaml")
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -301,6 +307,7 @@ func TestSyncPromoteCmd(t *testing.T) {
 		"promote",
 		"--distribution-channel", channelPath,
 		"--target-bom", targetBOMPath,
+		"--health-proof", healthProofPath,
 		"--reason", "beta cohort passed",
 		"--approved-by", "release-team",
 		"--approved-at", "2024-04-24T10:30:00Z",
@@ -338,6 +345,15 @@ func TestSyncPromoteCmd(t *testing.T) {
 	if got, want := out.Promotion.BOMPath, "../boms/rev-20240424.yaml"; got != want {
 		t.Fatalf("promotion.bomPath = %q, want %q", got, want)
 	}
+	if got, want := out.Promotion.HealthProofPath, "../proofs/rev-20240424-health.yaml"; got != want {
+		t.Fatalf("promotion.healthProofPath = %q, want %q", got, want)
+	}
+	if got, want := out.Promotion.HealthProofSummary, "beta cohort passed"; got != want {
+		t.Fatalf("promotion.healthProofSummary = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(out.Promotion.HealthProofDigest, "sha256:") {
+		t.Fatalf("promotion.healthProofDigest = %q, want sha256 digest", out.Promotion.HealthProofDigest)
+	}
 
 	loaded, err := bom.LoadDistributionChannelFile(channelPath)
 	if err != nil {
@@ -351,6 +367,44 @@ func TestSyncPromoteCmd(t *testing.T) {
 	}
 	if got, want := len(loaded.Spec.PromotionHistory), 1; got != want {
 		t.Fatalf("len(persisted promotionHistory) = %d, want %d", got, want)
+	}
+}
+
+func TestSyncPromoteCmdRejectsFailedHealthProof(t *testing.T) {
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	targetBOM := testSyncBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := bom.NewDistributionChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, false)
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
+
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"promote",
+		"--distribution-channel", channelPath,
+		"--target-bom", targetBOMPath,
+		"--health-proof", healthProofPath,
+		"--reason", "passed canary",
+		"--approved-by", "release-team",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want failed health proof error")
+	}
+	if !strings.Contains(err.Error(), "did not pass") {
+		t.Fatalf("Execute() error = %v, want health proof failure", err)
 	}
 }
 

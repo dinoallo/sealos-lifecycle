@@ -92,6 +92,73 @@ func TestDistributionChannelValidate(t *testing.T) {
 	}
 }
 
+func TestDistributionHealthProofValidate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mutate  func(*DistributionHealthProof)
+		wantErr string
+	}{
+		{
+			name: "valid",
+		},
+		{
+			name: "missing line",
+			mutate: func(p *DistributionHealthProof) {
+				p.Spec.Line = ""
+			},
+			wantErr: "spec.line",
+		},
+		{
+			name: "missing target revision",
+			mutate: func(p *DistributionHealthProof) {
+				p.Spec.TargetRevision = ""
+			},
+			wantErr: "spec.targetRevision",
+		},
+		{
+			name: "invalid collectedAt",
+			mutate: func(p *DistributionHealthProof) {
+				p.Spec.CollectedAt = "not-rfc3339"
+			},
+			wantErr: "spec.collectedAt",
+		},
+		{
+			name: "empty signal name",
+			mutate: func(p *DistributionHealthProof) {
+				p.Spec.Signals = []DistributionHealthSignal{{Passed: true}}
+			},
+			wantErr: "spec.signals[0].name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+			if tt.mutate != nil {
+				tt.mutate(proof)
+			}
+
+			err := proof.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Validate() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveDistributionChannelFile(t *testing.T) {
 	t.Parallel()
 
@@ -200,6 +267,17 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 	if err := yamlutil.MarshalFile(newBOMPath, newBOM); err != nil {
 		t.Fatalf("MarshalFile(newBOM) error = %v", err)
 	}
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", newBOM.Metadata.Name, newBOM.Spec.Revision, true)
+	healthProof.Spec.Summary = "beta cohort passed"
+	healthProof.Spec.CollectedAt = "2024-04-24T09:30:00Z"
+	healthProof.Spec.Signals = []DistributionHealthSignal{
+		{Name: "reconcile", Passed: true, Message: "all canaries ready"},
+		{Name: "node-readiness", Passed: true},
+	}
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
 	channel := NewDistributionChannel("default-platform-stable", "default-platform", ChannelStable, oldBOM.Spec.Revision, "../boms/rev-20240423.yaml")
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -207,11 +285,12 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 
 	approvedAt := time.Date(2024, 4, 24, 10, 30, 0, 0, time.UTC)
 	result, err := PromoteDistributionChannelFile(PromoteDistributionChannelOptions{
-		ChannelPath:   channelPath,
-		TargetBOMPath: newBOMPath,
-		Reason:        "beta cohort passed",
-		ApprovedBy:    "release-team",
-		ApprovedAt:    approvedAt,
+		ChannelPath:     channelPath,
+		TargetBOMPath:   newBOMPath,
+		HealthProofPath: healthProofPath,
+		Reason:          "beta cohort passed",
+		ApprovedBy:      "release-team",
+		ApprovedAt:      approvedAt,
 	})
 	if err != nil {
 		t.Fatalf("PromoteDistributionChannelFile() error = %v", err)
@@ -257,6 +336,21 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 	if got, want := entry.ApprovedAt, "2024-04-24T10:30:00Z"; got != want {
 		t.Fatalf("promotionHistory[0].approvedAt = %q, want %q", got, want)
 	}
+	if got, want := entry.HealthProofPath, "../proofs/rev-20240424-health.yaml"; got != want {
+		t.Fatalf("promotionHistory[0].healthProofPath = %q, want %q", got, want)
+	}
+	if got, want := entry.HealthProofSummary, "beta cohort passed"; got != want {
+		t.Fatalf("promotionHistory[0].healthProofSummary = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(entry.HealthProofDigest, "sha256:") {
+		t.Fatalf("promotionHistory[0].healthProofDigest = %q, want sha256 digest", entry.HealthProofDigest)
+	}
+	if result.HealthProof == nil {
+		t.Fatal("HealthProof = nil, want loaded proof")
+	}
+	if got, want := result.HealthProof.Spec.TargetRevision, "rev-20240424"; got != want {
+		t.Fatalf("HealthProof targetRevision = %q, want %q", got, want)
+	}
 
 	resolved, err := ResolveDistributionChannelFile(channelPath)
 	if err != nil {
@@ -267,6 +361,45 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 	}
 	if got, want := resolved.BOM.Spec.Channel, ChannelStable; got != want {
 		t.Fatalf("resolved BOM channel = %q, want %q", got, want)
+	}
+}
+
+func TestPromoteDistributionChannelFileRejectsFailedHealthProof(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	targetBOM := validBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := NewDistributionChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof.Spec.Signals = []DistributionHealthSignal{
+		{Name: "node-readiness", Passed: false, Message: "one canary node not ready"},
+	}
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
+
+	_, err := PromoteDistributionChannelFile(PromoteDistributionChannelOptions{
+		ChannelPath:     channelPath,
+		TargetBOMPath:   targetBOMPath,
+		HealthProofPath: healthProofPath,
+		Reason:          "passed canary",
+		ApprovedBy:      "release-team",
+	})
+	if err == nil {
+		t.Fatal("PromoteDistributionChannelFile() error = nil, want failed health proof error")
+	}
+	if !strings.Contains(err.Error(), `signal "node-readiness" did not pass`) {
+		t.Fatalf("PromoteDistributionChannelFile() error = %v, want failed signal error", err)
 	}
 }
 

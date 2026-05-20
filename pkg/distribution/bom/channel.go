@@ -16,10 +16,12 @@ package bom
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/opencontainers/go-digest"
 	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/distribution"
@@ -36,12 +38,15 @@ type DistributionChannelSpec struct {
 }
 
 type DistributionPromotionRef struct {
-	FromRevision string `json:"fromRevision,omitempty" yaml:"fromRevision,omitempty"`
-	ToRevision   string `json:"toRevision" yaml:"toRevision"`
-	BOMPath      string `json:"bomPath" yaml:"bomPath"`
-	Reason       string `json:"reason" yaml:"reason"`
-	ApprovedBy   string `json:"approvedBy" yaml:"approvedBy"`
-	ApprovedAt   string `json:"approvedAt" yaml:"approvedAt"`
+	FromRevision       string `json:"fromRevision,omitempty" yaml:"fromRevision,omitempty"`
+	ToRevision         string `json:"toRevision" yaml:"toRevision"`
+	BOMPath            string `json:"bomPath" yaml:"bomPath"`
+	Reason             string `json:"reason" yaml:"reason"`
+	ApprovedBy         string `json:"approvedBy" yaml:"approvedBy"`
+	ApprovedAt         string `json:"approvedAt" yaml:"approvedAt"`
+	HealthProofPath    string `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
+	HealthProofDigest  string `json:"healthProofDigest,omitempty" yaml:"healthProofDigest,omitempty"`
+	HealthProofSummary string `json:"healthProofSummary,omitempty" yaml:"healthProofSummary,omitempty"`
 }
 
 type DistributionChannel struct {
@@ -58,11 +63,12 @@ type ResolvedDistributionChannel struct {
 }
 
 type PromoteDistributionChannelOptions struct {
-	ChannelPath   string
-	TargetBOMPath string
-	Reason        string
-	ApprovedBy    string
-	ApprovedAt    time.Time
+	ChannelPath     string
+	TargetBOMPath   string
+	HealthProofPath string
+	Reason          string
+	ApprovedBy      string
+	ApprovedAt      time.Time
 }
 
 type PromoteDistributionChannelResult struct {
@@ -74,6 +80,44 @@ type PromoteDistributionChannelResult struct {
 	ToRevision   string
 	Changed      bool
 	Promotion    DistributionPromotionRef
+	HealthProof  *DistributionHealthProof
+}
+
+type DistributionHealthProofSpec struct {
+	Line           string                     `json:"line" yaml:"line"`
+	TargetRevision string                     `json:"targetRevision" yaml:"targetRevision"`
+	Passed         bool                       `json:"passed" yaml:"passed"`
+	Summary        string                     `json:"summary,omitempty" yaml:"summary,omitempty"`
+	CollectedAt    string                     `json:"collectedAt,omitempty" yaml:"collectedAt,omitempty"`
+	Signals        []DistributionHealthSignal `json:"signals,omitempty" yaml:"signals,omitempty"`
+}
+
+type DistributionHealthSignal struct {
+	Name    string `json:"name" yaml:"name"`
+	Passed  bool   `json:"passed" yaml:"passed"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+type DistributionHealthProof struct {
+	APIVersion string                      `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string                      `json:"kind" yaml:"kind"`
+	Metadata   Metadata                    `json:"metadata" yaml:"metadata"`
+	Spec       DistributionHealthProofSpec `json:"spec" yaml:"spec"`
+}
+
+func NewDistributionHealthProof(name, line, targetRevision string, passed bool) *DistributionHealthProof {
+	return &DistributionHealthProof{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindDistributionHealthProof,
+		Metadata: Metadata{
+			Name: name,
+		},
+		Spec: DistributionHealthProofSpec{
+			Line:           line,
+			TargetRevision: targetRevision,
+			Passed:         passed,
+		},
+	}
 }
 
 func NewDistributionChannel(name, line string, channel ReleaseChannel, targetRevision, bomPath string) *DistributionChannel {
@@ -146,6 +190,38 @@ func (p DistributionPromotionRef) Validate() error {
 	if _, err := time.Parse(time.RFC3339, p.ApprovedAt); err != nil {
 		return fmt.Errorf("approvedAt must be RFC3339: %w", err)
 	}
+	if strings.TrimSpace(p.HealthProofDigest) != "" && strings.TrimSpace(p.HealthProofPath) == "" {
+		return fmt.Errorf("healthProofPath cannot be empty when healthProofDigest is set")
+	}
+	return nil
+}
+
+func (p DistributionHealthProof) Validate() error {
+	if p.APIVersion != distribution.APIVersion {
+		return fmt.Errorf("unsupported apiVersion %q", p.APIVersion)
+	}
+	if p.Kind != distribution.KindDistributionHealthProof {
+		return fmt.Errorf("unsupported kind %q", p.Kind)
+	}
+	if p.Metadata.Name == "" {
+		return fmt.Errorf("metadata.name cannot be empty")
+	}
+	if strings.TrimSpace(p.Spec.Line) == "" {
+		return fmt.Errorf("spec.line cannot be empty")
+	}
+	if strings.TrimSpace(p.Spec.TargetRevision) == "" {
+		return fmt.Errorf("spec.targetRevision cannot be empty")
+	}
+	if strings.TrimSpace(p.Spec.CollectedAt) != "" {
+		if _, err := time.Parse(time.RFC3339, p.Spec.CollectedAt); err != nil {
+			return fmt.Errorf("spec.collectedAt must be RFC3339: %w", err)
+		}
+	}
+	for i, signal := range p.Spec.Signals {
+		if strings.TrimSpace(signal.Name) == "" {
+			return fmt.Errorf("spec.signals[%d].name cannot be empty", i)
+		}
+	}
 	return nil
 }
 
@@ -162,6 +238,26 @@ func LoadDistributionChannelFile(path string) (*DistributionChannel, error) {
 		return nil, fmt.Errorf("validate distribution channel %q: %w", path, err)
 	}
 	return &doc, nil
+}
+
+func LoadDistributionHealthProofFile(path string) (*DistributionHealthProof, string, error) {
+	if !fileutil.IsFile(path) {
+		return nil, "", fmt.Errorf("distribution health proof file %q not found", path)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("read distribution health proof %q: %w", path, err)
+	}
+	proofDigest := digest.Canonical.FromBytes(data).String()
+	var doc DistributionHealthProof
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, "", fmt.Errorf("unmarshal distribution health proof %q: %w", path, err)
+	}
+	if err := doc.Validate(); err != nil {
+		return nil, "", fmt.Errorf("validate distribution health proof %q: %w", path, err)
+	}
+	return &doc, proofDigest, nil
 }
 
 func ResolveDistributionChannelFile(path string) (*ResolvedDistributionChannel, error) {
@@ -220,9 +316,13 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	if targetBOM.Metadata.Name != channel.Spec.Line {
 		return nil, fmt.Errorf("distribution channel %q line %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Spec.Line, targetBOM.Metadata.Name)
 	}
+	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(opts.HealthProofPath, channelPath, targetBOM)
+	if err != nil {
+		return nil, err
+	}
 
 	fromRevision := channel.Spec.TargetRevision
-	targetBOMPathForChannel := distributionChannelRelativeBOMPath(channelPath, targetBOMPath)
+	targetBOMPathForChannel := distributionChannelRelativePath(channelPath, targetBOMPath)
 	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
 	channel.Spec.BOMPath = targetBOMPathForChannel
@@ -238,6 +338,12 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		Reason:       reason,
 		ApprovedBy:   approvedBy,
 		ApprovedAt:   approvedAt.UTC().Format(time.RFC3339),
+	}
+	if healthProof != nil {
+		healthProofPath := distributionChannelRelativePath(channelPath, opts.HealthProofPath)
+		promotion.HealthProofPath = healthProofPath
+		promotion.HealthProofDigest = healthProofDigest
+		promotion.HealthProofSummary = strings.TrimSpace(healthProof.Spec.Summary)
 	}
 	channel.Spec.PromotionHistory = append(channel.Spec.PromotionHistory, promotion)
 
@@ -257,21 +363,51 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		ToRevision:   targetBOM.Spec.Revision,
 		Changed:      changed,
 		Promotion:    promotion,
+		HealthProof:  healthProof,
 	}, nil
 }
 
-func distributionChannelRelativeBOMPath(channelPath, bomPath string) string {
+func distributionHealthProofForPromotion(path, channelPath string, targetBOM *BOM) (*DistributionHealthProof, string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, "", nil
+	}
+	if targetBOM == nil {
+		return nil, "", fmt.Errorf("target BOM cannot be nil")
+	}
+	proof, digest, err := LoadDistributionHealthProofFile(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if proof.Spec.Line != targetBOM.Metadata.Name {
+		return nil, "", fmt.Errorf("distribution health proof %q line %q does not match target BOM metadata.name %q", proof.Metadata.Name, proof.Spec.Line, targetBOM.Metadata.Name)
+	}
+	if proof.Spec.TargetRevision != targetBOM.Spec.Revision {
+		return nil, "", fmt.Errorf("distribution health proof %q targetRevision %q does not match target BOM spec.revision %q", proof.Metadata.Name, proof.Spec.TargetRevision, targetBOM.Spec.Revision)
+	}
+	if !proof.Spec.Passed {
+		return nil, "", fmt.Errorf("distribution health proof %q did not pass", proof.Metadata.Name)
+	}
+	for _, signal := range proof.Spec.Signals {
+		if !signal.Passed {
+			return nil, "", fmt.Errorf("distribution health proof %q signal %q did not pass", proof.Metadata.Name, signal.Name)
+		}
+	}
+	return proof, digest, nil
+}
+
+func distributionChannelRelativePath(channelPath, path string) string {
 	channelAbs, err := filepath.Abs(channelPath)
 	if err != nil {
-		return filepath.ToSlash(filepath.Clean(bomPath))
+		return filepath.ToSlash(filepath.Clean(path))
 	}
-	bomAbs, err := filepath.Abs(bomPath)
+	pathAbs, err := filepath.Abs(path)
 	if err != nil {
-		return filepath.ToSlash(filepath.Clean(bomPath))
+		return filepath.ToSlash(filepath.Clean(path))
 	}
-	rel, err := filepath.Rel(filepath.Dir(channelAbs), bomAbs)
+	rel, err := filepath.Rel(filepath.Dir(channelAbs), pathAbs)
 	if err != nil {
-		return bomAbs
+		return pathAbs
 	}
 	return filepath.ToSlash(rel)
 }

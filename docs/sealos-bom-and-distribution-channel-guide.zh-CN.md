@@ -260,9 +260,9 @@ lookup。
 
 同样在本地文件边界内，现在也有一个很小的 promotion 原语：
 `sealos sync promote`。它会把一份本地 `DistributionChannel` 文件推进到目标 BOM
-文件，并记录 approver、reason、timestamp 和一条 promotion history。这样，跟随
-本地 channel 的集群已经有一条可评审的 channel advancement 路径，但这不等于已经
-实现 registry/API-backed 的 release lookup。
+文件，可选检查一份本地 health proof，并记录 approver、reason、timestamp 和一条
+promotion history。这样，跟随本地 channel 的集群已经有一条可评审的 channel
+advancement 路径，但这不等于已经实现 registry/API-backed 的 release lookup。
 
 ## Day 0 怎么选
 
@@ -318,6 +318,7 @@ BOM，再进入 materialization。
 sealos sync promote \
   --distribution-channel channels/default-platform-stable.yaml \
   --target-bom boms/default-platform/rev-008.yaml \
+  --health-proof proofs/default-platform-rev-008-health.yaml \
   --reason "beta cohort passed source preflight and rollout validation" \
   --approved-by release-team
 ```
@@ -327,6 +328,9 @@ sealos sync promote \
 - channel 文档是有效的 `DistributionChannel`
 - 目标 BOM 是有效 BOM
 - `DistributionChannel.spec.line` 匹配 `BOM.metadata.name`
+- 如果设置了 `--health-proof`，proof 必须是有效的
+  `DistributionHealthProof`，必须指向同一条 line 和目标 BOM revision，并且
+  `spec.passed: true`，所有 signals 也都不能失败
 
 然后它会写回更新后的 channel 文件，并追加一条
 `spec.promotionHistory[]`，内容包括：
@@ -337,6 +341,28 @@ sealos sync promote \
 - promotion reason
 - approver
 - approval timestamp
+- 使用 `--health-proof` 时的 health proof path、digest 和 summary
+
+最小 health proof 形态如下：
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: DistributionHealthProof
+metadata:
+  name: default-platform-rev-008-health
+spec:
+  line: default-platform
+  targetRevision: rev-008
+  passed: true
+  summary: beta cohort passed rollout health checks
+  collectedAt: "2026-05-20T10:30:00Z"
+  signals:
+    - name: reconcile
+      passed: true
+      message: all canary targets reconciled
+    - name: node-readiness
+      passed: true
+```
 
 生成的 `spec.bomPath` 会尽量写成相对于 channel 文件的路径。现有 render、
 validate、agent 和 controller 路径继续通过 `--distribution-channel` 或
@@ -459,6 +485,8 @@ digest。
   revision 的规则
 - API-backed 的 channel advancement history 怎么存、怎么审计；当前只有本地
   `spec.promotionHistory[]`
+- health proof 的 ingestion 或 collection；当前只有 `sealos sync promote` 的本地
+  `DistributionHealthProof` 文件 gate
 - `BOM.spec.channel` 是先变 optional，还是以后直接移除
 - API-backed pin 模式和 channel 模式在 Day 0 的最终 operator interface 长什么样
 

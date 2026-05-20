@@ -23,9 +23,10 @@ const (
 )
 
 const (
-	KindBOM                 = "BOM"
-	KindAppliedRevision     = "AppliedRevision"
-	KindComponentPackage    = "ComponentPackage"
-	KindDistributionChannel = "DistributionChannel"
-	KindHydratedBundle      = "HydratedBundle"
+	KindBOM                     = "BOM"
+	KindAppliedRevision         = "AppliedRevision"
+	KindComponentPackage        = "ComponentPackage"
+	KindDistributionChannel     = "DistributionChannel"
+	KindDistributionHealthProof = "DistributionHealthProof"
+	KindHydratedBundle          = "HydratedBundle"
 )

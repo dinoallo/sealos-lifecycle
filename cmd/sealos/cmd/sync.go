@@ -199,6 +199,7 @@ func newSyncPromoteCmd() *cobra.Command {
 	var flags struct {
 		distributionChannelFile string
 		targetBOMFile           string
+		healthProofFile         string
 		reason                  string
 		approvedBy              string
 		approvedAt              string
@@ -221,11 +222,12 @@ func newSyncPromoteCmd() *cobra.Command {
 			}
 
 			result, err := bom.PromoteDistributionChannelFile(bom.PromoteDistributionChannelOptions{
-				ChannelPath:   flags.distributionChannelFile,
-				TargetBOMPath: flags.targetBOMFile,
-				Reason:        flags.reason,
-				ApprovedBy:    flags.approvedBy,
-				ApprovedAt:    approvedAt,
+				ChannelPath:     flags.distributionChannelFile,
+				TargetBOMPath:   flags.targetBOMFile,
+				HealthProofPath: flags.healthProofFile,
+				Reason:          flags.reason,
+				ApprovedBy:      flags.approvedBy,
+				ApprovedAt:      approvedAt,
 			})
 			if err != nil {
 				return err
@@ -245,6 +247,7 @@ func newSyncPromoteCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&flags.distributionChannelFile, "distribution-channel", "", "path to the local DistributionChannel file to advance")
 	cmd.Flags().StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
+	cmd.Flags().StringVar(&flags.healthProofFile, "health-proof", "", "optional DistributionHealthProof file that must pass for the target BOM before promotion")
 	cmd.Flags().StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
 	cmd.Flags().StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
 	cmd.Flags().StringVar(&flags.approvedAt, "approved-at", "", "approval timestamp in RFC3339 format; defaults to the current time")

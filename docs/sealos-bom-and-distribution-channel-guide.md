@@ -269,9 +269,10 @@ lookup for "latest stable on this distribution line" yet.
 
 The same local-file boundary also has a small promotion primitive:
 `sealos sync promote`. It advances one local `DistributionChannel` file to a
-target BOM file after recording an approver, reason, timestamp, and promotion
-history entry. That gives file-backed channel followers a reviewable channel
-advancement path without implying registry/API-backed release lookup.
+target BOM file after optionally checking a local health proof and recording an
+approver, reason, timestamp, and promotion history entry. That gives
+file-backed channel followers a reviewable channel advancement path without
+implying registry/API-backed release lookup.
 
 ## Day 0 Selection
 
@@ -328,6 +329,7 @@ Use:
 sealos sync promote \
   --distribution-channel channels/default-platform-stable.yaml \
   --target-bom boms/default-platform/rev-008.yaml \
+  --health-proof proofs/default-platform-rev-008-health.yaml \
   --reason "beta cohort passed source preflight and rollout validation" \
   --approved-by release-team
 ```
@@ -337,6 +339,9 @@ The command validates that:
 - the channel document is a valid `DistributionChannel`
 - the target BOM is a valid BOM
 - `DistributionChannel.spec.line` matches `BOM.metadata.name`
+- if `--health-proof` is set, the proof is a valid
+  `DistributionHealthProof`, targets the same line and BOM revision, and
+  reports `spec.passed: true` with no failed signals
 
 It then writes the updated channel file and appends
 `spec.promotionHistory[]` with:
@@ -347,6 +352,28 @@ It then writes the updated channel file and appends
 - the reason
 - the approver
 - the approval timestamp
+- the health proof path, digest, and summary when `--health-proof` is used
+
+A minimal health proof looks like:
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: DistributionHealthProof
+metadata:
+  name: default-platform-rev-008-health
+spec:
+  line: default-platform
+  targetRevision: rev-008
+  passed: true
+  summary: beta cohort passed rollout health checks
+  collectedAt: "2026-05-20T10:30:00Z"
+  signals:
+    - name: reconcile
+      passed: true
+      message: all canary targets reconciled
+    - name: node-readiness
+      passed: true
+```
 
 The generated `spec.bomPath` is relative to the channel file when possible.
 Existing render, validate, agent, and controller paths continue to consume the
@@ -475,6 +502,8 @@ line, not as "whatever the cluster currently drifted into."
   without requiring a local `spec.bomPath`
 - API-backed channel advancement history and audit storage beyond the current
   local `spec.promotionHistory[]` field
+- Health-proof ingestion or collection beyond the current local
+  `DistributionHealthProof` file gate for `sealos sync promote`
 - Whether `BOM.spec.channel` should become optional first and then be removed
   later
 - The exact Day 0 operator interface for API-backed pinned versus
