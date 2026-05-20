@@ -429,7 +429,7 @@ sealos sync status \
 
 这份 walkthrough 只描述当前仓库行为。当前 MVP 仍然没有：
 
-- 多节点 target resolution
+- controller 驱动的多节点 rollout 和持续 reconcile
 - 对 generated projection 的直接 `commit` 或 `revert`
 - 通过 `commit` 去接受任意 global baseline 变更
 - 完整的、后台持续运行的 controller reconcile loop
@@ -437,4 +437,5 @@ sealos sync status \
 所以更准确的心智模型是：
 
 - 仓库里已经有一个可工作的单节点 operator loop
-- 但它仍然是 CLI 驱动的 MVP，不是完整自治的 distribution agent
+- 也有一条边界很窄的 CLI 驱动 multi-node `sync apply` 路径
+- 但它仍然不是完整自治的 distribution agent

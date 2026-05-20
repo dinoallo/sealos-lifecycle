@@ -56,7 +56,7 @@
 | 能力 | 当前状态 | 主要证据 | 边界 |
 | --- | --- | --- | --- |
 | 在一条统一流程里把 package 内容同时部署到 Kubernetes 和 host | Ready with boundary | [apply.go](../pkg/distribution/reconcile/apply.go) | 当前部署单元是 rendered bundle，不是“直接安装一个 package”。 |
-| 从 cluster inventory 解析 `allNodes`、`firstMaster`、`cluster` apply target | Ready with boundary | [topology.go](../pkg/distribution/reconcile/topology.go), [apply.go](../pkg/distribution/reconcile/apply.go) | 当前执行路径仍然是 CLI 驱动，并且默认假设 package 自己的 hook/script 已经具备 multi-node-safe 行为。 |
+| 跨多个 cluster host 编排一个 rendered bundle | Ready with boundary | [topology.go](../pkg/distribution/reconcile/topology.go), [apply.go](../pkg/distribution/reconcile/apply.go), [kubeadm_bootstrap.go](../pkg/distribution/reconcile/kubeadm_bootstrap.go) | CLI 驱动的 `sync apply` 路径会解析 `allNodes`、`firstMaster`、`cluster`，按 remote host staging bundle payload，生成 kubeadm join config，并在 cluster-scoped step 需要时从 remote first master 拉取 kubeconfig。package 自己的 hook/script 仍然需要具备 multi-node-safe 行为。 |
 | 从多节点中的指定 host commit 一个 local input 绑定出来的 host file | Ready with boundary | [sync.go](../cmd/sealos/cmd/sync.go), [commit.go](../pkg/distribution/commit/commit.go) | 当前 multi-node commit 支持面故意很窄：只覆盖 local-input regular file；如果选中 host 有 host-scoped input，就回写 scoped input；如果没有 scoped provenance 且多节点内容已经分叉，就拒绝把单个节点的值覆盖到默认 input。 |
 | 跟踪 host file、Kubernetes object 和部分 generated projection | Ready with boundary | [inventory.go](../pkg/distribution/hydrate/inventory.go), [compare.go](../pkg/distribution/compare/compare.go) | generated projection 覆盖面刻意很窄。 |
 | 支持 generated control-plane static Pod tracking | Ready with boundary | [inventory.go](../pkg/distribution/hydrate/inventory.go) | 只覆盖明确建模的 kubeadm-generated static Pod 集合。 |
@@ -70,7 +70,7 @@
 | 能力 | 当前状态 | 为什么重要 |
 | --- | --- | --- |
 | 不经过 BOM/bundle，直接“安装这个 package” | Not implemented | 当前部署路径是 `package -> BOM -> render -> bundle -> apply`，不是 package-direct install。 |
-| 完整泛化的多节点 topology-aware rollout / orchestration | Not implemented | `sync apply` 已经能解析运行时 target，但还没有 controller 驱动的编排、rollout policy，也没有覆盖所有多节点工作流的 package 级安全模型。 |
+| controller 驱动的多节点 rollout policy | Not implemented | CLI 驱动的 `sync apply` 路径已经能为当前 rendered-bundle 工作流做多 host 编排，但还没有后台 controller、rollout strategy 对象，也没有覆盖所有多节点工作流的 package 级安全模型。 |
 | controller 驱动的持续 reconcile loop | Not implemented | 现在主接口仍然是 CLI 驱动的 render/apply/diff/status/commit/revert。 |
 | `DistributionChannel` 驱动的 release resolution | Not implemented | 当前运行方式仍然依赖显式 BOM 文件或 revision，而不是 live channel object。 |
 | 完全泛化的 generated-output drift 管理 | Not implemented | 当前 MVP 只跟踪一组已知 generated target。 |
@@ -84,7 +84,8 @@
 - 打包：好了
 - 解析：好了
 - 部署：好了，它是 BOM 驱动的当前 MVP
-- 多节点编排和发布系统化：还没好
+- CLI 驱动的多节点 bundle 编排：好了，但边界很窄
+- controller 驱动的 rollout 和发布系统化：还没好
 
 所以当前仓库已经足够支撑：
 
@@ -96,7 +97,7 @@
 但它还不是下面这些最终形态：
 
 - 多集群 release management
-- 完整泛化的多节点 topology-aware deployment
+- controller 驱动的多节点 topology-aware deployment
 - 持续 controller-based reconciliation
 
 ## 相关文档

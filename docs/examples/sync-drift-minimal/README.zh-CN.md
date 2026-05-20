@@ -401,7 +401,7 @@ sealos sync status \
 - 一整套带真实 digest、timestamp 和 recorded state path 的可直接运行 runtime
   root
 - generated static Pod remediation
-- 多节点 target resolution
+- 多节点 apply 编排示例
 - package rebuild 或 BOM fork 流程
 
 这些内容在别的文档里已经有。这个示例目录唯一的目标，就是把当前单节点

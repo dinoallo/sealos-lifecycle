@@ -43,7 +43,8 @@ gaps are broader follow-up work rather than blockers for the PoC itself:
 
 - deciding which generated PoC assets should stay tracked versus generated
 - making fresh-host setup more automated
-- broadening `sync apply` beyond the prepared single-node host path
+- adding a multi-node PoC that exercises the current CLI-driven `sync apply`
+  orchestration path
 - extending the PoC beyond one machine and one cluster
 
 ## Current Machine Reality
@@ -87,8 +88,8 @@ Bottom line for this environment:
 ### Out Of Scope
 
 - OCI build and push pipeline
-- multi-node join flow
-- generic multi-node `sync apply`
+- multi-node PoC validation
+- controller-driven multi-node rollout policy
 - upgrades, rollback, or drift workflows
 - long-running reconcile loop
 - secret management beyond local static files

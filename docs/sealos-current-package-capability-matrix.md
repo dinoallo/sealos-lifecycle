@@ -59,7 +59,7 @@ Read this matrix as an implementation snapshot, not as a long-term promise.
 | Capability | Current State | Main Evidence | Boundary |
 | --- | --- | --- | --- |
 | Deploy package content to Kubernetes and the host from one unified flow | Ready with boundary | [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The deployment unit is the rendered bundle, not a standalone package install command. |
-| Resolve `allNodes`, `firstMaster`, and `cluster` apply targets from cluster inventory | Ready with boundary | [pkg/distribution/reconcile/topology.go](../pkg/distribution/reconcile/topology.go), [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The current execution path is still CLI-driven and assumes package hooks/scripts are already written with multi-node-safe behavior. |
+| Orchestrate a rendered bundle across multiple cluster hosts | Ready with boundary | [pkg/distribution/reconcile/topology.go](../pkg/distribution/reconcile/topology.go), [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go), [pkg/distribution/reconcile/kubeadm_bootstrap.go](../pkg/distribution/reconcile/kubeadm_bootstrap.go) | The CLI-driven `sync apply` path resolves `allNodes`, `firstMaster`, and `cluster`, stages bundle payloads per remote host, handles kubeadm join configs, and fetches remote first-master kubeconfig for cluster-scoped steps. Package hooks/scripts still need to be multi-node-safe. |
 | Commit a local input-backed host file from a selected multi-node host | Ready with boundary | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/commit/commit.go](../pkg/distribution/commit/commit.go) | Current multi-node commit support is intentionally narrow: it only covers local-input regular files, writes selected hosts back to host-scoped inputs when present, and rejects divergent selected-host commits that would overwrite the default input without host-scoped provenance. |
 | Track host files, Kubernetes objects, and some generated projections | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go), [pkg/distribution/compare/compare.go](../pkg/distribution/compare/compare.go) | Generated projection coverage is intentionally narrow. |
 | Support generated control-plane static Pod tracking | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go) | Only the explicitly modeled kubeadm-generated static Pod set is covered. |
@@ -73,7 +73,7 @@ These are the main things users should **not** mistake as already done.
 | Capability | Current State | Why It Matters |
 | --- | --- | --- |
 | Direct “install this package” workflow without BOM/bundle mediation | Not implemented | The current deployment path is `package -> BOM -> render -> bundle -> apply`, not package-direct install. |
-| Fully generalized multi-node topology-aware rollout and orchestration | Not implemented | `sync apply` can now resolve runtime targets, but there is still no controller-driven orchestration, rollout policy, or package-level safety model for every multi-node workflow. |
+| Controller-driven multi-node rollout policy | Not implemented | The CLI-driven `sync apply` path can orchestrate the current rendered-bundle workflow across multiple hosts, but there is still no background controller, rollout strategy object, or package-level safety model for every multi-node workflow. |
 | Controller-based continuous reconcile loop | Not implemented | Today the primary interface is CLI-driven render/apply/diff/status/commit/revert. |
 | `DistributionChannel`-driven release resolution | Not implemented | Current operation still uses explicit BOM files or revisions rather than live channel objects. |
 | Fully generalized generated-output drift management | Not implemented | The MVP tracks a narrow known set, not every possible generated artifact. |
@@ -87,7 +87,8 @@ The shortest accurate statement for the current repository is:
 - packaging is ready
 - package resolution is ready
 - deployment is ready as a BOM-driven MVP
-- multi-node orchestration and release-system behavior are not ready yet
+- CLI-driven multi-node bundle orchestration is ready with a narrow boundary
+- controller-driven rollout and release-system behavior are not ready yet
 
 That means the repository is already strong enough for:
 
@@ -99,7 +100,7 @@ That means the repository is already strong enough for:
 But it is not yet the final shape of:
 
 - multi-cluster release management
-- fully generalized multi-node topology-aware deployment
+- controller-driven multi-node topology-aware deployment
 - continuous controller-based reconciliation
 
 ## Related Documents

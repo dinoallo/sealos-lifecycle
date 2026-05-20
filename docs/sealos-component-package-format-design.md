@@ -717,12 +717,13 @@ the BOM.
 
 ### Do We Need To Change Installation-Time Code
 
-For the current single-node PoC path, no additional install-time integration is
-required. The existing `sync apply` path is explicitly single-node today.
+For the current package lifecycle path, no additional install-time integration
+is required. The `sync apply` executor now consumes the existing cluster
+inventory for CLI-driven rendered-bundle orchestration.
 
-For real multi-node distribution execution, yes, some code changes are needed,
-but they should be integration changes rather than a full rewrite of cluster
-installation.
+For controller-driven multi-node rollout policy, yes, some code changes are
+still needed, but they should be integration changes rather than a full rewrite
+of cluster installation.
 
 The repository already has installation-time inventory creation in the older
 cluster path, for example:
@@ -731,20 +732,22 @@ cluster path, for example:
 - the Kubernetes runtime already uses getters such as `getMaster0IPAndPort()`,
   `getMasterIPAndPortList()`, and `getNodeIPAndPortList()`
 
-What is missing is that the new distribution path does not yet consume that
-inventory. Today:
+The current distribution path now consumes that inventory:
 
-- `sync render` only takes a cluster name plus package sources
-- `sync apply` is described as applying to a prepared single-node host
-- the current distribution executor does not load cluster topology from the
-  existing Clusterfile or runtime objects
+- `sync render` records an `executionTopology` snapshot for the selected
+  cluster
+- `sync apply` resolves `allNodes`, `firstMaster`, and `cluster` from the
+  bundle snapshot or current Clusterfile inventory
+- the executor stages rendered bundle payloads per remote host and runs
+  host-scoped hooks on the resolved targets
+- the kubeadm bootstrap path renders per-host join configs and fetches the
+  remote first-master kubeconfig when later cluster-scoped steps need it
 
-So the likely next step is not “rewrite install”, but:
+The remaining next step is not “rewrite install”, but:
 
-- add one inventory/topology provider for the distribution runtime
-- load the named cluster's `ClusterSpec.Hosts` or equivalent runtime state
-- resolve `allNodes`, `firstMaster`, and `cluster` from that provider
-- keep the package contract unchanged
+- keep strengthening the distribution runtime's inventory/topology provider
+- add explicit rollout policy for batching, failure handling, and safety gates
+- keep package definitions declaring only logical scope
 
 That is the clean boundary:
 
@@ -763,13 +766,15 @@ Rules:
 Current implementation note:
 
 - the current repository validates these target values and carries them through
-  hydration, but the multi-node execution model is still a design direction,
-  not a fully implemented distributed scheduler
+  hydration
 - in the current code path, `target` is declared in
   `pkg/distribution/packageformat/types.go`, copied into hydrate steps in
   `pkg/distribution/hydrate/plan.go`, rendered into the bundle in
-  `pkg/distribution/hydrate/render.go`, and only lightly validated in the
-  current single-node apply path
+  `pkg/distribution/hydrate/render.go`, planned in
+  `cmd/sealos/cmd/sync_plan.go`, and resolved during apply in
+  `pkg/distribution/reconcile/topology.go`
+- this is still a CLI-driven executor, not a controller-driven distributed
+  scheduler with rollout strategy objects
 
 ## Compatibility Contract
 

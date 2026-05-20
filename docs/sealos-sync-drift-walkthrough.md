@@ -433,7 +433,7 @@ If you want a concrete sample directory that matches this loop, use:
 This walkthrough only describes the current repo behavior. The current MVP
 still does not provide:
 
-- multi-node target resolution
+- controller-driven multi-node rollout and continuous reconciliation
 - direct `commit` or `revert` for generated projections
 - arbitrary global-baseline mutation through `commit`
 - a full controller-driven background reconcile loop
@@ -441,4 +441,5 @@ still does not provide:
 So the right mental model is:
 
 - the repo already has a working single-node operator loop
-- but it is still a CLI-driven MVP, not a fully autonomous distribution agent
+- and a narrow CLI-driven multi-node `sync apply` path
+- but it is still not a fully autonomous distribution agent

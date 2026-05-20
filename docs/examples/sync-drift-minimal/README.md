@@ -408,7 +408,7 @@ This example is intentionally minimal. It does not try to show:
 - a fully runnable runtime root with real digests, timestamps, and recorded
   state paths
 - generated static Pod remediation
-- multi-node target resolution
+- multi-node apply orchestration examples
 - package rebuild or BOM fork flow
 
 Those are documented elsewhere. This example only exists to pin down the

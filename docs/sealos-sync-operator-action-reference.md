@@ -199,7 +199,7 @@ This reference describes the current single-node MVP only.
 
 It does not imply:
 
-- multi-node target resolution
+- multi-node commit/revert coverage beyond the narrow host-input path
 - controller-driven continuous reconciliation
 - direct generated-projection revert support
 - a fully externalized ownership-policy object
