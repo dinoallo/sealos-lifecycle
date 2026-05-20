@@ -26,9 +26,9 @@ deployment that is `/host/etc/kubernetes/admin.conf`.
 ## Prerequisites
 
 - A Kubernetes cluster that already has the `sealos-agent` image available.
-- A controller image that contains `sealos-agent`, `kubectl`, and the host tools
-  needed by package hooks, or an image plus mounted host paths that put those
-  tools on `PATH`.
+- A controller image that contains `/usr/bin/sealos-agent`, `kubectl`, and the
+  host tools needed by package hooks, or an image plus mounted host paths that
+  put those tools on `PATH`.
 - The selected BOM or local `DistributionChannel` file staged under
   `/var/lib/sealos/distribution/...` on the node running the controller pod.
 - A cluster-local repo staged under `/var/lib/sealos/distribution/...` when the

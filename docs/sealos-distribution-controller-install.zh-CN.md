@@ -24,7 +24,7 @@ kubeconfig；base deployment 里默认是 `/host/etc/kubernetes/admin.conf`。
 ## 前置条件
 
 - 已经有 Kubernetes 集群，并且集群可以拉取或使用 `sealos-agent` 镜像。
-- controller 镜像里包含 `sealos-agent`、`kubectl` 和 package hooks 需要的 host
+- controller 镜像里包含 `/usr/bin/sealos-agent`、`kubectl` 和 package hooks 需要的 host
   tools；或者镜像加上挂载的 host paths 后，可以从 `PATH` 找到这些工具。
 - 选中的 BOM 或本地 `DistributionChannel` 文件已经放到运行 controller pod 的节点的
   `/var/lib/sealos/distribution/...` 下。

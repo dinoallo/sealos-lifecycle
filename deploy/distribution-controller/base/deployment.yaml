@@ -53,6 +53,8 @@ spec:
         - name: sealos-agent
           image: labring/sealos-agent:dev
           imagePullPolicy: IfNotPresent
+          command:
+            - /usr/bin/sealos-agent
           args:
             - --controller
             - --controller-namespace=sealos-system

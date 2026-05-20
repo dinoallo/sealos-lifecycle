@@ -141,6 +141,9 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 		t.Fatalf("container count = %d, want 1", len(deployment.Spec.Template.Spec.Containers))
 	}
 	container := deployment.Spec.Template.Spec.Containers[0]
+	if !contains(container.Command, "/usr/bin/sealos-agent") {
+		t.Fatalf("container command missing /usr/bin/sealos-agent: %v", container.Command)
+	}
 	for _, arg := range []string{
 		"--controller",
 		"--controller-namespace=sealos-system",
