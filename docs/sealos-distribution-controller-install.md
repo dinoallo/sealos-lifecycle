@@ -70,6 +70,10 @@ kubectl apply -f deploy/distribution-controller/base/rbac.yaml
 kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
 ```
 
+Apply those files individually when using `-f`. Do not apply the whole
+`deploy/distribution-controller/base` directory with `kubectl apply -f`; it also
+contains `kustomization.yaml`, which must be rendered with `kubectl apply -k`.
+
 If you are using Kustomize, you can also update the image from the base
 directory and apply the rendered output:
 

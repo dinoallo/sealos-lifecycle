@@ -65,6 +65,10 @@ kubectl apply -f deploy/distribution-controller/base/rbac.yaml
 kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
 ```
 
+使用 `-f` 时请逐个应用这些文件。不要执行
+`kubectl apply -f deploy/distribution-controller/base` 来应用整个目录；该目录还包含
+`kustomization.yaml`，它需要通过 `kubectl apply -k` 渲染。
+
 如果使用 Kustomize，也可以在 base 目录里更新镜像并应用渲染结果：
 
 ```bash

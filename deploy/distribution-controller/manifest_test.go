@@ -62,6 +62,29 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 	}
 }
 
+func TestDistributionControllerDirectApplyFileSet(t *testing.T) {
+	t.Parallel()
+
+	objects := loadManifestObjects(t,
+		filepath.Join("base", "namespace.yaml"),
+		filepath.Join("base", "crd.yaml"),
+		filepath.Join("base", "rbac.yaml"),
+		filepath.Join("base", "deployment.yaml"),
+	)
+
+	want := []schema.GroupVersionKind{
+		{Version: "v1", Kind: "Namespace"},
+		{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"},
+		{Version: "v1", Kind: "ServiceAccount"},
+		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"},
+		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
+		{Group: "apps", Version: "v1", Kind: "Deployment"},
+	}
+	if got := objectKinds(objects); !sameKinds(got, want) {
+		t.Fatalf("direct apply manifest kinds = %v, want %v", got, want)
+	}
+}
+
 func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 	t.Parallel()
 
