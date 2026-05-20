@@ -14,10 +14,13 @@ The current decision is intentionally narrow:
 
 - `LocalPatchPolicy` governs only cluster-local override surfaces
 - the policy document scope must be `clusterLocal`
-- the current supported sources are only:
+- the current supported sources are:
   - `localRepo`
+  - `bom`
+  - `package`
   - `builtInDefault`
-- package and BOM content do not define local-patch policy in the current MVP
+- package and BOM content may select a cluster-local policy artifact, but they
+  still do not create a package/BOM-scoped policy surface
 - after render, the bundle-carried policy artifact becomes the effective policy
   source of truth for compare, validation, and `sync commit`
 
@@ -89,16 +92,22 @@ In the current MVP:
 - an omitted scope is interpreted as `clusterLocal` for legacy compatibility
 - any other scope is rejected
 
-### 2. Supported Policy Sources Are Only `localRepo` And `builtInDefault`
+### 2. Supported Policy Sources
 
-The current bundle provenance model supports only two policy sources:
+The current bundle provenance model supports these policy sources:
 
 - `localRepo`
   - the cluster-local repo explicitly provided
     `policy/local-patch-policy.yaml`
+- `bom`
+  - the selected BOM references a reviewed policy file through
+    `spec.localPatchPolicy`
+- `package`
+  - exactly one BOM-selected component package references a reviewed policy
+    file through `spec.localPatchPolicy`
 - `builtInDefault`
-  - Sealos rendered the built-in default policy because the local repo did not
-    provide one
+  - Sealos rendered the built-in default policy because no explicit source
+    provided one
 
 This is reflected in bundle metadata:
 
@@ -108,22 +117,21 @@ This is reflected in bundle metadata:
 - `bundle.spec.localPatchPolicyPath`
 - `bundle.spec.localPatchPolicyDigest`
 
-### 3. Package And BOM Content Do Not Define Local-Patch Policy
+### 3. Package And BOM Sources Still Carry `clusterLocal` Policy
 
-The current MVP intentionally rejects package-side or BOM-side local-patch
-policy as a supported source.
-
-The reason is architectural, not accidental:
+Package-side and BOM-side sources select the effective cluster-local policy for
+the rendered bundle. They do not introduce package/BOM-scoped policy.
 
 - package/BOM content defines shared baseline
 - `LocalPatchPolicy` defines which cluster-local mutations are acceptable
-- letting shared baseline producers silently widen local mutation surfaces would
-  blur the global/local ownership boundary
+- the policy document still must use `spec.scope: clusterLocal`
 
 Put differently:
 
 - package/BOM may define extension points
-- but they do not currently define the cluster's local mutation policy
+- package/BOM may select a reviewed policy artifact
+- package/BOM may not currently define a different ownership scope or merge
+  policy layers
 
 ### 4. The Rendered Bundle Is The Effective Policy Carrier
 
@@ -144,13 +152,20 @@ This keeps the rendered revision self-describing.
 The current resolution order is:
 
 1. If `local-repo/policy/local-patch-policy.yaml` exists, use it.
-2. Otherwise, use the built-in default policy document.
-3. Render the chosen document into `bundle/policy/local-patch-policy.yaml`.
-4. Record source, scope, name, path, and digest in `bundle.yaml`.
-5. Require later policy consumers to read the rendered bundle artifact, not the
+2. Otherwise, if the selected BOM declares `spec.localPatchPolicy`, load that
+   policy file relative to the BOM file.
+3. Otherwise, if exactly one selected component package declares
+   `spec.localPatchPolicy`, load that policy file relative to that package
+   root.
+4. Otherwise, use the built-in default policy document.
+5. Render the chosen document into `bundle/policy/local-patch-policy.yaml`.
+6. Record source, scope, name, path, and digest in `bundle.yaml`.
+7. Require later policy consumers to read the rendered bundle artifact, not the
    ambient local repo.
 
-The current MVP does not merge multiple policy layers.
+The current MVP does not merge multiple policy layers. If the package source
+would be the effective source and more than one package declares a policy,
+render fails instead of guessing.
 
 There is exactly one effective policy document per rendered bundle revision.
 
@@ -171,17 +186,15 @@ should reject that bundle instead of guessing.
 
 ## Rejected Alternatives
 
-### Package-Scoped Local Patch Policy
+### Package-Scoped Policy Scope
 
-Rejected for now because it would let package producers define the local
-mutation envelope for every consuming cluster, which is stronger than the
-current ownership model allows.
+Rejected for now. A package may select a `clusterLocal` policy artifact, but it
+does not define a package-owned policy scope.
 
-### BOM-Scoped Local Patch Policy
+### BOM-Scoped Policy Scope
 
-Rejected for now because a BOM is still part of global release selection. It
-can choose baseline artifacts, but it does not currently own the cluster-local
-override budget.
+Rejected for now. A BOM may select a `clusterLocal` policy artifact for the
+rendered revision, but it does not define a BOM-owned policy scope.
 
 ### Layered Merge Of Package + BOM + Local Repo Policy
 
@@ -190,8 +203,8 @@ single-policy model is proven.
 
 ## Future Extension Gate
 
-If Sealos later needs package/BOM-scoped policy, that should not be added as a
-silent third source.
+If Sealos later needs package/BOM-scoped policy, that should not be added by
+reusing the current source-selection fields.
 
 It should require a separate design that answers at least:
 
@@ -204,4 +217,5 @@ It should require a separate design that answers at least:
 Until that design exists, the current rule stays simple:
 
 - policy scope is `clusterLocal`
-- supported sources are `localRepo` and `builtInDefault`
+- supported sources are `localRepo`, `bom`, `package`, and `builtInDefault`
+- there is exactly one rendered effective policy

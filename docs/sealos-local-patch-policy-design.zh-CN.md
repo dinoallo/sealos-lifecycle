@@ -13,10 +13,13 @@ Sealos 在 render 之后应该如何携带它的 provenance。
 
 - `LocalPatchPolicy` 只治理 cluster-local override surface
 - policy 文档的 scope 必须是 `clusterLocal`
-- 当前只支持两种来源：
+- 当前支持这些来源：
   - `localRepo`
+  - `bom`
+  - `package`
   - `builtInDefault`
-- 当前 MVP 里，package 和 BOM 都不负责定义 local-patch policy
+- package 和 BOM 可以选择一份 cluster-local policy artifact，但不会因此创建
+  package/BOM-scoped policy surface
 - render 结束后，bundle 中携带的 policy artifact 会成为 compare、validation
   和 `sync commit` 共同消费的有效 policy source of truth
 
@@ -88,15 +91,21 @@ spec:
 - 对 legacy policy 文档，scope 缺失时会按 `clusterLocal` 解释
 - 任何其他 scope 都会被拒绝
 
-### 2. 当前只支持 `localRepo` 和 `builtInDefault`
+### 2. 支持的 Policy Sources
 
-当前 bundle provenance 模型只支持两种 policy source：
+当前 bundle provenance 模型支持这些 policy source：
 
 - `localRepo`
   - cluster-local repo 明确提供了
     `policy/local-patch-policy.yaml`
+- `bom`
+  - 被选中的 BOM 通过 `spec.localPatchPolicy` 引用了一份经过评审的
+    policy 文件
+- `package`
+  - 正好一个被 BOM 选中的 component package 通过 `spec.localPatchPolicy`
+    引用了一份经过评审的 policy 文件
 - `builtInDefault`
-  - local repo 没有提供 policy，于是 Sealos 把内置默认 policy 渲染进了
+  - 没有任何显式 source 提供 policy，于是 Sealos 把内置默认 policy 渲染进了
     bundle
 
 这层 provenance 会记录在 bundle metadata 里：
@@ -107,21 +116,20 @@ spec:
 - `bundle.spec.localPatchPolicyPath`
 - `bundle.spec.localPatchPolicyDigest`
 
-### 3. Package 和 BOM 当前都不负责定义 Local-Patch Policy
+### 3. Package 和 BOM Source 仍然携带 `clusterLocal` Policy
 
-当前 MVP 刻意不把 package-side 或 BOM-side local-patch policy 当成合法来源。
-
-这不是实现没做完，而是当前架构下的明确选择：
+package-side 和 BOM-side source 可以为 rendered bundle 选择生效的
+cluster-local policy。它们不会引入 package/BOM-scoped policy。
 
 - package/BOM content 定义 shared baseline
 - `LocalPatchPolicy` 定义哪些 cluster-local mutation 是被允许的
-- 如果让 shared baseline producer 悄悄扩大可本地修改的 surface，就会把
-  global/local ownership boundary 搅混
+- policy 文档本身仍然必须使用 `spec.scope: clusterLocal`
 
 换句话说：
 
 - package/BOM 可以定义 extension point
-- 但当前它们不定义 cluster 的 local mutation policy
+- package/BOM 可以选择一份经过评审的 policy artifact
+- package/BOM 当前不能定义不同的 ownership scope，也不能合并 policy layers
 
 ### 4. Render 后的 Bundle 才是有效 Policy Carrier
 
@@ -142,13 +150,18 @@ spec:
 当前解析顺序是：
 
 1. 如果 `local-repo/policy/local-patch-policy.yaml` 存在，就用它。
-2. 否则，用内置默认 policy 文档。
-3. 把选中的文档渲染到 `bundle/policy/local-patch-policy.yaml`。
-4. 在 `bundle.yaml` 里记录 source、scope、name、path、digest。
-5. 后续 consumer 一律读 rendered bundle artifact，而不是回头读环境里的
+2. 否则，如果被选中的 BOM 声明了 `spec.localPatchPolicy`，就按 BOM 文件所在
+   目录解析并加载这份 policy。
+3. 否则，如果正好一个被选中的 component package 声明了
+   `spec.localPatchPolicy`，就按该 package root 解析并加载这份 policy。
+4. 否则，用内置默认 policy 文档。
+5. 把选中的文档渲染到 `bundle/policy/local-patch-policy.yaml`。
+6. 在 `bundle.yaml` 里记录 source、scope、name、path、digest。
+7. 后续 consumer 一律读 rendered bundle artifact，而不是回头读环境里的
    local repo。
 
-当前 MVP 不做多层 policy merge。
+当前 MVP 不做多层 policy merge。如果 package source 会成为生效 source，并且
+多于一个 package 声明了 policy，render 会直接失败，而不是猜测。
 
 每个 rendered bundle revision 只有一份有效 policy 文档。
 
@@ -168,15 +181,15 @@ name/scope/path/digest 和 rendered artifact 对不上，policy consumer
 
 ## 当前不采纳的方案
 
-### Package-Scoped Local Patch Policy
+### Package-Scoped Policy Scope
 
-当前不采纳。因为这会让 package producer 为所有消费集群定义本地 mutation
-envelope，这比当前 ownership 模型允许的权力更大。
+当前不采纳。package 可以选择一份 `clusterLocal` policy artifact，但它不定义
+package-owned policy scope。
 
-### BOM-Scoped Local Patch Policy
+### BOM-Scoped Policy Scope
 
-当前不采纳。因为 BOM 仍然属于 global release selection 的一部分。它可以选择
-baseline artifact，但当前不拥有 cluster-local override budget。
+当前不采纳。BOM 可以为 rendered revision 选择一份 `clusterLocal` policy
+artifact，但它不定义 BOM-owned policy scope。
 
 ### Package + BOM + Local Repo 多层 Merge
 
@@ -185,8 +198,8 @@ baseline artifact，但当前不拥有 cluster-local override budget。
 
 ## 未来扩展门槛
 
-如果 Sealos 以后真的需要 package/BOM-scoped policy，那也不应该作为“悄悄加上
-第三种 source”来做。
+如果 Sealos 以后真的需要 package/BOM-scoped policy，那也不应该复用当前这些
+source-selection 字段来悄悄实现。
 
 它应该走一份单独设计，至少回答这些问题：
 
@@ -199,4 +212,5 @@ baseline artifact，但当前不拥有 cluster-local override budget。
 在那份设计出现之前，当前规则保持简单：
 
 - policy scope 是 `clusterLocal`
-- 支持的 source 只有 `localRepo` 和 `builtInDefault`
+- 支持的 source 是 `localRepo`、`bom`、`package` 和 `builtInDefault`
+- 每个 rendered bundle 只有一份生效 policy

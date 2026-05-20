@@ -13,7 +13,7 @@ become part of a rendered bundle.
 It builds on the current source-and-scope design:
 
 - policy scope is `clusterLocal`
-- supported sources are only `localRepo` and `builtInDefault`
+- supported sources are `localRepo`, `bom`, `package`, and `builtInDefault`
 - the rendered bundle carries the effective policy artifact and its provenance
 
 This guide answers the next operational question:
@@ -35,16 +35,22 @@ This guide answers the next operational question:
 
 ## Current Authoring Boundary
 
-In the current MVP, `LocalPatchPolicy` is authored only in one place:
+In the current MVP, `LocalPatchPolicy` can be authored in these places:
 
 - `local-repo/policy/local-patch-policy.yaml`
+- a BOM-selected policy file referenced by `BOM.spec.localPatchPolicy`
+- a component-package policy file referenced by
+  `ComponentPackage.spec.localPatchPolicy`
 
 That means:
 
-- cluster operators may author or adjust cluster-local policy
-- package authors do not ship local-patch policy in package artifacts
-- BOM authors do not select or compose local-patch policy as part of release
-  selection
+- cluster operators may author or adjust cluster-local policy in the local repo
+- BOM authors may select a reviewed cluster-local policy for a rendered
+  revision
+- package authors may ship a reviewed cluster-local policy in a package
+  artifact, but only one selected package may do so unless the BOM or local repo
+  chooses the effective policy
+- no source may currently define a package/BOM-scoped policy
 
 This is a direct consequence of the current design:
 

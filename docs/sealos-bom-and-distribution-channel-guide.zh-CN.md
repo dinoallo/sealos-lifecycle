@@ -142,6 +142,7 @@ metadata:
 spec:
   revision: rev-poc-001
   channel: alpha
+  localPatchPolicy: policy/local-patch-policy.yaml
   components:
     - name: containerd
       kind: infra
@@ -166,6 +167,8 @@ spec:
 - `spec.revision` 必填
 - `spec.channel` 今天仍然是必填
 - `spec.components` 必填
+- `spec.localPatchPolicy` 可选；如果设置，它是相对于 BOM 文件所在目录的一份
+  `LocalPatchPolicy`，并且优先级高于 package policy source
 - 每个组件的 artifact digest 必填
 - 依赖名必须引用同一个 BOM 里的其他组件名
 

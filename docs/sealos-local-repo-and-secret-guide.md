@@ -173,18 +173,19 @@ Current boundary for host-scoped inputs:
   and ingress or service exposure fields such as `spec.rules`, `spec.tls`, and
   selected metadata annotations
 - if `local-repo/policy/local-patch-policy.yaml` is absent, render still writes
-  an explicit default policy artifact into the bundle so compare, commit, and
-  remediation all share the same policy source of truth for that rendered
-  revision
+  an explicit policy artifact into the bundle, either from the selected BOM,
+  from exactly one selected package, or from the built-in default
 - the current ownership model is therefore explicit:
-  package and BOM content do not define local-patch policy yet
-  the rendered bundle will mark policy provenance as either
+  package and BOM content may select the effective cluster-local policy, but
+  they do not create a package/BOM-scoped policy surface
+  the rendered bundle will mark policy provenance as one of:
   `localPatchPolicySource: localRepo`
-  or
+  `localPatchPolicySource: bom`
+  `localPatchPolicySource: package`
   `localPatchPolicySource: builtInDefault`
 - the policy artifact itself now also carries `spec.scope: clusterLocal`
-  whether it came from `localRepo` or from the built-in fallback; package/BOM
-  scoped local-patch policy is currently unsupported
+  regardless of source; package/BOM-scoped local-patch policy and multi-layer
+  policy merge are currently unsupported
 - if a bundle claims any other source, or its recorded policy name/path/digest
   do not match the rendered artifact, current policy consumers reject that
   bundle instead of guessing

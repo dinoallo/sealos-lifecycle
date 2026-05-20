@@ -227,8 +227,9 @@ spec:
 - 以 `localPatchPolicySource`、`localPatchPolicyScope`、
   `localPatchPolicyName`、`localPatchPolicyPath` 和
   `localPatchPolicyDigest` 的形式记录进 `bundle.yaml`
-- 当前只支持 `spec.scope: clusterLocal`；这个 MVP 里故意不支持
-  package/BOM-scoped 的 local-patch policy
+- 当前只支持 `spec.scope: clusterLocal`；package 和 BOM source 可以选择这类
+  policy，但这个 MVP 里仍然故意不支持 package/BOM-scoped policy，也不支持
+  多层 policy merge
 - 在后续的 local patch validation、compare 阶段 `policyEligible`
   标注，以及 `sync commit` 中被统一消费
 

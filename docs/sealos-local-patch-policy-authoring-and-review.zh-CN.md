@@ -12,7 +12,7 @@
 它建立在当前已经定下来的 source-and-scope 设计之上：
 
 - policy scope 是 `clusterLocal`
-- 当前只支持 `localRepo` 和 `builtInDefault`
+- 当前支持 `localRepo`、`bom`、`package` 和 `builtInDefault`
 - rendered bundle 会携带生效中的 policy artifact 及其 provenance
 
 这份文档回答的是下一层更操作化的问题：
@@ -34,15 +34,22 @@
 
 ## 当前的编写边界
 
-在当前 MVP 里，`LocalPatchPolicy` 只在一个地方编写：
+在当前 MVP 里，`LocalPatchPolicy` 可以在这些地方编写：
 
 - `local-repo/policy/local-patch-policy.yaml`
+- 由 `BOM.spec.localPatchPolicy` 引用的一份 BOM-selected policy 文件
+- 由 `ComponentPackage.spec.localPatchPolicy` 引用的一份 component-package
+  policy 文件
 
 这意味着：
 
-- cluster operator 可以编写或调整 cluster-local policy
-- package author 不会在 package artifact 里携带 local-patch policy
-- BOM author 不会把 local-patch policy 当成 release selection 的一部分
+- cluster operator 可以在 local repo 里编写或调整 cluster-local policy
+- BOM author 可以为一次 rendered revision 选择一份经过评审的 cluster-local
+  policy
+- package author 可以在 package artifact 里携带一份经过评审的 cluster-local
+  policy，但除非 BOM 或 local repo 选择了生效 policy，否则一次只允许一个被选中
+  package 这么做
+- 当前没有任何 source 可以定义 package/BOM-scoped policy
 
 这直接来自当前设计边界：
 

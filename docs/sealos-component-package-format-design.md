@@ -473,6 +473,13 @@ Key optional fields:
 - `spec.compatibility`
 - `spec.inputs`
 - `spec.hooks`
+- `spec.localPatchPolicy`
+
+`spec.localPatchPolicy` is a relative path inside the package to a
+`LocalPatchPolicy` document. If no higher-priority local repo or BOM policy is
+selected, exactly one selected package may provide the effective rendered
+policy. The policy scope is still only `clusterLocal`; package-scoped policy
+and policy-layer merging are outside the current format.
 
 ## Content Model
 

@@ -171,17 +171,19 @@ local-repo/
   binding，以及 ingress / service 暴露相关字段（例如 `spec.rules`、
   `spec.tls` 和部分 metadata annotations）
 - 如果 `local-repo/policy/local-patch-policy.yaml` 缺失，render 仍然会把一份
-  显式的默认 policy 写进 bundle，这样 compare、commit 和 remediation 在
-  当前 rendered revision 上就会共享同一个 policy source of truth
+  显式 policy 写进 bundle；它可能来自选中的 BOM、唯一选中的 package，或者
+  内置默认值
 - 所以当前这套 ownership 模型现在已经是显式的：
-  package 和 BOM 目前都还不负责定义 local-patch policy
-  render 后的 bundle 会把 policy provenance 标成下面两者之一：
+  package 和 BOM 可以选择当前 rendered revision 的 cluster-local policy，但
+  它们还不能定义 package/BOM-scoped policy surface
+  render 后的 bundle 会把 policy provenance 标成下面几种之一：
   `localPatchPolicySource: localRepo`
-  或
+  `localPatchPolicySource: bom`
+  `localPatchPolicySource: package`
   `localPatchPolicySource: builtInDefault`
 - 这份 policy artifact 本身现在也会显式带上 `spec.scope: clusterLocal`，
-  无论它来自 `localRepo` 还是内置默认值；当前还不支持 package/BOM-scoped 的
-  local-patch policy
+  无论它来自哪种 source；当前还不支持 package/BOM-scoped 的 local-patch
+  policy，也不支持多层 policy merge
 - 如果 bundle 声称来自其他 source，或者它记录下来的 policy
   name/path/digest 和渲染出来的 artifact 对不上，当前 policy consumer
   会直接拒绝这个 bundle，而不是猜测应该用哪份规则

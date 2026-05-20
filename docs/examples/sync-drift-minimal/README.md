@@ -236,8 +236,9 @@ In the current single-node MVP, this policy is:
 - recorded in `bundle.yaml` as `localPatchPolicySource`,
   `localPatchPolicyScope`, `localPatchPolicyName`, `localPatchPolicyPath`, and
   `localPatchPolicyDigest`
-- currently only `spec.scope: clusterLocal` is supported; package/BOM-scoped
-  local-patch policy is intentionally unsupported in this MVP
+- currently only `spec.scope: clusterLocal` is supported; package and BOM
+  sources may select that policy, but package/BOM-scoped policy and multi-layer
+  policy merge are intentionally unsupported in this MVP
 - consumed later by local patch validation, compare-side `policyEligible`
   annotation, and `sync commit`
 

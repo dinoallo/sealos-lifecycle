@@ -71,6 +71,7 @@ Read this matrix as an implementation snapshot, not as a long-term promise.
 | Support generated control-plane static Pod tracking | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go) | Only the explicitly modeled kubeadm-generated static Pod set is covered. |
 | Approval-governed local patch policy gate | Ready with boundary | [pkg/distribution/policyreport/gate.go](../pkg/distribution/policyreport/gate.go), [.github/workflows/local_patch_policy_gate.yml](./../.github/workflows/local_patch_policy_gate.yml) | This governs local patch policy only, not every future ownership policy. |
 | Time-based approval hygiene scanning | Ready with boundary | `sealos sync policy-approval-scan` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [.github/workflows/local_patch_policy_approval_scan.yml](./../.github/workflows/local_patch_policy_approval_scan.yml) | The scan is repo-level and approval-focused, not a general cluster health controller. |
+| Package/BOM-defined local patch policy source | Ready with boundary | [pkg/distribution/bom/types.go](../pkg/distribution/bom/types.go), [pkg/distribution/packageformat/types.go](../pkg/distribution/packageformat/types.go), [pkg/distribution/hydrate/policy.go](../pkg/distribution/hydrate/policy.go) | `LocalPatchPolicy` scope is still only `clusterLocal`; precedence is `localRepo > bom > package > builtInDefault`, the package source requires exactly one selected package policy unless localRepo/BOM wins, and there is no multi-layer policy merge. |
 
 ## Not Implemented
 
@@ -82,7 +83,6 @@ These are the main things users should **not** mistake as already done.
 | Package-level safety model for every multi-node workflow | Not implemented | Durable rollout policy now covers eligible rendered-bundle host batches with canary, pause, health gate, stop, and rollback behavior, but bootstrap rootfs, manifest-only, and package-specific safety models still require separate design. |
 | Live `DistributionChannel` release lookup and health-gated promotion service | Not implemented | Local file-backed `DistributionChannel` resolution and `sealos sync promote` advancement exist, but there is no registry/API-backed lookup by `distribution line + channel` and no health-gated promotion service. |
 | Fully generalized generated-output drift management | Not implemented | The MVP tracks a narrow known set, not every possible generated artifact. |
-| Package/BOM-defined local patch policy source | Not implemented | Current policy sources are only `localRepo` and `builtInDefault`. |
 | Multi-layer policy merge across package, BOM, and cluster-local inputs | Not implemented | The current model intentionally rejects that complexity. |
 
 ## Practical Interpretation

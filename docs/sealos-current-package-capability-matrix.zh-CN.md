@@ -68,6 +68,7 @@
 | 支持 generated control-plane static Pod tracking | Ready with boundary | [inventory.go](../pkg/distribution/hydrate/inventory.go) | 只覆盖明确建模的 kubeadm-generated static Pod 集合。 |
 | 带 approval 的 local patch policy gate | Ready with boundary | [gate.go](../pkg/distribution/policyreport/gate.go), [local_patch_policy_gate.yml](../.github/workflows/local_patch_policy_gate.yml) | 它当前治理的是 local patch policy，不是所有未来 ownership policy。 |
 | 按时间巡检 approval 卫生状态 | Ready with boundary | [sync.go](../cmd/sealos/cmd/sync.go) 里的 `sealos sync policy-approval-scan`，以及 [local_patch_policy_approval_scan.yml](../.github/workflows/local_patch_policy_approval_scan.yml) | 这是一条 repo 级 approval 巡检，不是通用 cluster health controller。 |
+| package/BOM 侧提供 local patch policy source | Ready with boundary | [pkg/distribution/bom/types.go](../pkg/distribution/bom/types.go), [pkg/distribution/packageformat/types.go](../pkg/distribution/packageformat/types.go), [pkg/distribution/hydrate/policy.go](../pkg/distribution/hydrate/policy.go) | `LocalPatchPolicy` 的 scope 仍然只支持 `clusterLocal`；优先级是 `localRepo > bom > package > builtInDefault`，只有 package source 生效时才要求正好选中一份 package policy，也没有多层 policy merge。 |
 
 ## 还没有
 
@@ -79,7 +80,6 @@
 | 覆盖所有 multi-node workflow 的 package 级安全模型 | Not implemented | 持久 rollout policy 现在已经覆盖符合条件的 rendered-bundle host batches，支持 canary、pause、health gate、stop 和 rollback；但 bootstrap rootfs、manifest-only 以及 package-specific safety model 仍需要单独设计。 |
 | live `DistributionChannel` release lookup 和 health-gated promotion service | Not implemented | 本地文件形式的 `DistributionChannel` resolution 和 `sealos sync promote` advancement 已经有了，但还没有 registry/API 驱动的 `distribution line + channel` lookup，也没有 health-gated promotion service。 |
 | 完全泛化的 generated-output drift 管理 | Not implemented | 当前 MVP 只跟踪一组已知 generated target。 |
-| package/BOM 侧提供 local patch policy source | Not implemented | 当前 policy source 只支持 `localRepo` 和 `builtInDefault`。 |
 | package、BOM、cluster-local 多层 policy merge | Not implemented | 当前模型刻意拒绝这层复杂度。 |
 
 ## 最实用的解释

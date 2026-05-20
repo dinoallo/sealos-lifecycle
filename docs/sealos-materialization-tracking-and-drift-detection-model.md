@@ -633,12 +633,17 @@ In other words, the current single-node MVP now makes policy ownership
 explicit:
 
 - `localPatchPolicySource: localRepo` means the cluster-local repo defined it
+- `localPatchPolicySource: bom` means the selected BOM chose the policy
+  artifact through `spec.localPatchPolicy`
+- `localPatchPolicySource: package` means exactly one selected component
+  package chose the policy artifact through `spec.localPatchPolicy`
 - `localPatchPolicySource: builtInDefault` means Sealos rendered the built-in
   default policy into the bundle
 - `localPatchPolicyScope: clusterLocal` means the rendered artifact governs
-  cluster-local override surfaces only; package/BOM-scoped local patch policy
-  is currently unsupported
-- package and BOM content do not define local-patch policy yet
+  cluster-local override surfaces only; package/BOM-scoped policy is still
+  unsupported
+- package/BOM policy sources select one effective policy artifact; package,
+  BOM, and cluster-local policy layers are not merged
 
 ## Current `sync diff` And `sync status` Output Shape
 

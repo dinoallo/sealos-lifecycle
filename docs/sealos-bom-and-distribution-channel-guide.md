@@ -147,6 +147,7 @@ metadata:
 spec:
   revision: rev-poc-001
   channel: alpha
+  localPatchPolicy: policy/local-patch-policy.yaml
   components:
     - name: containerd
       kind: infra
@@ -171,6 +172,9 @@ Important current rules:
 - `spec.revision` is required
 - `spec.channel` is required today
 - `spec.components` is required
+- `spec.localPatchPolicy` is optional; when set, it is a relative path to a
+  `LocalPatchPolicy` file next to the BOM and takes precedence over package
+  policy sources
 - every component artifact digest is required
 - component dependency names must refer to other component names in the same BOM
 

@@ -604,12 +604,16 @@ bundle，并让它成为下面这些路径共享的 source of truth：
 换句话说，当前单节点 MVP 现在已经把 policy ownership 说死成了显式模型：
 
 - `localPatchPolicySource: localRepo` 表示这份 policy 由 cluster-local repo 定义
+- `localPatchPolicySource: bom` 表示被选中的 BOM 通过
+  `spec.localPatchPolicy` 选择了这份 policy artifact
+- `localPatchPolicySource: package` 表示正好一个被选中的 component package
+  通过 `spec.localPatchPolicy` 选择了这份 policy artifact
 - `localPatchPolicySource: builtInDefault` 表示 Sealos 把内置默认 policy 渲染进了
   bundle
 - `localPatchPolicyScope: clusterLocal` 表示这份 rendered artifact 只治理
-  cluster-local override surface；当前还不支持 package/BOM-scoped 的
-  local-patch policy
-- package 和 BOM 目前都还不是 local-patch policy 的合法来源
+  cluster-local override surface；当前仍不支持 package/BOM-scoped policy
+- package/BOM policy source 只选择一份生效 policy artifact；package、BOM 和
+  cluster-local policy layers 不会合并
 
 ## 当前 `sync diff` 和 `sync status` 的输出形态
 
