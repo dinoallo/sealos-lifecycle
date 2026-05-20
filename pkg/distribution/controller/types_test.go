@@ -113,6 +113,18 @@ func TestDistributionTargetSpecValidateRejectsEmptyRolloutPolicyRef(t *testing.T
 	}
 }
 
+func TestDistributionTargetSpecAgentOptionsRejectsUnresolvedRolloutPolicyRef(t *testing.T) {
+	t.Parallel()
+
+	_, err := (DistributionTargetSpec{
+		BOMPath:          "bom.yaml",
+		RolloutPolicyRef: &DistributionPolicyRef{Name: "steady"},
+	}).AgentOptions(Defaults{})
+	if err == nil {
+		t.Fatal("AgentOptions() error = nil, want unresolved rollout policy ref error")
+	}
+}
+
 func TestDistributionRolloutPolicySpecValidateRejectsNegativeBatch(t *testing.T) {
 	t.Parallel()
 

@@ -341,6 +341,9 @@ func (s DistributionTargetSpec) AgentOptions(defaults Defaults) (agent.Options, 
 	if err := s.Validate(); err != nil {
 		return agent.Options{}, err
 	}
+	if s.RolloutPolicyRef != nil {
+		return agent.Options{}, fmt.Errorf("spec.rolloutPolicyRef requires resolving a DistributionRolloutPolicy")
+	}
 	return s.agentOptions(defaults, reconcile.RolloutStrategy{BatchSize: s.RolloutBatchSize})
 }
 
