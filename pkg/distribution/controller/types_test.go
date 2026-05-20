@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/labring/sealos/pkg/distribution/reconcile"
 )
 
 func TestDistributionTargetSpecAgentOptions(t *testing.T) {
@@ -96,5 +98,28 @@ func TestDistributionTargetSpecValidateRejectsDuplicatePackageSources(t *testing
 	}).Validate()
 	if err == nil {
 		t.Fatal("Validate() error = nil, want duplicate package source error")
+	}
+}
+
+func TestDistributionTargetSpecValidateRejectsEmptyRolloutPolicyRef(t *testing.T) {
+	t.Parallel()
+
+	err := (DistributionTargetSpec{
+		BOMPath:          "bom.yaml",
+		RolloutPolicyRef: &DistributionPolicyRef{Name: " "},
+	}).Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want empty rollout policy ref error")
+	}
+}
+
+func TestDistributionRolloutPolicySpecValidateRejectsNegativeBatch(t *testing.T) {
+	t.Parallel()
+
+	err := (DistributionRolloutPolicySpec{
+		Strategy: reconcile.RolloutStrategy{BatchSize: -1},
+	}).Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want negative batch size error")
 	}
 }

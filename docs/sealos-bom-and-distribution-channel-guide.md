@@ -372,8 +372,10 @@ See
 for the in-cluster installation workflow and sample targets.
 
 This mode currently supplies the watched API, status conditions, and installable
-manifests only. Registry-backed channel lookup, promotion automation, and
-durable rollout policy objects are still outside the implemented surface.
+manifests, including a durable `DistributionRolloutPolicy` object for host
+batch size. Registry-backed channel lookup, promotion automation, canary
+pauses, health gates, and automatic rollback are still outside the implemented
+surface.
 
 ## Applied Revision State
 

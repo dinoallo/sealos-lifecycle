@@ -28,6 +28,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/labring/sealos/pkg/distribution/agent"
+	"github.com/labring/sealos/pkg/distribution/reconcile"
 )
 
 func TestReconcilerUpdatesReadyStatus(t *testing.T) {
@@ -101,6 +102,101 @@ func TestReconcilerUpdatesReadyStatus(t *testing.T) {
 	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonReconcileSucceeded)
 }
 
+func TestReconcilerUsesReferencedRolloutPolicy(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	target := &DistributionTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "platform",
+			Namespace:  "sealos-system",
+			Generation: 2,
+		},
+		Spec: DistributionTargetSpec{
+			ClusterName:      "cluster-a",
+			BOMPath:          "bom.yaml",
+			RolloutBatchSize: 5,
+			RolloutPolicyRef: &DistributionPolicyRef{Name: "steady"},
+		},
+	}
+	policy := &DistributionRolloutPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "steady",
+			Namespace: "sealos-system",
+		},
+		Spec: DistributionRolloutPolicySpec{
+			Strategy: reconcile.RolloutStrategy{BatchSize: 2},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&DistributionTarget{}).
+		WithObjects(target, policy).
+		Build()
+	runner := &recordingRunner{}
+
+	if _, err := (&Reconciler{
+		Client: cl,
+		Runner: runner,
+	}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(target)}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("runner calls = %d, want 1", len(runner.calls))
+	}
+	if got, want := runner.calls[0].ApplyOptions.Rollout.BatchSize, 2; got != want {
+		t.Fatalf("rollout batch size = %d, want policy value %d", got, want)
+	}
+}
+
+func TestReconcilerMarksDegradedWhenRolloutPolicyMissing(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	target := &DistributionTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "platform",
+			Namespace:  "sealos-system",
+			Generation: 1,
+		},
+		Spec: DistributionTargetSpec{
+			ClusterName:      "cluster-a",
+			BOMPath:          "bom.yaml",
+			RolloutPolicyRef: &DistributionPolicyRef{Name: "missing"},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&DistributionTarget{}).
+		WithObjects(target).
+		Build()
+	runner := &recordingRunner{}
+
+	_, err := (&Reconciler{
+		Client: cl,
+		Runner: runner,
+	}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(target)})
+	if err == nil {
+		t.Fatal("Reconcile() error = nil, want missing policy error")
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %d, want 0", len(runner.calls))
+	}
+
+	var updated DistributionTarget
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: target.Name, Namespace: target.Namespace}, &updated); err != nil {
+		t.Fatalf("Get(updated) error = %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonReconcileFailed)
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionTrue, DistributionTargetReasonReconcileFailed)
+}
+
 func TestReconcilerUpdatesDegradedStatusOnRunnerError(t *testing.T) {
 	t.Parallel()
 
@@ -158,6 +254,52 @@ func TestReconcilerIgnoresMissingTarget(t *testing.T) {
 	}
 	if !result.IsZero() {
 		t.Fatalf("result = %#v, want zero", result)
+	}
+}
+
+func TestTargetsForRolloutPolicy(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	targets := []client.Object{
+		&DistributionTarget{
+			ObjectMeta: metav1.ObjectMeta{Name: "uses-policy", Namespace: "sealos-system"},
+			Spec: DistributionTargetSpec{
+				BOMPath:          "bom.yaml",
+				RolloutPolicyRef: &DistributionPolicyRef{Name: "steady"},
+			},
+		},
+		&DistributionTarget{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-policy", Namespace: "sealos-system"},
+			Spec: DistributionTargetSpec{
+				BOMPath:          "bom.yaml",
+				RolloutPolicyRef: &DistributionPolicyRef{Name: "fast"},
+			},
+		},
+		&DistributionTarget{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-namespace", Namespace: "other"},
+			Spec: DistributionTargetSpec{
+				BOMPath:          "bom.yaml",
+				RolloutPolicyRef: &DistributionPolicyRef{Name: "steady"},
+			},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(targets...).
+		Build()
+	requests := (&Reconciler{Client: cl}).targetsForRolloutPolicy(context.Background(), &DistributionRolloutPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "steady", Namespace: "sealos-system"},
+	})
+
+	if got, want := len(requests), 1; got != want {
+		t.Fatalf("len(requests) = %d, want %d: %#v", got, want, requests)
+	}
+	if got, want := requests[0].NamespacedName, (types.NamespacedName{Name: "uses-policy", Namespace: "sealos-system"}); got != want {
+		t.Fatalf("request = %s, want %s", got, want)
 	}
 }
 

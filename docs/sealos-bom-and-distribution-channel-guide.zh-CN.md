@@ -358,8 +358,9 @@ sealos-agent --controller --controller-namespace sealos-system
 安装 CRD、RBAC 和 deployment manifests。集群内安装流程和 sample targets 见
 [`sealos-distribution-controller-install.zh-CN.md`](./sealos-distribution-controller-install.zh-CN.md)。
 
-这个模式目前提供 watched API、status condition 和可安装 manifests。registry-backed
-channel lookup、promotion automation 和持久 rollout policy object 仍然不在已实现范围内。
+这个模式目前提供 watched API、status condition 和可安装 manifests，也包含用于 host
+batch size 的持久 `DistributionRolloutPolicy` 对象。registry-backed channel lookup、
+promotion automation、canary pause、health gate 和自动 rollback 仍然不在已实现范围内。
 
 ## Applied revision state
 
