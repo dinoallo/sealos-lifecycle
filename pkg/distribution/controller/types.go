@@ -29,7 +29,8 @@ import (
 )
 
 const (
-	KindDistributionTarget = "DistributionTarget"
+	KindDistributionTarget        = "DistributionTarget"
+	KindDistributionRolloutPolicy = "DistributionRolloutPolicy"
 
 	DistributionTargetConditionReady    = "Ready"
 	DistributionTargetConditionDegraded = "Degraded"
@@ -50,6 +51,7 @@ type DistributionTargetSpec struct {
 	CacheRoot               string                      `json:"cacheRoot,omitempty"`
 	KubeconfigPath          string                      `json:"kubeconfigPath,omitempty"`
 	HostRoot                string                      `json:"hostRoot,omitempty"`
+	RolloutPolicyRef        *DistributionPolicyRef      `json:"rolloutPolicyRef,omitempty"`
 	RolloutBatchSize        int                         `json:"rolloutBatchSize,omitempty"`
 	RequeueAfter            *metav1.Duration            `json:"requeueAfter,omitempty"`
 }
@@ -57,6 +59,19 @@ type DistributionTargetSpec struct {
 type DistributionPackageSource struct {
 	Component string `json:"component"`
 	Root      string `json:"root"`
+}
+
+type DistributionPolicyRef struct {
+	Name string `json:"name"`
+}
+
+type DistributionRolloutPolicySpec struct {
+	Strategy reconcile.RolloutStrategy `json:"strategy,omitempty"`
+}
+
+type DistributionRolloutPolicyStatus struct {
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 type DistributionTargetStatus struct {
@@ -95,8 +110,32 @@ type DistributionTargetList struct {
 	Items           []DistributionTarget `json:"items"`
 }
 
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+
+type DistributionRolloutPolicy struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   DistributionRolloutPolicySpec   `json:"spec,omitempty"`
+	Status DistributionRolloutPolicyStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+type DistributionRolloutPolicyList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []DistributionRolloutPolicy `json:"items"`
+}
+
 func AddToScheme(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(GroupVersion, &DistributionTarget{}, &DistributionTargetList{})
+	scheme.AddKnownTypes(GroupVersion,
+		&DistributionTarget{},
+		&DistributionTargetList{},
+		&DistributionRolloutPolicy{},
+		&DistributionRolloutPolicyList{},
+	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil
 }
@@ -157,15 +196,87 @@ func (l *DistributionTargetList) DeepCopy() *DistributionTargetList {
 	return out
 }
 
+func (p *DistributionRolloutPolicy) DeepCopyObject() runtime.Object {
+	if p == nil {
+		return nil
+	}
+	out := new(DistributionRolloutPolicy)
+	p.DeepCopyInto(out)
+	return out
+}
+
+func (p *DistributionRolloutPolicy) DeepCopyInto(out *DistributionRolloutPolicy) {
+	*out = *p
+	out.TypeMeta = p.TypeMeta
+	p.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	p.Spec.DeepCopyInto(&out.Spec)
+	p.Status.DeepCopyInto(&out.Status)
+}
+
+func (p *DistributionRolloutPolicy) DeepCopy() *DistributionRolloutPolicy {
+	if p == nil {
+		return nil
+	}
+	out := new(DistributionRolloutPolicy)
+	p.DeepCopyInto(out)
+	return out
+}
+
+func (l *DistributionRolloutPolicyList) DeepCopyObject() runtime.Object {
+	if l == nil {
+		return nil
+	}
+	out := new(DistributionRolloutPolicyList)
+	l.DeepCopyInto(out)
+	return out
+}
+
+func (l *DistributionRolloutPolicyList) DeepCopyInto(out *DistributionRolloutPolicyList) {
+	*out = *l
+	out.TypeMeta = l.TypeMeta
+	l.ListMeta.DeepCopyInto(&out.ListMeta)
+	if l.Items != nil {
+		out.Items = make([]DistributionRolloutPolicy, len(l.Items))
+		for i := range l.Items {
+			l.Items[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+func (l *DistributionRolloutPolicyList) DeepCopy() *DistributionRolloutPolicyList {
+	if l == nil {
+		return nil
+	}
+	out := new(DistributionRolloutPolicyList)
+	l.DeepCopyInto(out)
+	return out
+}
+
 func (s *DistributionTargetSpec) DeepCopyInto(out *DistributionTargetSpec) {
 	*out = *s
 	if s.PackageSources != nil {
 		out.PackageSources = make([]DistributionPackageSource, len(s.PackageSources))
 		copy(out.PackageSources, s.PackageSources)
 	}
+	if s.RolloutPolicyRef != nil {
+		rolloutPolicyRef := *s.RolloutPolicyRef
+		out.RolloutPolicyRef = &rolloutPolicyRef
+	}
 	if s.RequeueAfter != nil {
 		requeueAfter := *s.RequeueAfter
 		out.RequeueAfter = &requeueAfter
+	}
+}
+
+func (s *DistributionRolloutPolicySpec) DeepCopyInto(out *DistributionRolloutPolicySpec) {
+	*out = *s
+}
+
+func (s *DistributionRolloutPolicyStatus) DeepCopyInto(out *DistributionRolloutPolicyStatus) {
+	*out = *s
+	if s.Conditions != nil {
+		out.Conditions = make([]metav1.Condition, len(s.Conditions))
+		copy(out.Conditions, s.Conditions)
 	}
 }
 
@@ -195,6 +306,9 @@ func (s DistributionTargetSpec) Validate() error {
 	if s.RolloutBatchSize < 0 {
 		return fmt.Errorf("spec.rolloutBatchSize cannot be negative")
 	}
+	if s.RolloutPolicyRef != nil && strings.TrimSpace(s.RolloutPolicyRef.Name) == "" {
+		return fmt.Errorf("spec.rolloutPolicyRef.name cannot be empty")
+	}
 	if s.RequeueAfter != nil && s.RequeueAfter.Duration < 0 {
 		return fmt.Errorf("spec.requeueAfter cannot be negative")
 	}
@@ -216,10 +330,31 @@ func (s DistributionTargetSpec) Validate() error {
 	return nil
 }
 
+func (s DistributionRolloutPolicySpec) Validate() error {
+	if err := s.Strategy.Validate(); err != nil {
+		return fmt.Errorf("spec.strategy: %w", err)
+	}
+	return nil
+}
+
 func (s DistributionTargetSpec) AgentOptions(defaults Defaults) (agent.Options, error) {
 	if err := s.Validate(); err != nil {
 		return agent.Options{}, err
 	}
+	return s.agentOptions(defaults, reconcile.RolloutStrategy{BatchSize: s.RolloutBatchSize})
+}
+
+func (s DistributionTargetSpec) AgentOptionsWithRollout(defaults Defaults, rollout reconcile.RolloutStrategy) (agent.Options, error) {
+	if err := s.Validate(); err != nil {
+		return agent.Options{}, err
+	}
+	if err := rollout.Validate(); err != nil {
+		return agent.Options{}, fmt.Errorf("rollout policy: %w", err)
+	}
+	return s.agentOptions(defaults, rollout)
+}
+
+func (s DistributionTargetSpec) agentOptions(defaults Defaults, rollout reconcile.RolloutStrategy) (agent.Options, error) {
 	clusterName := strings.TrimSpace(s.ClusterName)
 	if clusterName == "" {
 		clusterName = strings.TrimSpace(defaults.ClusterName)
@@ -263,9 +398,7 @@ func (s DistributionTargetSpec) AgentOptions(defaults Defaults) (agent.Options, 
 			KubeconfigPath: kubeconfigPath,
 			HostRoot:       hostRoot,
 			Stderr:         defaults.Stderr,
-			Rollout: reconcile.RolloutStrategy{
-				BatchSize: s.RolloutBatchSize,
-			},
+			Rollout:        rollout,
 		},
 		Once: true,
 		Out:  defaults.Stderr,

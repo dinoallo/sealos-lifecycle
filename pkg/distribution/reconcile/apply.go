@@ -61,6 +61,13 @@ type RolloutStrategy struct {
 	BatchSize int `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
 }
 
+func (s RolloutStrategy) Validate() error {
+	if s.BatchSize < 0 {
+		return fmt.Errorf("rollout.batchSize cannot be negative")
+	}
+	return nil
+}
+
 type bundleExecutor struct {
 	bundle                *hydrate.Bundle
 	bundlePath            string
@@ -84,6 +91,9 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	}
 	if strings.TrimSpace(opts.BundlePath) == "" {
 		return nil, fmt.Errorf("bundle path cannot be empty")
+	}
+	if err := opts.Rollout.Validate(); err != nil {
+		return nil, err
 	}
 
 	bundlePath, err := filepath.Abs(opts.BundlePath)
