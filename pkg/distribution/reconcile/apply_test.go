@@ -1898,6 +1898,211 @@ func TestApplyRolloutBatchSizeLogsHostWaves(t *testing.T) {
 	}
 }
 
+func TestApplyRolloutBatchSizeCompletesHostWaveBeforeNext(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	fakeRemote := &fakeApplyRemoteExecutor{}
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.10:22", "10.0.0.11:22"},
+			firstMaster: "10.0.0.10:22",
+		}, nil
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	bundleDir := filepath.Join(t.TempDir(), "bundle")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	bundle := &hydrate.Bundle{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindHydratedBundle,
+		Spec: hydrate.BundleSpec{
+			BOMName:  "rollout-runtime",
+			Revision: "rev-1",
+			Channel:  bom.ChannelAlpha,
+			ExecutionTopology: hydrate.ExecutionTopology{
+				AllNodes:    []string{"10.0.0.10:22", "10.0.0.11:22"},
+				FirstMaster: "10.0.0.10:22",
+			},
+			Components: []hydrate.RenderedComponent{{
+				Name:        "runtime",
+				PackageName: "runtime-rootfs",
+				Version:     "v0.1.0",
+				Class:       packageformat.ClassRootfs,
+				RootPath:    "components/runtime/files",
+				Steps: []hydrate.RenderedStep{
+					{
+						Name:        "runtime-rootfs",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/runtime/files/rootfs",
+						SourcePath:  "rootfs/",
+						ContentType: packageformat.ContentRootfs,
+					},
+					{
+						Name:           "preflight",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/runtime/files/hooks/preflight.sh",
+						SourcePath:     "hooks/preflight.sh",
+						HookPhase:      packageformat.PhaseBootstrap,
+						Target:         packageformat.TargetAllNodes,
+						TimeoutSeconds: 5,
+					},
+					{
+						Name:           "configure",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/runtime/files/hooks/configure.sh",
+						SourcePath:     "hooks/configure.sh",
+						HookPhase:      packageformat.PhaseConfigure,
+						Target:         packageformat.TargetAllNodes,
+						TimeoutSeconds: 5,
+					},
+				},
+			}},
+		},
+	}
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	persistRenderedStateForBundle(t, "rollout-wave-cluster", bundleDir, bundle)
+
+	if _, err := Apply(ApplyOptions{
+		ClusterName: "rollout-wave-cluster",
+		BundlePath:  bundleDir,
+		Rollout: RolloutStrategy{
+			BatchSize: 1,
+		},
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	firstConfigure := -1
+	secondPreflight := -1
+	for i, op := range fakeRemote.cmdOps {
+		switch {
+		case op.host == "10.0.0.10:22" && strings.Contains(op.cmd, "configure.sh") && firstConfigure < 0:
+			firstConfigure = i
+		case op.host == "10.0.0.11:22" && strings.Contains(op.cmd, "preflight.sh") && secondPreflight < 0:
+			secondPreflight = i
+		}
+	}
+	if firstConfigure < 0 || secondPreflight < 0 {
+		t.Fatalf("missing expected rollout hook commands\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+	if !(firstConfigure < secondPreflight) {
+		t.Fatalf("second rollout wave started before first wave completed configure\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+}
+
+func TestApplyRolloutBatchSizeDoesNotRepeatScopedHooks(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	fakeRemote := &fakeApplyRemoteExecutor{}
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"},
+			firstMaster: "10.0.0.10:22",
+		}, nil
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	bundleDir := filepath.Join(t.TempDir(), "bundle")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure-first.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	bundle := &hydrate.Bundle{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindHydratedBundle,
+		Spec: hydrate.BundleSpec{
+			BOMName:  "rollout-scoped-runtime",
+			Revision: "rev-1",
+			Channel:  bom.ChannelAlpha,
+			ExecutionTopology: hydrate.ExecutionTopology{
+				AllNodes:    []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"},
+				FirstMaster: "10.0.0.10:22",
+			},
+			Components: []hydrate.RenderedComponent{{
+				Name:        "runtime",
+				PackageName: "runtime-rootfs",
+				Version:     "v0.1.0",
+				Class:       packageformat.ClassRootfs,
+				RootPath:    "components/runtime/files",
+				Steps: []hydrate.RenderedStep{
+					{
+						Name:        "runtime-rootfs",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/runtime/files/rootfs",
+						SourcePath:  "rootfs/",
+						ContentType: packageformat.ContentRootfs,
+					},
+					{
+						Name:           "configure-first",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/runtime/files/hooks/configure-first.sh",
+						SourcePath:     "hooks/configure-first.sh",
+						HookPhase:      packageformat.PhaseConfigure,
+						Target:         packageformat.TargetFirstMaster,
+						TimeoutSeconds: 5,
+					},
+				},
+			}},
+		},
+	}
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	persistRenderedStateForBundle(t, "rollout-scoped-cluster", bundleDir, bundle)
+
+	if _, err := Apply(ApplyOptions{
+		ClusterName: "rollout-scoped-cluster",
+		BundlePath:  bundleDir,
+		Rollout: RolloutStrategy{
+			BatchSize: 1,
+		},
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	for _, host := range []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"} {
+		count := strings.Count(strings.Join(fakeRemote.commandsForHost(host), "\n"), "configure-first.sh")
+		if host == "10.0.0.10:22" {
+			if count != 1 {
+				t.Fatalf("first master configure-first hook count = %d, want 1\ncommands:\n%s", count, strings.Join(fakeRemote.allCommands(), "\n"))
+			}
+			continue
+		}
+		if count != 0 {
+			t.Fatalf("non-first-master %q configure-first hook count = %d, want 0\ncommands:\n%s", host, count, strings.Join(fakeRemote.allCommands(), "\n"))
+		}
+	}
+}
+
 func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, bundle *hydrate.Bundle) {
 	t.Helper()
 

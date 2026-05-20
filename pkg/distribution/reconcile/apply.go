@@ -644,28 +644,56 @@ func (e *bundleExecutor) applyRuntimeRootfsComponent(component hydrate.RenderedC
 	if err != nil {
 		return err
 	}
-	if err := e.runHooksForHosts(component, hooks.preflight, provisioningHosts); err != nil {
-		return err
+	if !supportsRuntimeRootfsRolloutBatches(files, hooks) {
+		if err := e.applyRuntimeRootfsHostBatch(component, files, hooks, provisioningHosts); err != nil {
+			return err
+		}
+		return e.runHooks(component, hooks.healthcheck)
 	}
-	if err := e.stopServices(provisioningHosts, files); err != nil {
-		return err
-	}
-	if err := e.applyMutableContent(provisioningHosts, files); err != nil {
-		return err
-	}
-	if err := e.runReloadIfNeeded(provisioningHosts, files, false); err != nil {
-		return err
-	}
-	if err := e.runBootstrapHooksForHosts(component, files, hooks.bootstrap, provisioningHosts); err != nil {
-		return err
-	}
-	if err := e.runHooksForHosts(component, hooks.configure, provisioningHosts); err != nil {
-		return err
-	}
-	if err := e.runHooksForHosts(component, hooks.install, provisioningHosts); err != nil {
+	if err := e.forEachHostBatch(provisioningHosts, func(batch []string) error {
+		return e.applyRuntimeRootfsHostBatch(component, files, hooks, batch)
+	}); err != nil {
 		return err
 	}
 	return e.runHooks(component, hooks.healthcheck)
+}
+
+func supportsRuntimeRootfsRolloutBatches(files contentSet, hooks hookSet) bool {
+	if _, ok := kubeadmBootstrapConfigStep(files); ok {
+		return false
+	}
+	for _, hook := range append(append(append(
+		slices.Clone(hooks.preflight),
+		hooks.bootstrap...),
+		hooks.configure...),
+		hooks.install...) {
+		if hook.Target != packageformat.TargetAllNodes {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *bundleExecutor) applyRuntimeRootfsHostBatch(component hydrate.RenderedComponent, files contentSet, hooks hookSet, hosts []string) error {
+	if err := e.runHooksForHosts(component, hooks.preflight, hosts); err != nil {
+		return err
+	}
+	if err := e.stopServices(hosts, files); err != nil {
+		return err
+	}
+	if err := e.applyMutableContent(hosts, files); err != nil {
+		return err
+	}
+	if err := e.runReloadIfNeeded(hosts, files, false); err != nil {
+		return err
+	}
+	if err := e.runBootstrapHooksForHosts(component, files, hooks.bootstrap, hosts); err != nil {
+		return err
+	}
+	if err := e.runHooksForHosts(component, hooks.configure, hosts); err != nil {
+		return err
+	}
+	return e.runHooksForHosts(component, hooks.install, hosts)
 }
 
 func (e *bundleExecutor) applyBootstrapRootfsComponent(bundle *hydrate.Bundle, component hydrate.RenderedComponent, files contentSet, hooks hookSet) error {
@@ -791,52 +819,46 @@ func (e *bundleExecutor) stopServices(hosts []string, files contentSet) error {
 	if len(services) == 0 {
 		return nil
 	}
-	return e.forEachHostBatch(hosts, func(batch []string) error {
-		for _, host := range batch {
-			for _, service := range services {
-				if err := e.stopServiceIfActiveOnHost(host, service); err != nil {
-					return err
-				}
+	for _, host := range hosts {
+		for _, service := range services {
+			if err := e.stopServiceIfActiveOnHost(host, service); err != nil {
+				return err
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func (e *bundleExecutor) applyMutableContent(hosts []string, files contentSet) error {
-	return e.forEachHostBatch(hosts, func(batch []string) error {
-		for _, host := range batch {
-			for _, step := range files.rootfs {
-				if err := e.applyRootfsToHost(host, step); err != nil {
-					return err
-				}
-			}
-			for _, step := range files.files {
-				if err := e.applyFileToHost(host, step); err != nil {
-					return err
-				}
+	for _, host := range hosts {
+		for _, step := range files.rootfs {
+			if err := e.applyRootfsToHost(host, step); err != nil {
+				return err
 			}
 		}
-		return nil
-	})
+		for _, step := range files.files {
+			if err := e.applyFileToHost(host, step); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (e *bundleExecutor) runReloadIfNeeded(hosts []string, files contentSet, applySysctl bool) error {
-	return e.forEachHostBatch(hosts, func(batch []string) error {
-		for _, host := range batch {
-			if applySysctl {
-				if err := e.runIfPresentOnHost(host, "sysctl", "--system"); err != nil {
-					return err
-				}
-			}
-			if len(files.rootfs) > 0 || len(files.files) > 0 {
-				if err := e.runIfPresentOnHost(host, "systemctl", "daemon-reload"); err != nil {
-					return err
-				}
+	for _, host := range hosts {
+		if applySysctl {
+			if err := e.runIfPresentOnHost(host, "sysctl", "--system"); err != nil {
+				return err
 			}
 		}
-		return nil
-	})
+		if len(files.rootfs) > 0 || len(files.files) > 0 {
+			if err := e.runIfPresentOnHost(host, "systemctl", "daemon-reload"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (e *bundleExecutor) runHooksForHosts(component hydrate.RenderedComponent, hooks []hydrate.RenderedStep, allNodeHosts []string) error {
@@ -855,15 +877,10 @@ func (e *bundleExecutor) runHooksForHosts(component hydrate.RenderedComponent, h
 					return err
 				}
 			}
-			if err := e.forEachHostBatch(targetHosts, func(batch []string) error {
-				for _, host := range batch {
-					if err := e.runHookOnHost(host, component, hook); err != nil {
-						return err
-					}
+			for _, host := range targetHosts {
+				if err := e.runHookOnHost(host, component, hook); err != nil {
+					return err
 				}
-				return nil
-			}); err != nil {
-				return err
 			}
 		default:
 			targetHosts, err := e.resolveTargetHosts(hook.Target)
