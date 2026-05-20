@@ -318,7 +318,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	if targetBOM.Metadata.Name != channel.Spec.Line {
 		return nil, fmt.Errorf("distribution channel %q line %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Spec.Line, targetBOM.Metadata.Name)
 	}
-	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(opts.HealthProofPath, channelPath, targetBOM)
+	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(opts.HealthProofPath, targetBOM)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +429,7 @@ func distributionPromotionViolationSummary(violations []promotionpolicy.Violatio
 	return strings.Join(parts, "; ")
 }
 
-func distributionHealthProofForPromotion(path, channelPath string, targetBOM *BOM) (*DistributionHealthProof, string, error) {
+func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*DistributionHealthProof, string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, "", nil
