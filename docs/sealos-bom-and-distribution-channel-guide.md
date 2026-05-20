@@ -390,10 +390,10 @@ exit code `0`, the report BOM file, rendered BOM line/revision, and rendered
 BOM digest match the target BOM, source and runtime preflight were
 non-blocking, mutating apply was exercised, post-apply state is `Clean`,
 post-revert state is `Clean` when `revertCheck: true`, and the expected
-smoke/apply/revert acceptance stages are present and passing. Safe smoke
-reports that do not run a mutating apply still generate useful evidence, but
-they produce `spec.passed: false` and should not satisfy beta/stable promotion
-policy.
+smoke/apply/revert acceptance stages are present, passing, and mark mutating
+steps as mutating. Safe smoke reports that do not run a mutating apply still
+generate useful evidence, but they produce `spec.passed: false` and should not
+satisfy beta/stable promotion policy.
 
 A minimal health proof looks like:
 

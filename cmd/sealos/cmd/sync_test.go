@@ -930,6 +930,84 @@ func TestSyncHealthProofCmdFailsWhenContractStageMissing(t *testing.T) {
 	}
 }
 
+func TestSyncHealthProofCmdFailsWhenMutatingContractStageIsNotMarkedMutating(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		stageName   string
+		revertCheck bool
+	}{
+		{
+			name:      "apply",
+			stageName: "apply",
+		},
+		{
+			name:        "revert",
+			stageName:   "revert-check-revert",
+			revertCheck: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			bomPath := filepath.Join(root, "bom.yaml")
+			targetBOM := testSyncBOM()
+			if err := yamlutil.MarshalFile(bomPath, targetBOM); err != nil {
+				t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+			}
+			bomData, err := os.ReadFile(bomPath)
+			if err != nil {
+				t.Fatalf("ReadFile(targetBOM) error = %v", err)
+			}
+			stages := syncHealthProofTestStages(tt.revertCheck)
+			for i := range stages {
+				if stages[i].Name == tt.stageName {
+					stages[i].Mutates = false
+					break
+				}
+			}
+			reportPath := filepath.Join(root, "acceptance-report.yaml")
+			writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+				BOMFile:               bomPath,
+				BOMName:               targetBOM.Metadata.Name,
+				BOMRevision:           targetBOM.Spec.Revision,
+				BOMDigest:             digest.Canonical.FromBytes(bomData).String(),
+				Status:                "Passed",
+				ExitCode:              0,
+				MutatingApply:         true,
+				RevertCheck:           tt.revertCheck,
+				SourcePreflightState:  "Ready",
+				RuntimePreflightState: "Ready",
+				PostApplyState:        "Clean",
+				PostRevertState:       "Clean",
+				Stages:                stages,
+			})
+
+			buf := bytes.NewBuffer(nil)
+			cmd := newSyncCmd()
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs([]string{
+				"health-proof",
+				"--file", bomPath,
+				"--acceptance-report", reportPath,
+			})
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+			}
+			var out bom.DistributionHealthProof
+			if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+				t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+			}
+			if out.Spec.Passed {
+				t.Fatal("spec.passed = true, want false")
+			}
+			if syncHealthProofTestSignalPassed(out, "contract/"+tt.stageName) {
+				t.Fatalf("contract/%s signal passed, want failed", tt.stageName)
+			}
+		})
+	}
+}
+
 func TestSyncHealthProofCmdFailsWhenPostApplyStateMissing(t *testing.T) {
 	root := t.TempDir()
 	bomPath := filepath.Join(root, "bom.yaml")

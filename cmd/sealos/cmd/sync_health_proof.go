@@ -420,53 +420,67 @@ func syncHealthProofBOMFileSignal(reportBOMPath, targetBOMPath string) bom.Distr
 }
 
 func syncHealthProofContractSignals(report *syncHealthProofAcceptanceReport) []bom.DistributionHealthSignal {
-	stageStatuses := make(map[string]string, len(report.Spec.Stages))
+	stageByName := make(map[string]syncHealthProofAcceptanceReportStage, len(report.Spec.Stages))
 	for _, stage := range report.Spec.Stages {
-		stageStatuses[strings.TrimSpace(stage.Name)] = strings.TrimSpace(stage.Status)
+		stage.Name = strings.TrimSpace(stage.Name)
+		stage.Status = strings.TrimSpace(stage.Status)
+		stageByName[stage.Name] = stage
 	}
-	required := []string{
-		"package-inspect-containerd",
-		"package-inspect-kubernetes",
-		"package-inspect-cilium",
-		"local-repo-init",
-		"fill-local-repo-inputs",
-		"local-repo-doctor",
-		"validate",
-		"source-preflight",
-		"render",
-		"verify-sourcePreflight-metadata",
-		"runtime-preflight",
-		"plan",
-		"apply",
-		"status",
-		"diff",
-		"validate-cluster",
+
+	type contractStage struct {
+		name    string
+		mutates bool
+	}
+	required := []contractStage{
+		{name: "package-inspect-containerd"},
+		{name: "package-inspect-kubernetes"},
+		{name: "package-inspect-cilium"},
+		{name: "local-repo-init"},
+		{name: "fill-local-repo-inputs"},
+		{name: "local-repo-doctor"},
+		{name: "validate"},
+		{name: "source-preflight"},
+		{name: "render"},
+		{name: "verify-sourcePreflight-metadata"},
+		{name: "runtime-preflight"},
+		{name: "plan"},
+		{name: "apply", mutates: true},
+		{name: "status"},
+		{name: "diff"},
+		{name: "validate-cluster", mutates: true},
 	}
 	if report.Spec.RevertCheck {
 		required = append(required,
-			"revert-check-drift-inject",
-			"revert-check-drift-diff",
-			"revert-check-revert",
-			"revert-check-clean-diff",
-			"validate-cluster-after-revert",
+			contractStage{name: "revert-check-drift-inject", mutates: true},
+			contractStage{name: "revert-check-drift-diff"},
+			contractStage{name: "revert-check-revert", mutates: true},
+			contractStage{name: "revert-check-clean-diff"},
+			contractStage{name: "validate-cluster-after-revert", mutates: true},
 		)
 	}
 
 	signals := make([]bom.DistributionHealthSignal, 0, len(required))
-	for _, name := range required {
-		status, ok := stageStatuses[name]
+	for _, requiredStage := range required {
+		stage, ok := stageByName[requiredStage.name]
+		status := strings.TrimSpace(stage.Status)
 		if !ok || strings.TrimSpace(status) == "" {
 			signals = append(signals, bom.DistributionHealthSignal{
-				Name:    "contract/" + name,
+				Name:    "contract/" + requiredStage.name,
 				Passed:  false,
 				Message: "stage=<missing>",
 			})
 			continue
 		}
+		passed := strings.EqualFold(status, "Passed")
+		message := "status=" + status
+		if requiredStage.mutates {
+			passed = passed && stage.Mutates
+			message += fmt.Sprintf(" mutates=%t", stage.Mutates)
+		}
 		signals = append(signals, bom.DistributionHealthSignal{
-			Name:    "contract/" + name,
-			Passed:  strings.EqualFold(status, "Passed"),
-			Message: "status=" + status,
+			Name:    "contract/" + requiredStage.name,
+			Passed:  passed,
+			Message: message,
 		})
 	}
 	return signals
