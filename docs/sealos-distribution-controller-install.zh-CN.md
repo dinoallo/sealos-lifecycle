@@ -117,6 +117,8 @@ controller 要求 `spec.bomPath` 和 `spec.distributionChannelPath` 必须二选
 `spec.strategy.failureAction: Rollback`。这会让符合条件的 host-targeted steps 一次滚动一个
 host，把第一批当作 canary，在进入后续批次前暂停，每批完成后运行该 component 的
 `healthcheck` hooks，并在 apply 失败时重新 apply 上一次成功的 rendered revision。
+controller target 进入暂停或回滚完成状态后不会通过周期 requeue 继续重试；需要更新 target
+或它引用的 rollout policy，例如清掉 `pause.afterCanary` 或选择新的 desired revision，才能继续。
 如果 target 没有设置 `spec.rolloutPolicyRef`，仍可使用旧的 inline `spec.rolloutBatchSize`
 fallback。
 
@@ -137,6 +139,7 @@ desired state digest 和 applied revision path。
 这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
 rendered-bundle executor 使用的 host rollout batch size、第一批 canary size、可选的
 post-canary pause、可选的逐批 health gate，以及 stop-or-rollback failure action。这些设置只作用于符合条件的
-all-node runtime-rootfs host batches。它还没有加入 registry-backed `DistributionChannel`
-lookup、带 health gate 的 channel promotion，也不是覆盖所有 multi-node workflow 的
-package 级安全模型。controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。
+all-node runtime-rootfs host batches。pause gate 和 rollback result 都是 operator action hold，
+不是按 host 保存的 rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
+它还没有加入 registry-backed `DistributionChannel` lookup、带 health gate 的 channel promotion，也不是覆盖所有
+multi-node workflow 的 package 级安全模型。controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。

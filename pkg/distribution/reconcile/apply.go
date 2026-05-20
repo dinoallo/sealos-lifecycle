@@ -122,6 +122,10 @@ func IsRolloutRolledBack(err error) bool {
 	return errors.Is(err, rolloutRollbackError{})
 }
 
+func NewRolloutRolledBackError(cause error) error {
+	return rolloutRollbackError{cause: cause}
+}
+
 func (s RolloutStrategy) Validate() error {
 	if s.BatchSize < 0 {
 		return fmt.Errorf("rollout.batchSize cannot be negative")

@@ -94,7 +94,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
-			return ctrl.Result{RequeueAfter: requeueDuration(&target)}, nil
+			return ctrl.Result{}, nil
 		}
 		if reconcile.IsRolloutRolledBack(err) {
 			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
@@ -117,7 +117,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
-			return ctrl.Result{RequeueAfter: requeueDuration(&target)}, nil
+			return ctrl.Result{}, nil
 		}
 		target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
 			Type:               DistributionTargetConditionReady,

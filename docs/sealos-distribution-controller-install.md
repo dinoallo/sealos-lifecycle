@@ -126,8 +126,11 @@ controller pod. The sample `DistributionRolloutPolicy` sets
 `spec.strategy.failureAction: Rollback`. That rolls eligible host-targeted
 steps one host at a time, treats the first host batch as the canary, pauses
 before later batches, runs component `healthcheck` hooks after each batch, and
-re-applies the last successful rendered revision if apply fails. If a target
-does not set `spec.rolloutPolicyRef`, it can still use the older inline
+re-applies the last successful rendered revision if apply fails. Paused and
+rolled-back controller targets do not use periodic requeue; update the target
+or its referenced rollout policy, for example by clearing `pause.afterCanary`
+or selecting a new desired revision, to continue. If a target does not set
+`spec.rolloutPolicyRef`, it can still use the older inline
 `spec.rolloutBatchSize` fallback.
 
 ## Check Status
@@ -148,7 +151,9 @@ This is a minimal controller install path. `DistributionRolloutPolicy` currently
 persists host rollout batch size, a first-batch canary size, an optional
 post-canary pause, an optional per-batch health gate, and a stop-or-rollback
 failure action used by the rendered-bundle executor. These settings only apply
-to eligible all-node runtime-rootfs host batches. It does not add
-registry-backed `DistributionChannel` lookup, health-gated channel promotion, or
-a package-level safety model for every multi-node workflow. The controller still
-delegates to the existing BOM-driven render/apply agent path.
+to eligible all-node runtime-rootfs host batches. The pause gate and rollback
+result are operator action holds, not per-host rollout cursors; continuing
+re-enters the eligible apply path with an updated target or policy. It does not
+add registry-backed `DistributionChannel` lookup, health-gated channel
+promotion, or a package-level safety model for every multi-node workflow. The
+controller still delegates to the existing BOM-driven render/apply agent path.

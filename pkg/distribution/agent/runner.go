@@ -125,6 +125,9 @@ func (r Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 				}
 				return last, err
 			}
+			if reconcile.IsRolloutPaused(err) || reconcile.IsRolloutRolledBack(err) {
+				return result, err
+			}
 			if result != nil {
 				last = result
 			}

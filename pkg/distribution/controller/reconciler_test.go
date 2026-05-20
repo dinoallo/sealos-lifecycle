@@ -270,8 +270,9 @@ func TestReconcilerMarksPausedRolloutWithoutDegraded(t *testing.T) {
 			Generation: 1,
 		},
 		Spec: DistributionTargetSpec{
-			ClusterName: "cluster-a",
-			BOMPath:     "bom.yaml",
+			ClusterName:  "cluster-a",
+			BOMPath:      "bom.yaml",
+			RequeueAfter: &metav1.Duration{Duration: time.Minute},
 		},
 	}
 	cl := fake.NewClientBuilder().
@@ -297,6 +298,50 @@ func TestReconcilerMarksPausedRolloutWithoutDegraded(t *testing.T) {
 	}
 	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonRolloutPaused)
 	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonRolloutPaused)
+}
+
+func TestReconcilerMarksRolledBackRolloutWithoutDegraded(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	target := &DistributionTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "platform",
+			Namespace:  "sealos-system",
+			Generation: 1,
+		},
+		Spec: DistributionTargetSpec{
+			ClusterName:  "cluster-a",
+			BOMPath:      "bom.yaml",
+			RequeueAfter: &metav1.Duration{Duration: time.Minute},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&DistributionTarget{}).
+		WithObjects(target).
+		Build()
+
+	result, err := (&Reconciler{
+		Client: cl,
+		Runner: &recordingRunner{err: reconcile.NewRolloutRolledBackError(errors.New("apply failed"))},
+	}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(target)})
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v, want nil rolled-back result", err)
+	}
+	if !result.IsZero() {
+		t.Fatalf("result = %#v, want zero", result)
+	}
+
+	var updated DistributionTarget
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: target.Name, Namespace: target.Namespace}, &updated); err != nil {
+		t.Fatalf("Get(updated) error = %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonRolloutRolledBack)
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonRolloutRolledBack)
 }
 
 func TestReconcilerIgnoresMissingTarget(t *testing.T) {

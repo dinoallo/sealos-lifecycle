@@ -312,6 +312,85 @@ func TestRunnerLoopRetriesAfterApplyFailure(t *testing.T) {
 	}
 }
 
+func TestRunnerLoopStopsOnRolloutTerminalAction(t *testing.T) {
+	testCases := []struct {
+		name    string
+		err     error
+		wantErr func(error) bool
+	}{
+		{
+			name:    "pause",
+			err:     reconcile.NewRolloutPausedError("rollout paused after canary batch"),
+			wantErr: reconcile.IsRolloutPaused,
+		},
+		{
+			name:    "rollback",
+			err:     reconcile.NewRolloutRolledBackError(errors.New("apply failed")),
+			wantErr: reconcile.IsRolloutRolledBack,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			withRuntimeRoot(t)
+			root := t.TempDir()
+			packageRoot := writeAgentPackage(t, root)
+			doc := agentBOM()
+			bomPath := filepath.Join(root, "bom.yaml")
+			if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+				t.Fatalf("MarshalFile(bom) error = %v", err)
+			}
+
+			attempts := 0
+			sleepCalled := false
+			runner := Runner{
+				Materialize: func(*bom.BOM, reconcile.Options) (*reconcile.Result, error) {
+					return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
+				},
+				Apply: func(opts reconcile.ApplyOptions) (*reconcile.ApplyResult, error) {
+					attempts++
+					applied, err := state.PersistRenderedState(opts.ClusterName, state.BOMReference{
+						Name:     doc.Metadata.Name,
+						Revision: doc.Spec.Revision,
+						Channel:  doc.Spec.Channel,
+					}, "sha256:1414141414141414141414141414141414141414141414141414141414141414", "", "")
+					if err != nil {
+						return nil, err
+					}
+					return &reconcile.ApplyResult{
+						BundlePath:         opts.BundlePath,
+						DesiredStateDigest: applied.Spec.DesiredStateDigest,
+						AppliedRevision:    applied,
+					}, tc.err
+				},
+				Sleep: func(context.Context, time.Duration) error {
+					sleepCalled = true
+					return nil
+				},
+			}
+
+			result, err := runner.Run(context.Background(), Options{
+				ClusterName:    "agent-" + tc.name,
+				Target:         TargetOptions{BOMPath: bomPath},
+				PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
+				Interval:       time.Second,
+			})
+			if !tc.wantErr(err) {
+				t.Fatalf("Run() error = %v, want rollout %s terminal error", err, tc.name)
+			}
+			if got, want := attempts, 1; got != want {
+				t.Fatalf("attempts = %d, want %d", got, want)
+			}
+			if sleepCalled {
+				t.Fatal("Sleep called after rollout terminal action, want immediate return")
+			}
+			if result == nil || result.Revision != doc.Spec.Revision {
+				t.Fatalf("result = %#v, want terminal apply result", result)
+			}
+		})
+	}
+}
+
 func TestRunnerLoopReturnsLastResultWhenNextPassSeesCancellation(t *testing.T) {
 	withRuntimeRoot(t)
 	root := t.TempDir()

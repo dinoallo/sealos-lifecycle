@@ -444,9 +444,11 @@ for the in-cluster installation workflow and sample targets.
 This mode currently supplies the watched API, status conditions, and installable
 manifests, including a durable `DistributionRolloutPolicy` object for host
 batch size, first-batch canary size, optional post-canary pause, optional
-per-batch health gates, and stop-or-rollback failure behavior. Registry-backed
-channel lookup, health-gated promotion automation, and a package-level safety
-model for every multi-node workflow are still outside the implemented surface.
+per-batch health gates, and stop-or-rollback failure behavior. A paused
+or rolled-back controller target waits for an explicit target or policy update
+before it re-enters apply. Registry-backed channel lookup, health-gated
+promotion automation, and a package-level safety model for every multi-node
+workflow are still outside the implemented surface.
 
 ## Applied Revision State
 
