@@ -403,6 +403,42 @@ func TestPromoteDistributionChannelFileRejectsFailedHealthProof(t *testing.T) {
 	}
 }
 
+func TestPromoteDistributionChannelFileRejectsEmptyHealthProofSignals(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	targetBOM := validBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := NewDistributionChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
+
+	_, err := PromoteDistributionChannelFile(PromoteDistributionChannelOptions{
+		ChannelPath:     channelPath,
+		TargetBOMPath:   targetBOMPath,
+		HealthProofPath: healthProofPath,
+		Reason:          "passed canary",
+		ApprovedBy:      "release-team",
+	})
+	if err == nil {
+		t.Fatal("PromoteDistributionChannelFile() error = nil, want empty health signal error")
+	}
+	if !strings.Contains(err.Error(), "has no health signals") {
+		t.Fatalf("PromoteDistributionChannelFile() error = %v, want empty health signal error", err)
+	}
+}
+
 func TestPromoteDistributionChannelFileRejectsMissingHealthProofForStable(t *testing.T) {
 	t.Parallel()
 
@@ -462,6 +498,7 @@ func TestPromoteDistributionChannelFileRejectsAlphaCandidateForStable(t *testing
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
 	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof.Spec.Signals = []DistributionHealthSignal{{Name: "node-readiness", Passed: true}}
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}

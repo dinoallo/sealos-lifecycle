@@ -450,6 +450,9 @@ func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*Distribu
 	if !proof.Spec.Passed {
 		return nil, "", fmt.Errorf("distribution health proof %q did not pass", proof.Metadata.Name)
 	}
+	if len(proof.Spec.Signals) == 0 {
+		return nil, "", fmt.Errorf("distribution health proof %q has no health signals", proof.Metadata.Name)
+	}
 	for _, signal := range proof.Spec.Signals {
 		if !signal.Passed {
 			return nil, "", fmt.Errorf("distribution health proof %q signal %q did not pass", proof.Metadata.Name, signal.Name)

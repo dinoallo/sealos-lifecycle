@@ -344,7 +344,8 @@ The command validates that:
   candidate BOM's source channel
 - if the target channel requires proof, `--health-proof` points to a valid
   `DistributionHealthProof` that targets the same line and BOM revision,
-  reports `spec.passed: true`, and has no failed signals
+  reports `spec.passed: true`, includes at least one signal, and has no
+  failed signals
 
 It then writes the updated channel file and appends
 `spec.promotionHistory[]` with:

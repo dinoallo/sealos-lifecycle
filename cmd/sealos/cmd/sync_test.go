@@ -291,6 +291,7 @@ func TestSyncPromoteCmd(t *testing.T) {
 	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
 	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
 	healthProof.Spec.Summary = "beta cohort passed"
+	healthProof.Spec.Signals = []bom.DistributionHealthSignal{{Name: "node-readiness", Passed: true}}
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
@@ -423,6 +424,44 @@ func TestSyncPromoteCmdRejectsFailedHealthProof(t *testing.T) {
 	}
 }
 
+func TestSyncPromoteCmdRejectsEmptyHealthProofSignals(t *testing.T) {
+	root := t.TempDir()
+	channelPath := filepath.Join(root, "channels", "stable.yaml")
+	targetBOMPath := filepath.Join(root, "boms", "rev-20240424.yaml")
+	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
+	targetBOM := testSyncBOM()
+	targetBOM.Spec.Revision = "rev-20240424"
+	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	channel := bom.NewDistributionChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
+		t.Fatalf("MarshalFile(healthProof) error = %v", err)
+	}
+
+	cmd := newSyncCmd()
+	cmd.SetArgs([]string{
+		"promote",
+		"--distribution-channel", channelPath,
+		"--target-bom", targetBOMPath,
+		"--health-proof", healthProofPath,
+		"--reason", "passed canary",
+		"--approved-by", "release-team",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want empty health signal error")
+	}
+	if !strings.Contains(err.Error(), "has no health signals") {
+		t.Fatalf("Execute() error = %v, want empty health signal error", err)
+	}
+}
+
 func TestSyncPromoteCmdRejectsMissingHealthProofForStable(t *testing.T) {
 	root := t.TempDir()
 	channelPath := filepath.Join(root, "channels", "stable.yaml")
@@ -471,6 +510,7 @@ func TestSyncPromoteCmdRejectsAlphaCandidateForStable(t *testing.T) {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
 	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof.Spec.Signals = []bom.DistributionHealthSignal{{Name: "node-readiness", Passed: true}}
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}

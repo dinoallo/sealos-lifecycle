@@ -331,7 +331,7 @@ sealos sync promote \
 - 默认 promotion policy 允许目标 channel 前进到候选 BOM 的 source channel
 - 如果目标 channel 要求 proof，`--health-proof` 必须指向有效的
   `DistributionHealthProof`，它必须指向同一条 line 和目标 BOM revision，并且
-  `spec.passed: true`，所有 signals 也都不能失败
+  `spec.passed: true`，至少包含一个 signal，所有 signals 也都不能失败
 
 然后它会写回更新后的 channel 文件，并追加一条
 `spec.promotionHistory[]`，内容包括：
