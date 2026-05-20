@@ -661,6 +661,72 @@ func TestSyncHealthProofCmdFromAcceptanceReport(t *testing.T) {
 	}
 }
 
+func TestSyncHealthProofCmdMatchesAbsoluteReportBOMFileAgainstRelativeTarget(t *testing.T) {
+	root := t.TempDir()
+	targetBOM := testSyncBOM()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, targetBOM); err != nil {
+		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
+	}
+	bomData, err := os.ReadFile(bomPath)
+	if err != nil {
+		t.Fatalf("ReadFile(targetBOM) error = %v", err)
+	}
+	reportPath := filepath.Join(root, "acceptance-report.yaml")
+	writeSyncHealthProofTestReport(t, reportPath, syncHealthProofTestReportOptions{
+		BOMFile:               bomPath,
+		BOMName:               targetBOM.Metadata.Name,
+		BOMRevision:           targetBOM.Spec.Revision,
+		BOMDigest:             digest.Canonical.FromBytes(bomData).String(),
+		Status:                "Passed",
+		ExitCode:              0,
+		MutatingApply:         true,
+		SourcePreflightState:  "Ready",
+		RuntimePreflightState: "Ready",
+		PostApplyState:        "Clean",
+		Stages:                syncHealthProofTestStages(false),
+	})
+	previousWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir(%q) error = %v", root, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousWd); err != nil {
+			t.Fatalf("restore working directory %q: %v", previousWd, err)
+		}
+	})
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"health-proof",
+		"--file", "bom.yaml",
+		"--acceptance-report", reportPath,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+	var out bom.DistributionHealthProof
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v\noutput=%s", err, buf.String())
+	}
+	if !out.Spec.Passed {
+		t.Fatal("spec.passed = false, want true")
+	}
+	if !syncHealthProofTestSignalPassed(out, "bom-file") {
+		t.Fatal("bom-file signal did not pass")
+	}
+	if !syncHealthProofTestSignalPassed(out, "bom-digest") {
+		t.Fatal("bom-digest signal did not pass")
+	}
+}
+
 func TestSyncHealthProofCmdReportsFailedAcceptanceSignal(t *testing.T) {
 	root := t.TempDir()
 	targetBOM := testSyncBOM()

@@ -494,6 +494,11 @@ write_acceptance_report() {
   local runtime_preflight_out="${WORKDIR}/runtime-preflight.${OUTPUT_FORMAT}"
   local diff_out="${WORKDIR}/diff.${OUTPUT_FORMAT}"
   local revert_diff_out="${WORKDIR}/revert-check-clean-diff.${OUTPUT_FORMAT}"
+  local rendered_bom_file
+  rendered_bom_file="$(extract_yaml_value_any_indent "${render_out}" "bomPath")"
+  if [[ -z "${rendered_bom_file}" ]]; then
+    rendered_bom_file="${BOM_FILE}"
+  fi
 
   {
     printf 'apiVersion: distribution.sealos.io/v1alpha1\n'
@@ -509,7 +514,7 @@ write_acceptance_report() {
     printf '  mutatingApply: %s\n' "$(bool_yaml "${APPLY}")"
     printf '  revertCheck: %s\n' "$(bool_yaml "${REVERT_CHECK}")"
     printf '  packageMode: %s\n' "$(yaml_string "${PACKAGE_MODE}")"
-    printf '  bomFile: %s\n' "$(yaml_string "${BOM_FILE}")"
+    printf '  bomFile: %s\n' "$(yaml_string "${rendered_bom_file}")"
     printf '  bomName: %s\n' "$(yaml_string "$(extract_yaml_value "${render_out}" "bomName")")"
     printf '  bomRevision: %s\n' "$(yaml_string "$(extract_yaml_value "${render_out}" "revision")")"
     printf '  bomDigest: %s\n' "$(yaml_string "$(extract_yaml_value_any_indent "${render_out}" "bomDigest")")"
