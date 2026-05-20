@@ -1,0 +1,177 @@
+# Copyright 2026 sealos.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: distributiontargets.distribution.sealos.io
+spec:
+  group: distribution.sealos.io
+  names:
+    kind: DistributionTarget
+    listKind: DistributionTargetList
+    plural: distributiontargets
+    shortNames:
+      - disttarget
+    singular: distributiontarget
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Revision
+          type: string
+          jsonPath: .status.lastResult.revision
+        - name: Channel
+          type: string
+          jsonPath: .status.lastResult.channel
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                clusterName:
+                  type: string
+                  description: Cluster state name reconciled by the agent.
+                bomPath:
+                  type: string
+                  description: Local path to a BOM document visible inside the controller pod.
+                distributionChannelPath:
+                  type: string
+                  description: Local path to a DistributionChannel document visible inside the controller pod.
+                localRepoPath:
+                  type: string
+                  description: Local cluster repo used for render-time input bindings and local patches.
+                localPatchRevision:
+                  type: string
+                  description: Optional local patch revision recorded in applied state.
+                packageSources:
+                  type: array
+                  description: Local package source overrides, keyed by component name.
+                  items:
+                    type: object
+                    required:
+                      - component
+                      - root
+                    properties:
+                      component:
+                        type: string
+                        minLength: 1
+                      root:
+                        type: string
+                        minLength: 1
+                cacheRoot:
+                  type: string
+                  description: Package cache root used while resolving component packages.
+                kubeconfigPath:
+                  type: string
+                  description: Path to the admin kubeconfig inside the controller pod.
+                hostRoot:
+                  type: string
+                  description: Host filesystem root used for host apply steps.
+                rolloutBatchSize:
+                  type: integer
+                  minimum: 0
+                  description: Maximum hosts processed per eligible host rollout batch; 0 means all hosts.
+                requeueAfter:
+                  type: string
+                  format: duration
+                  description: Optional successful reconcile interval.
+              oneOf:
+                - required:
+                    - bomPath
+                  not:
+                    required:
+                      - distributionChannelPath
+                - required:
+                    - distributionChannelPath
+                  not:
+                    required:
+                      - bomPath
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                lastReconcileTime:
+                  type: string
+                  format: date-time
+                lastResult:
+                  type: object
+                  properties:
+                    clusterName:
+                      type: string
+                    bomName:
+                      type: string
+                    revision:
+                      type: string
+                    channel:
+                      type: string
+                    bundlePath:
+                      type: string
+                    desiredStateDigest:
+                      type: string
+                    appliedRevisionPath:
+                      type: string
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
