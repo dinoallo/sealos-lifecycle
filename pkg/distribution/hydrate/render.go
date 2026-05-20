@@ -151,17 +151,18 @@ func RenderPlanWithOptions(plan *Plan, sources SourceProvider, outputDir string,
 		if err != nil {
 			return nil, err
 		}
-		packagePolicy, err := LoadPackageLocalPatchPolicy(plan, sources)
-		if err != nil {
-			return nil, err
-		}
-		if packagePolicy != nil {
-			plan.LocalPatchPolicy = packagePolicy
-			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
-		}
 		if bomPolicy != nil {
 			plan.LocalPatchPolicy = bomPolicy
 			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
+		} else {
+			packagePolicy, err := LoadPackageLocalPatchPolicy(plan, sources)
+			if err != nil {
+				return nil, err
+			}
+			if packagePolicy != nil {
+				plan.LocalPatchPolicy = packagePolicy
+				plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
+			}
 		}
 	}
 

@@ -607,6 +607,165 @@ func TestMaterializeRejectsMultiplePackageLocalPatchPolicies(t *testing.T) {
 	}
 }
 
+func TestMaterializeBOMPolicyOverridesMultiplePackagePolicies(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
+	doc.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+		{
+			Name:    "other",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "other-rootfs",
+				Image:  "registry.example.io/sealos/other-rootfs:v1.30.3",
+				Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+			},
+		},
+	}
+	bomRoot := t.TempDir()
+	writePackagePatchPolicy(t, bomRoot, packagePolicyYAML("bom-local-patch-policy"))
+	sourceA := copiedFixture(t)
+	sourceB := copiedFixture(t)
+	writePackagePatchPolicy(t, sourceA, packagePolicyYAML("package-policy-a"))
+	writePackagePatchPolicy(t, sourceB, packagePolicyYAML("package-policy-b"))
+
+	result, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		BOMRoot:     bomRoot,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			var root string
+			componentName := ""
+			switch image {
+			case doc.Spec.Components[0].Artifact.Reference():
+				root = sourceA
+				componentName = "kubernetes"
+			case doc.Spec.Components[1].Artifact.Reference():
+				root = sourceB
+				componentName = "other"
+			default:
+				return nil, fmt.Errorf("unexpected image %q", image)
+			}
+			pkg, err := packageformat.LoadDir(root)
+			if err != nil {
+				return nil, err
+			}
+			pkg.Spec.Component = componentName
+			pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			return pkg, nil
+		}),
+		Sources: hydrate.SourceMap{
+			"kubernetes": sourceA,
+			"other":      sourceB,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicySource), "bom"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyName, "bom-local-patch-policy"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyName = %q, want %q", got, want)
+	}
+}
+
+func TestMaterializeLocalRepoPolicyOverridesMultiplePackagePolicies(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
+	doc.Spec.Components = []bom.Component{
+		{
+			Name:    "kubernetes",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "kubernetes-rootfs",
+				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+				Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			},
+		},
+		{
+			Name:    "other",
+			Kind:    "infra",
+			Version: "v1.30.3",
+			Artifact: bom.ArtifactReference{
+				Name:   "other-rootfs",
+				Image:  "registry.example.io/sealos/other-rootfs:v1.30.3",
+				Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+			},
+		},
+	}
+	localRoot := t.TempDir()
+	writeLocalRepoPatchPolicy(t, localRoot, packagePolicyYAML("repo-local-patch-policy"))
+	repo, err := localrepo.Load(localRoot)
+	if err != nil {
+		t.Fatalf("localrepo.Load() error = %v", err)
+	}
+	sourceA := copiedFixture(t)
+	sourceB := copiedFixture(t)
+	writePackagePatchPolicy(t, sourceA, packagePolicyYAML("package-policy-a"))
+	writePackagePatchPolicy(t, sourceB, packagePolicyYAML("package-policy-b"))
+
+	result, err := Materialize(doc, Options{
+		ClusterName: "cluster-a",
+		LocalRepo:   repo,
+		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
+			var root string
+			componentName := ""
+			switch image {
+			case doc.Spec.Components[0].Artifact.Reference():
+				root = sourceA
+				componentName = "kubernetes"
+			case doc.Spec.Components[1].Artifact.Reference():
+				root = sourceB
+				componentName = "other"
+			default:
+				return nil, fmt.Errorf("unexpected image %q", image)
+			}
+			pkg, err := packageformat.LoadDir(root)
+			if err != nil {
+				return nil, err
+			}
+			pkg.Spec.Component = componentName
+			pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+			return pkg, nil
+		}),
+		Sources: hydrate.SourceMap{
+			"kubernetes": sourceA,
+			"other":      sourceB,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if got, want := string(result.Bundle.Spec.LocalPatchPolicySource), "localRepo"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicySource = %q, want %q", got, want)
+	}
+	if got, want := result.Bundle.Spec.LocalPatchPolicyName, "repo-local-patch-policy"; got != want {
+		t.Fatalf("bundle.spec.localPatchPolicyName = %q, want %q", got, want)
+	}
+}
+
 func TestMaterializeRejectsInvalidLocalRepoPatch(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	constants.DefaultRuntimeRootDir = t.TempDir()

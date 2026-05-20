@@ -203,29 +203,36 @@ func attachLocalBindings(plan *hydrate.Plan, bomRoot string, sources hydrate.Sou
 	}
 	plan.LocalPatchPolicy = ownership.DefaultLocalPatchPolicyDocument().Clone()
 	plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBuiltInDefault
-	bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
-	if err != nil {
-		return err
+
+	repoPolicySelected := false
+	if repo != nil {
+		if localPatchPolicy := repo.LocalPatchPolicy(); localPatchPolicy != nil {
+			plan.LocalPatchPolicy = localPatchPolicy
+			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceLocalRepo
+			repoPolicySelected = true
+		}
 	}
-	packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
-	if err != nil {
-		return err
-	}
-	if packagePolicy != nil {
-		plan.LocalPatchPolicy = packagePolicy
-		plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
-	}
-	if bomPolicy != nil {
-		plan.LocalPatchPolicy = bomPolicy
-		plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
+	if !repoPolicySelected {
+		bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
+		if err != nil {
+			return err
+		}
+		if bomPolicy != nil {
+			plan.LocalPatchPolicy = bomPolicy
+			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
+		} else {
+			packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
+			if err != nil {
+				return err
+			}
+			if packagePolicy != nil {
+				plan.LocalPatchPolicy = packagePolicy
+				plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
+			}
+		}
 	}
 	if repo == nil {
 		return nil
-	}
-
-	if localPatchPolicy := repo.LocalPatchPolicy(); localPatchPolicy != nil {
-		plan.LocalPatchPolicy = localPatchPolicy
-		plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceLocalRepo
 	}
 
 	resources := repo.Resources()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
 )
 
@@ -294,6 +295,142 @@ spec:
 	}
 	if got, want := out.LocalPolicy, "bom"; got != want {
 		t.Fatalf("localPolicy = %q, want %q", got, want)
+	}
+}
+
+func TestSyncEffectiveLocalPatchPolicyUsesHigherPrecedenceSourcesBeforePackage(t *testing.T) {
+	tempDir := t.TempDir()
+	bomRoot := filepath.Join(tempDir, "bom")
+	packageRoot := filepath.Join(tempDir, "package")
+	localRepoRoot := filepath.Join(tempDir, "local-repo")
+
+	writeSyncTestPackage(t, packageRoot)
+	writeSyncPackagePatchPolicy(t, packageRoot, strings.TrimSpace(`
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicy
+metadata:
+  name: package-local-patch-policy
+spec:
+  scope: clusterLocal
+  forbiddenExactPaths:
+    - status
+    - spec.selector
+  forbiddenMetadataKeys:
+    - uid
+    - resourceVersion
+    - generation
+    - creationTimestamp
+    - managedFields
+    - ownerReferences
+    - finalizers
+    - generateName
+    - selfLink
+    - deletionTimestamp
+    - deletionGracePeriodSeconds
+  forbiddenContainerFields:
+    - image
+  kindRules:
+    - kind: ConfigMap
+      allowedPrefixes:
+        - data
+`)+"\n")
+	pkg, err := packageformat.LoadDir(packageRoot)
+	if err != nil {
+		t.Fatalf("packageformat.LoadDir() error = %v", err)
+	}
+
+	bomDoc := syncLifecycleBOM()
+	bomDoc.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
+	writeSyncPolicyFile(t, bomRoot, strings.TrimSpace(`
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicy
+metadata:
+  name: bom-local-patch-policy
+spec:
+  scope: clusterLocal
+  forbiddenExactPaths:
+    - status
+    - spec.selector
+  forbiddenMetadataKeys:
+    - uid
+    - resourceVersion
+    - generation
+    - creationTimestamp
+    - managedFields
+    - ownerReferences
+    - finalizers
+    - generateName
+    - selfLink
+    - deletionTimestamp
+    - deletionGracePeriodSeconds
+  forbiddenContainerFields:
+    - image
+  kindRules:
+    - kind: ConfigMap
+      allowedPrefixes:
+        - data
+`)+"\n")
+
+	policy, source, policyPath, err := syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, nil)
+	if err != nil {
+		t.Fatalf("syncEffectiveLocalPatchPolicy() error = %v", err)
+	}
+	if got, want := string(source), "bom"; got != want {
+		t.Fatalf("source = %q, want %q", got, want)
+	}
+	if got, want := policyPath, "bom"; got != want {
+		t.Fatalf("policyPath = %q, want %q", got, want)
+	}
+	if got, want := policy.EffectiveName(), "bom-local-patch-policy"; got != want {
+		t.Fatalf("policy.EffectiveName() = %q, want %q", got, want)
+	}
+
+	writeSyncPolicyFile(t, localRepoRoot, strings.TrimSpace(`
+apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalPatchPolicy
+metadata:
+  name: repo-local-patch-policy
+spec:
+  scope: clusterLocal
+  forbiddenExactPaths:
+    - status
+    - spec.selector
+  forbiddenMetadataKeys:
+    - uid
+    - resourceVersion
+    - generation
+    - creationTimestamp
+    - managedFields
+    - ownerReferences
+    - finalizers
+    - generateName
+    - selfLink
+    - deletionTimestamp
+    - deletionGracePeriodSeconds
+  forbiddenContainerFields:
+    - image
+  kindRules:
+    - kind: ConfigMap
+      allowedPrefixes:
+        - data
+`)+"\n")
+	repo, err := localrepo.Load(localRepoRoot)
+	if err != nil {
+		t.Fatalf("localrepo.Load() error = %v", err)
+	}
+
+	policy, source, policyPath, err = syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, repo)
+	if err != nil {
+		t.Fatalf("syncEffectiveLocalPatchPolicy() error = %v", err)
+	}
+	if got, want := string(source), "localRepo"; got != want {
+		t.Fatalf("source = %q, want %q", got, want)
+	}
+	if got, want := policyPath, "policy/local-patch-policy.yaml"; got != want {
+		t.Fatalf("policyPath = %q, want %q", got, want)
+	}
+	if got, want := policy.EffectiveName(), "repo-local-patch-policy"; got != want {
+		t.Fatalf("policy.EffectiveName() = %q, want %q", got, want)
 	}
 }
 

@@ -443,6 +443,12 @@ func syncEffectiveLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packagefor
 	source := ownership.LocalPatchPolicySourceBuiltInDefault
 	policyPath := string(source)
 
+	if repo != nil {
+		if localPolicy := repo.LocalPatchPolicy(); localPolicy != nil {
+			return localPolicy, ownership.LocalPatchPolicySourceLocalRepo, repo.LocalPatchPolicyRelativePath(), nil
+		}
+	}
+
 	if doc != nil && len(resolved) > 0 {
 		plan, err := hydrate.BuildPlanFromResolved(doc, resolved)
 		if err != nil {
@@ -452,27 +458,20 @@ func syncEffectiveLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packagefor
 		if err != nil {
 			return nil, "", "", err
 		}
-		packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
-		if err != nil {
-			return nil, "", "", err
-		}
-		if packagePolicy != nil {
-			policyDoc = packagePolicy
-			source = ownership.LocalPatchPolicySourcePackage
-			policyPath = string(source)
-		}
 		if bomPolicy != nil {
 			policyDoc = bomPolicy
 			source = ownership.LocalPatchPolicySourceBOM
 			policyPath = string(source)
-		}
-	}
-
-	if repo != nil {
-		if localPolicy := repo.LocalPatchPolicy(); localPolicy != nil {
-			policyDoc = localPolicy
-			source = ownership.LocalPatchPolicySourceLocalRepo
-			policyPath = repo.LocalPatchPolicyRelativePath()
+		} else {
+			packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
+			if err != nil {
+				return nil, "", "", err
+			}
+			if packagePolicy != nil {
+				policyDoc = packagePolicy
+				source = ownership.LocalPatchPolicySourcePackage
+				policyPath = string(source)
+			}
 		}
 	}
 
