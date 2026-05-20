@@ -34,7 +34,7 @@
 | 从 BOM 解析 component package | Ready now | [pkg/distribution/bom/resolve.go](../pkg/distribution/bom/resolve.go), [sync.go](../cmd/sealos/cmd/sync.go) 里的 `sync render` | 当前解析仍然是显式 BOM 驱动。 |
 | 从本地目录 override 或 cached OCI artifact 两种来源解析包 | Ready now | [sync.go](../cmd/sealos/cmd/sync.go), [pull.go](../pkg/distribution/ocipackage/pull.go), [packageformat/load.go](../pkg/distribution/packageformat/load.go) | BOM 驱动的 OCI 引用会先按 digest-derived key 拉到 cluster runtime cache，再由 render/validate 读取。 |
 | 把 BOM render 成 hydrated desired-state bundle | Ready now | [materialize.go](../pkg/distribution/reconcile/materialize.go), [render.go](../pkg/distribution/hydrate/render.go) | render 虽然已经是 cluster-targeted，但仍然以当前单节点路径为中心。 |
-| 把 rendered bundle apply 到当前 cluster 解析出来的目标面 | Ready now | [apply.go](../pkg/distribution/reconcile/apply.go) | 当前部署单元仍然是 rendered bundle，多节点行为仍然停留在 executor 层，不是 controller。 |
+| 把 rendered bundle apply 到当前 cluster 解析出来的目标面 | Ready now | [apply.go](../pkg/distribution/reconcile/apply.go) | 当前部署单元仍然是 rendered bundle，多节点行为是带可选 host batching 的 executor 层能力，不是 controller。 |
 | 在部署流程里消费 package contents | Ready now | `rootfs`、`file`、`manifest`、hooks 都由 [apply.go](../pkg/distribution/reconcile/apply.go) 消费 | 这些语义在 MVP 里故意收得很窄。 |
 | 根据 package input contract 初始化 cluster-local repo skeleton | Ready now | [sync_localrepo.go](../cmd/sealos/cmd/sync_localrepo.go) 里的 `sealos sync local-repo init`，以及 [sync_test.go](../cmd/sealos/cmd/sync_test.go) | 它只生成模板和 policy 元数据；真实 Secret 值仍然必须由运维提供。 |
 | 在 validate/render 前检查 cluster-local repo 是否就绪 | Ready now | [sync_localrepo.go](../cmd/sealos/cmd/sync_localrepo.go) 里的 `sealos sync local-repo doctor`，以及 [sync_test.go](../cmd/sealos/cmd/sync_test.go) | 它检查未替换的 init 模板、stale component 目录、Secret-like 文件权限/kind 错误和缺失的 local patch policy；不会打印 Secret payload。 |
@@ -57,6 +57,9 @@
 | --- | --- | --- | --- |
 | 在一条统一流程里把 package 内容同时部署到 Kubernetes 和 host | Ready with boundary | [apply.go](../pkg/distribution/reconcile/apply.go) | 当前部署单元是 rendered bundle，不是“直接安装一个 package”。 |
 | 跨多个 cluster host 编排一个 rendered bundle | Ready with boundary | [topology.go](../pkg/distribution/reconcile/topology.go), [apply.go](../pkg/distribution/reconcile/apply.go), [kubeadm_bootstrap.go](../pkg/distribution/reconcile/kubeadm_bootstrap.go) | CLI 驱动的 `sync apply` 路径会解析 `allNodes`、`firstMaster`、`cluster`，按 remote host staging bundle payload，生成 kubeadm join config，并在 cluster-scoped step 需要时从 remote first master 拉取 kubeconfig。package 自己的 hook/script 仍然需要具备 multi-node-safe 行为。 |
+| 解析本地文件形式的 `DistributionChannel` target | Ready with boundary | [channel.go](../pkg/distribution/bom/channel.go), [sync.go](../cmd/sealos/cmd/sync.go), [runner.go](../pkg/distribution/agent/runner.go) | `--distribution-channel` 会加载一份本地 channel 文档，校验它的 `line` 和 `targetRevision` 是否匹配 `spec.bomPath` 指向的 BOM，然后 render 解析出来的 BOM。还没有 registry/API 驱动的 `line + channel` lookup。 |
+| 运行进程级 distribution reconcile agent | Ready with boundary | [main.go](../cmd/sealos-agent/main.go), [root.go](../cmd/sealos-agent/cmd/root.go), [runner.go](../pkg/distribution/agent/runner.go) | `sealos-agent` 可以围绕 BOM 或本地 `DistributionChannel` 跑一次或按 interval 循环，但它还不是带 leader election、CRD 或 promotion health automation 的 Kubernetes controller。 |
+| 对 host-targeted rendered-bundle rollout 做分批 | Ready with boundary | [sync.go](../cmd/sealos/cmd/sync.go) 和 [root.go](../cmd/sealos-agent/cmd/root.go) 里的 `--rollout-batch-size`，以及 [apply.go](../pkg/distribution/reconcile/apply.go) 里的 batching | batching 只作用于 rendered-bundle executor 里的 host-targeted all-node steps。它还不是带 canary pause、health gate 或自动 rollback 的持久 rollout policy object。 |
 | 从多节点中的指定 host commit 一个 local input 绑定出来的 host file | Ready with boundary | [sync.go](../cmd/sealos/cmd/sync.go), [commit.go](../pkg/distribution/commit/commit.go) | 当前 multi-node commit 支持面故意很窄：只覆盖 local-input regular file；如果选中 host 有 host-scoped input，就回写 scoped input；如果没有 scoped provenance 且多节点内容已经分叉，就拒绝把单个节点的值覆盖到默认 input。 |
 | 跟踪 host file、Kubernetes object 和部分 generated projection | Ready with boundary | [inventory.go](../pkg/distribution/hydrate/inventory.go), [compare.go](../pkg/distribution/compare/compare.go) | generated projection 覆盖面刻意很窄。 |
 | 支持 generated control-plane static Pod tracking | Ready with boundary | [inventory.go](../pkg/distribution/hydrate/inventory.go) | 只覆盖明确建模的 kubeadm-generated static Pod 集合。 |
@@ -70,9 +73,9 @@
 | 能力 | 当前状态 | 为什么重要 |
 | --- | --- | --- |
 | 不经过 BOM/bundle，直接“安装这个 package” | Not implemented | 当前部署路径是 `package -> BOM -> render -> bundle -> apply`，不是 package-direct install。 |
-| controller 驱动的多节点 rollout policy | Not implemented | CLI 驱动的 `sync apply` 路径已经能为当前 rendered-bundle 工作流做多 host 编排，但还没有后台 controller、rollout strategy 对象，也没有覆盖所有多节点工作流的 package 级安全模型。 |
-| controller 驱动的持续 reconcile loop | Not implemented | 现在主接口仍然是 CLI 驱动的 render/apply/diff/status/commit/revert。 |
-| `DistributionChannel` 驱动的 release resolution | Not implemented | 当前运行方式仍然依赖显式 BOM 文件或 revision，而不是 live channel object。 |
+| controller 驱动的多节点 rollout policy | Not implemented | rendered-bundle apply 已经有 host batching，但还没有后台 controller、持久 rollout policy object、package 级安全模型、health gate 或自动 rollback 模型来覆盖所有多节点工作流。 |
+| Kubernetes controller 驱动的持续 reconcile loop | Not implemented | `sealos-agent` 已经提供进程级 once/interval loop，但还没有 watched API、leader election、CRD 或 controller status reconciliation。 |
+| live `DistributionChannel` release lookup 和 promotion service | Not implemented | 本地文件形式的 `DistributionChannel` resolution 已经有了，但还没有 registry/API 驱动的 `distribution line + channel` lookup、channel advancement history 或 promotion service。 |
 | 完全泛化的 generated-output drift 管理 | Not implemented | 当前 MVP 只跟踪一组已知 generated target。 |
 | package/BOM 侧提供 local patch policy source | Not implemented | 当前 policy source 只支持 `localRepo` 和 `builtInDefault`。 |
 | package、BOM、cluster-local 多层 policy merge | Not implemented | 当前模型刻意拒绝这层复杂度。 |
@@ -85,20 +88,26 @@
 - 解析：好了
 - 部署：好了，它是 BOM 驱动的当前 MVP
 - CLI 驱动的多节点 bundle 编排：好了，但边界很窄
-- controller 驱动的 rollout 和发布系统化：还没好
+- 本地文件形式的 `DistributionChannel` 选择：好了，但边界很窄
+- `sealos-agent` 进程级 reconcile：好了，但边界很窄
+- host rollout batching：好了，但边界很窄
+- Kubernetes controller 驱动的 rollout 和发布系统化：还没好
 
 所以当前仓库已经足够支撑：
 
 - package 编写
 - OCI package build / push / pull
 - BOM 驱动的 render/apply
+- 本地 `DistributionChannel` target 选择
+- 进程级 agent reconcile
+- rendered bundle 的分批 host apply waves
 - 当前 CLI 驱动路径上的 drift / ownership 实验
 
 但它还不是下面这些最终形态：
 
 - 多集群 release management
-- controller 驱动的多节点 topology-aware deployment
-- 持续 controller-based reconciliation
+- Kubernetes controller 驱动的多节点 topology-aware deployment
+- Kubernetes controller-based reconciliation 和 promotion automation
 
 ## 相关文档
 
@@ -111,5 +120,5 @@
 - local repo 与部署闭环：
   [sealos-local-repo-and-secret-guide.md](./sealos-local-repo-and-secret-guide.md),
   [sealos-sync-drift-walkthrough.md](./sealos-sync-drift-walkthrough.md)
-- 仍待正式实现的 release / channel 模型：
+- BOM 与 `DistributionChannel` 模型，包括当前本地文件边界：
   [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md)

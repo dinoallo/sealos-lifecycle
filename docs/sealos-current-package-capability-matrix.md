@@ -37,7 +37,7 @@ Read this matrix as an implementation snapshot, not as a long-term promise.
 | Resolve component packages from a BOM | Ready now | [pkg/distribution/bom/resolve.go](../pkg/distribution/bom/resolve.go), `sync render` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go) | Resolution is still explicit-BOM driven. |
 | Resolve packages from either local directory overrides or cached OCI artifacts | Ready now | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/ocipackage/pull.go](../pkg/distribution/ocipackage/pull.go), [pkg/distribution/packageformat/load.go](../pkg/distribution/packageformat/load.go) | BOM-driven OCI references are pulled into the cluster runtime cache under a digest-derived key before render/validate reads them. |
 | Render a BOM into a hydrated desired-state bundle | Ready now | [pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go), [pkg/distribution/hydrate/render.go](../pkg/distribution/hydrate/render.go) | Render is cluster-targeted but still centered on the current single-node path. |
-| Apply a rendered bundle to the resolved cluster targets | Ready now | [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The deployment unit is still the rendered bundle, and multi-node behavior is still executor-level rather than controller-driven. |
+| Apply a rendered bundle to the resolved cluster targets | Ready now | [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The deployment unit is still the rendered bundle, and multi-node behavior is executor-level with optional host batching rather than controller-driven. |
 | Carry package content types through deployment | Ready now | `rootfs`, `file`, `manifest`, hooks through [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The semantics are intentionally narrow and repo-specific for the MVP. |
 | Initialize a cluster-local repo skeleton from package input contracts | Ready now | `sealos sync local-repo init` in [cmd/sealos/cmd/sync_localrepo.go](../cmd/sealos/cmd/sync_localrepo.go), tests in [cmd/sealos/cmd/sync_test.go](../cmd/sealos/cmd/sync_test.go) | It creates templates and policy metadata only; real Secret values must still be supplied by operators. |
 | Inspect a cluster-local repo before validation/render | Ready now | `sealos sync local-repo doctor` in [cmd/sealos/cmd/sync_localrepo.go](../cmd/sealos/cmd/sync_localrepo.go), tests in [cmd/sealos/cmd/sync_test.go](../cmd/sealos/cmd/sync_test.go) | It catches unresolved init templates, stale component dirs, Secret-like permission/kind mistakes, and missing local patch policy without printing Secret payload. |
@@ -60,6 +60,9 @@ Read this matrix as an implementation snapshot, not as a long-term promise.
 | --- | --- | --- | --- |
 | Deploy package content to Kubernetes and the host from one unified flow | Ready with boundary | [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | The deployment unit is the rendered bundle, not a standalone package install command. |
 | Orchestrate a rendered bundle across multiple cluster hosts | Ready with boundary | [pkg/distribution/reconcile/topology.go](../pkg/distribution/reconcile/topology.go), [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go), [pkg/distribution/reconcile/kubeadm_bootstrap.go](../pkg/distribution/reconcile/kubeadm_bootstrap.go) | The CLI-driven `sync apply` path resolves `allNodes`, `firstMaster`, and `cluster`, stages bundle payloads per remote host, handles kubeadm join configs, and fetches remote first-master kubeconfig for cluster-scoped steps. Package hooks/scripts still need to be multi-node-safe. |
+| Resolve a local file-backed `DistributionChannel` target | Ready with boundary | [pkg/distribution/bom/channel.go](../pkg/distribution/bom/channel.go), [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/agent/runner.go](../pkg/distribution/agent/runner.go) | `--distribution-channel` loads one local channel document, validates its `line` and `targetRevision` against `spec.bomPath`, then renders the resolved BOM. There is no registry/API-backed lookup by `line + channel` yet. |
+| Run a process-level distribution reconcile agent | Ready with boundary | [cmd/sealos-agent/main.go](../cmd/sealos-agent/main.go), [cmd/sealos-agent/cmd/root.go](../cmd/sealos-agent/cmd/root.go), [pkg/distribution/agent/runner.go](../pkg/distribution/agent/runner.go) | `sealos-agent` can run once or on an interval against a BOM or local `DistributionChannel`, but it is not a Kubernetes controller with leader election, CRDs, or promotion health automation. |
+| Batch host-targeted rendered-bundle rollout | Ready with boundary | `--rollout-batch-size` in [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go) and [cmd/sealos-agent/cmd/root.go](../cmd/sealos-agent/cmd/root.go), batching in [pkg/distribution/reconcile/apply.go](../pkg/distribution/reconcile/apply.go) | Batching applies to host-targeted all-node steps inside the rendered-bundle executor. It is not a durable rollout policy object with canary pauses, health gates, or automatic rollback. |
 | Commit a local input-backed host file from a selected multi-node host | Ready with boundary | [cmd/sealos/cmd/sync.go](../cmd/sealos/cmd/sync.go), [pkg/distribution/commit/commit.go](../pkg/distribution/commit/commit.go) | Current multi-node commit support is intentionally narrow: it only covers local-input regular files, writes selected hosts back to host-scoped inputs when present, and rejects divergent selected-host commits that would overwrite the default input without host-scoped provenance. |
 | Track host files, Kubernetes objects, and some generated projections | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go), [pkg/distribution/compare/compare.go](../pkg/distribution/compare/compare.go) | Generated projection coverage is intentionally narrow. |
 | Support generated control-plane static Pod tracking | Ready with boundary | [pkg/distribution/hydrate/inventory.go](../pkg/distribution/hydrate/inventory.go) | Only the explicitly modeled kubeadm-generated static Pod set is covered. |
@@ -73,9 +76,9 @@ These are the main things users should **not** mistake as already done.
 | Capability | Current State | Why It Matters |
 | --- | --- | --- |
 | Direct “install this package” workflow without BOM/bundle mediation | Not implemented | The current deployment path is `package -> BOM -> render -> bundle -> apply`, not package-direct install. |
-| Controller-driven multi-node rollout policy | Not implemented | The CLI-driven `sync apply` path can orchestrate the current rendered-bundle workflow across multiple hosts, but there is still no background controller, rollout strategy object, or package-level safety model for every multi-node workflow. |
-| Controller-based continuous reconcile loop | Not implemented | Today the primary interface is CLI-driven render/apply/diff/status/commit/revert. |
-| `DistributionChannel`-driven release resolution | Not implemented | Current operation still uses explicit BOM files or revisions rather than live channel objects. |
+| Controller-driven multi-node rollout policy | Not implemented | Host batching now exists for rendered-bundle apply, but there is still no background controller, durable rollout policy object, package-level safety model, health gate, or automatic rollback model for every multi-node workflow. |
+| Kubernetes controller-based continuous reconcile loop | Not implemented | `sealos-agent` provides a process-level once/interval loop, but there is no Kubernetes controller with watched APIs, leader election, CRDs, or controller status reconciliation. |
+| Live `DistributionChannel` release lookup and promotion service | Not implemented | Local file-backed `DistributionChannel` resolution exists, but there is no registry/API-backed lookup by `distribution line + channel`, no channel advancement history, and no promotion service. |
 | Fully generalized generated-output drift management | Not implemented | The MVP tracks a narrow known set, not every possible generated artifact. |
 | Package/BOM-defined local patch policy source | Not implemented | Current policy sources are only `localRepo` and `builtInDefault`. |
 | Multi-layer policy merge across package, BOM, and cluster-local inputs | Not implemented | The current model intentionally rejects that complexity. |
@@ -88,20 +91,26 @@ The shortest accurate statement for the current repository is:
 - package resolution is ready
 - deployment is ready as a BOM-driven MVP
 - CLI-driven multi-node bundle orchestration is ready with a narrow boundary
-- controller-driven rollout and release-system behavior are not ready yet
+- local file-backed `DistributionChannel` selection is ready with a narrow boundary
+- `sealos-agent` process-level reconciliation is ready with a narrow boundary
+- host rollout batching is ready with a narrow boundary
+- Kubernetes controller-driven rollout and release-system behavior are not ready yet
 
 That means the repository is already strong enough for:
 
 - package authoring
 - OCI package build, push, and pull
 - BOM-driven render/apply workflows
+- local `DistributionChannel` target selection
+- process-level agent reconciliation
+- batched host apply waves for rendered bundles
 - drift and ownership experiments on the current CLI-driven path
 
 But it is not yet the final shape of:
 
 - multi-cluster release management
-- controller-driven multi-node topology-aware deployment
-- continuous controller-based reconciliation
+- Kubernetes controller-driven multi-node topology-aware deployment
+- Kubernetes controller-based reconciliation and promotion automation
 
 ## Related Documents
 
@@ -114,5 +123,5 @@ But it is not yet the final shape of:
 - Local repo and deployment loop:
   [sealos-local-repo-and-secret-guide.md](./sealos-local-repo-and-secret-guide.md),
   [sealos-sync-drift-walkthrough.md](./sealos-sync-drift-walkthrough.md)
-- Release and channel model that still remains to be implemented:
+- BOM and `DistributionChannel` model, including the current local-file boundary:
   [sealos-bom-and-distribution-channel-guide.md](./sealos-bom-and-distribution-channel-guide.md)

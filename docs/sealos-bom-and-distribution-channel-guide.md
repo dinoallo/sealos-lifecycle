@@ -16,7 +16,9 @@ This guide explains how Sealos should think about:
 
 It exists because these concepts currently appear across several design
 documents, while the current PoC code still uses a simpler transition model in
-which `spec.channel` lives inside the BOM itself.
+which `spec.channel` lives inside the BOM itself. The repository now also
+supports a narrow local-file `DistributionChannel` path for selecting a BOM
+before render.
 
 ## Related Documents
 
@@ -34,6 +36,8 @@ which `spec.channel` lives inside the BOM itself.
   [pkg/distribution/state/types.go](../pkg/distribution/state/types.go)
 - Current materialization path:
   [pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go)
+- Current local `DistributionChannel` resolver:
+  [pkg/distribution/bom/channel.go](../pkg/distribution/bom/channel.go)
 
 ## Why This Guide Exists
 
@@ -238,6 +242,7 @@ spec:
   line: default-platform
   channel: stable
   targetRevision: rev-007
+  bomPath: bom.yaml
 ```
 
 That shape keeps responsibilities clean:
@@ -250,15 +255,17 @@ That shape keeps responsibilities clean:
 
 | Topic | Current Repo Behavior | Target Design Direction |
 | --- | --- | --- |
-| How a cluster chooses a target | Explicit BOM file path | Explicit BOM revision, or `distribution line + DistributionChannel` |
-| Where channel metadata lives | `BOM.spec.channel` | `DistributionChannel` object |
-| What `sync render` resolves today | One BOM document passed in directly | One resolved BOM revision after optional channel lookup |
-| What applied state records | BOM name, revision, and channel | BOM name, revision, and the channel or explicit target that led to that revision |
+| How a cluster chooses a target | Explicit BOM file path, or a local `DistributionChannel` file passed with `--distribution-channel` | Explicit BOM revision, or `distribution line + DistributionChannel` lookup |
+| Where channel metadata lives | `BOM.spec.channel`, plus local channel selection metadata in render provenance when a `DistributionChannel` file is used | `DistributionChannel` object |
+| What `sync render` resolves today | A BOM document passed directly, or a local `DistributionChannel` whose `spec.bomPath` points at the BOM to load | One resolved BOM revision after optional channel lookup |
+| What applied state records | BOM name, revision, and channel; rendered bundles also record BOM and local `DistributionChannel` provenance | BOM name, revision, and the channel or explicit target that led to that revision |
 
 This distinction is important because the current code path in
-[pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go)
-does not resolve a channel head yet. It loads one explicit BOM document and
-materializes that.
+[pkg/distribution/bom/channel.go](../pkg/distribution/bom/channel.go)
+resolves only local channel documents. It validates that the channel `line`
+matches the target BOM `metadata.name`, that `targetRevision` matches the BOM
+`spec.revision`, and then renders that concrete BOM. It does not provide live
+lookup for "latest stable on this distribution line" yet.
 
 ## Day 0 Selection
 
@@ -286,18 +293,21 @@ live state. It should be assigned one of these two target shapes:
 | General production cluster | `stable` |
 | Regulated or tightly controlled rollout | Explicit BOM revision pin |
 
-### Important Current Limitation
+### Important Current Boundary
 
-Today, the current repo only implements the explicit BOM document path.
+Today, the current repo implements two local document paths:
 
-That means the current Day 0 workflow is effectively:
+- choose a specific BOM file and pass it to `sealos sync render --file`
+- choose a local `DistributionChannel` file and pass it to
+  `sealos sync render --distribution-channel`
 
-- choose a specific BOM file
-- pass it to `sealos sync render`
+The local `DistributionChannel` must name the distribution line, channel,
+target revision, and `spec.bomPath` for the target BOM. The CLI resolves the
+channel to that local BOM before materialization.
 
 It does not yet implement:
 
-- `DistributionChannel` lookup
+- registry/API-backed `DistributionChannel` lookup
 - "follow the latest stable revision on this line" resolution
 
 ## Day 1 To Day N Behavior
@@ -316,7 +326,8 @@ If a cluster is pinned to one BOM revision:
 
 If a cluster follows a `DistributionChannel`:
 
-- it re-resolves that channel over time
+- `sealos-agent` can re-resolve a local `DistributionChannel` file on each
+  process-level reconcile pass
 - it moves only when the `DistributionChannel` target revision advances
 - it should still persist the exact resolved BOM revision it last applied
 
@@ -327,17 +338,21 @@ This keeps operational intent and concrete state separate:
 
 ## Applied Revision State
 
-The current applied-state model already records:
+The current applied-state model records:
 
 - BOM name
 - BOM revision
 - BOM channel
 
+Rendered bundles also record render provenance, including the local
+`DistributionChannel` path, digest, distribution line, BOM path, and BOM digest
+when a channel file is used.
+
 See [pkg/distribution/state/types.go](../pkg/distribution/state/types.go).
 
-That is useful even before `DistributionChannel` is fully implemented, because
-the cluster still needs a durable record of what exact baseline it last
-materialized.
+That is useful even while the channel resolver is still local-file scoped,
+because the cluster still needs a durable record of what exact baseline it last
+materialized and which local selection document produced it.
 
 Longer term, the most useful state shape would capture both:
 
@@ -366,18 +381,19 @@ line, not as "whatever the cluster currently drifted into."
 - If you need long-lived divergence from the upstream baseline, fork the
   distribution line and publish new BOM revisions there.
 - Do not treat `spec.channel` inside today's BOM schema as the final release
-  architecture. Treat it as a useful transition field until channel resolution
-  is modeled explicitly.
+  architecture. Treat it as a useful transition field until live channel lookup
+  and promotion are modeled explicitly.
 
 ## What Still Needs To Be Designed Or Implemented
 
-- The final `DistributionChannel` schema
+- The final API-backed `DistributionChannel` schema and storage contract
 - Resolution rules from `distribution line + channel` to one BOM revision
+  without requiring a local `spec.bomPath`
 - How channel advancement history is stored and audited
 - Whether `BOM.spec.channel` should become optional first and then be removed
   later
-- The exact Day 0 operator interface for choosing pinned versus channel-based
-  targets
+- The exact Day 0 operator interface for API-backed pinned versus
+  channel-based targets
 
 This guide does not require those pieces to be fully implemented first. It only
 defines how they should fit together coherently.

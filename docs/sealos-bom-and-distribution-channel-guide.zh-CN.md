@@ -15,7 +15,9 @@
 - Day 0 / Day 1 的目标版本选择
 
 之所以单独写这一份，是因为这些概念现在分散在几份设计文档里，而当前 PoC
-代码仍然使用一个更简单的过渡模型：`spec.channel` 还直接写在 BOM 里。
+代码仍然使用一个更简单的过渡模型：`spec.channel` 还直接写在 BOM 里。当前仓库
+现在也支持一条很窄的本地文件 `DistributionChannel` 路径，用来在 render 前选择
+BOM。
 
 ## 相关文档
 
@@ -33,6 +35,8 @@
   [pkg/distribution/state/types.go](../pkg/distribution/state/types.go)
 - 当前 materialize 路径：
   [pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go)
+- 当前本地 `DistributionChannel` resolver：
+  [pkg/distribution/bom/channel.go](../pkg/distribution/bom/channel.go)
 
 ## 为什么需要这份文档
 
@@ -230,6 +234,7 @@ spec:
   line: default-platform
   channel: stable
   targetRevision: rev-007
+  bomPath: bom.yaml
 ```
 
 这个形状的职责边界很清楚：
@@ -241,14 +246,17 @@ spec:
 
 | 主题 | 当前仓库行为 | 目标设计方向 |
 | --- | --- | --- |
-| 集群怎么选择目标 | 显式传一份 BOM 文件 | 显式选 BOM revision，或使用 `distribution line + DistributionChannel` |
-| channel 元数据放哪里 | `BOM.spec.channel` | 独立的 `DistributionChannel` 对象 |
-| `sync render` 今天解析什么 | 直接解析传入的 BOM 文档 | 先做可选的 channel lookup，再落到具体 BOM revision |
-| applied state 今天记录什么 | BOM name、revision、channel | BOM name、revision，以及把它解析出来的 channel 或显式 target |
+| 集群怎么选择目标 | 显式 BOM 文件，或通过 `--distribution-channel` 传入本地 `DistributionChannel` 文件 | 显式选 BOM revision，或做 `distribution line + DistributionChannel` lookup |
+| channel 元数据放哪里 | `BOM.spec.channel`；使用 `DistributionChannel` 文件时，render provenance 还会记录本地 channel 选择元数据 | 独立的 `DistributionChannel` 对象 |
+| `sync render` 今天解析什么 | 直接传入的 BOM 文档，或本地 `DistributionChannel`，它的 `spec.bomPath` 指向要加载的 BOM | 先做可选的 channel lookup，再落到具体 BOM revision |
+| applied state 今天记录什么 | BOM name、revision、channel；rendered bundle 还会记录 BOM 和本地 `DistributionChannel` provenance | BOM name、revision，以及把它解析出来的 channel 或显式 target |
 
 这一点很关键，因为当前
-[pkg/distribution/reconcile/materialize.go](../pkg/distribution/reconcile/materialize.go)
-还不会去解析 channel head。它今天做的只是加载一份显式 BOM 文档并 materialize。
+[pkg/distribution/bom/channel.go](../pkg/distribution/bom/channel.go)
+只解析本地 channel 文档。它会校验 channel 的 `line` 是否匹配目标 BOM 的
+`metadata.name`，`targetRevision` 是否匹配 BOM 的 `spec.revision`，然后 render
+这份具体 BOM。它还没有提供“这条 distribution line 的 latest stable”这种 live
+lookup。
 
 ## Day 0 怎么选
 
@@ -275,18 +283,21 @@ spec:
 | 普通生产集群 | `stable` |
 | 强监管或精确受控 rollout | 显式 pin 一个 BOM revision |
 
-### 当前实现的限制
+### 当前实现的边界
 
-今天这个仓库只实现了“显式 BOM 文档”这条路径。
+今天这个仓库实现了两种本地文档路径：
 
-也就是说，当前 Day 0 实际上等价于：
+- 选择一个具体 BOM 文件，传给 `sealos sync render --file`
+- 选择一个本地 `DistributionChannel` 文件，传给
+  `sealos sync render --distribution-channel`
 
-- 选一份具体 BOM 文件
-- 把它传给 `sealos sync render`
+本地 `DistributionChannel` 必须声明 distribution line、channel、target
+revision，以及目标 BOM 的 `spec.bomPath`。CLI 会先把 channel 解析到这份本地
+BOM，再进入 materialization。
 
 还没有实现：
 
-- `DistributionChannel` lookup
+- registry/API 驱动的 `DistributionChannel` lookup
 - “帮你跟随这条线的 latest stable” 这种解析逻辑
 
 ## Day 1 到 Day N 应该怎么表现
@@ -305,7 +316,8 @@ Day 0 完成后，集群的后续行为应该取决于它是 pin 模式还是 ch
 
 如果一个集群跟随 `DistributionChannel`：
 
-- 它会周期性重新解析这个 channel
+- `sealos-agent` 可以在每次进程级 reconcile pass 里重新解析本地
+  `DistributionChannel` 文件
 - 只有当 `DistributionChannel` 指向的新 revision 发生变化时，它才会前进
 - 但它仍然应该把自己最终实际 apply 的 BOM revision 记下来
 
@@ -316,16 +328,21 @@ Day 0 完成后，集群的后续行为应该取决于它是 pin 模式还是 ch
 
 ## Applied revision state
 
-当前 applied-state 模型已经会记录：
+当前 applied-state 模型会记录：
 
 - BOM name
 - BOM revision
 - BOM channel
 
+rendered bundle 还会记录 render provenance；如果使用了 channel 文件，其中会包含
+本地 `DistributionChannel` path、digest、distribution line、BOM path 和 BOM
+digest。
+
 见 [pkg/distribution/state/types.go](../pkg/distribution/state/types.go)。
 
-即使在 `DistributionChannel` 还没完全实现之前，这也仍然有价值，因为集群需
-要有一个稳定记录，说明自己最近一次 materialize 的精确 baseline 是什么。
+即使 channel resolver 仍然限定在本地文件范围内，这也仍然有价值，因为集群需要有
+一个稳定记录，说明自己最近一次 materialize 的精确 baseline 是什么，以及是哪份本
+地选择文档导向了它。
 
 更长期、更理想的状态模型应该同时记住两层：
 
@@ -354,15 +371,16 @@ Day 0 完成后，集群的后续行为应该取决于它是 pin 模式还是 ch
 - 如果你需要长期偏离上游 baseline，就 fork 一条新的 distribution line，
   并在那条线上继续发 BOM revisions。
 - 不要把今天 BOM schema 里的 `spec.channel` 当成最终 release architecture；
-  它更像一个过渡字段。
+  它更像一个过渡字段，直到 live channel lookup 和 promotion 被显式建模。
 
 ## 仍然需要继续设计或实现的部分
 
-- 最终版 `DistributionChannel` schema
-- 从 `distribution line + channel` 解析到 BOM revision 的规则
+- API-backed 的最终版 `DistributionChannel` schema 和存储契约
+- 不依赖本地 `spec.bomPath` 时，从 `distribution line + channel` 解析到 BOM
+  revision 的规则
 - channel advancement history 怎么存、怎么审计
 - `BOM.spec.channel` 是先变 optional，还是以后直接移除
-- Day 0 选择 pin 模式还是 channel 模式时，最终的 operator interface 长什么样
+- API-backed pin 模式和 channel 模式在 Day 0 的最终 operator interface 长什么样
 
 这份文档不要求这些东西今天已经全部实现。它只是先把它们应该如何拼在一起讲
 清楚。
