@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/opencontainers/go-digest"
 	"sigs.k8s.io/yaml"
@@ -36,6 +37,7 @@ import (
 const (
 	BundlesDirName       = "bundles"
 	CurrentBundleDirName = "current"
+	RevisionsDirName     = "revisions"
 )
 
 type Options struct {
@@ -67,6 +69,17 @@ func BundleStorePath(clusterName string) string {
 
 func CurrentBundlePath(clusterName string) string {
 	return filepath.Join(BundleStorePath(clusterName), CurrentBundleDirName)
+}
+
+func RevisionBundlePath(clusterName, desiredStateDigest string) (string, error) {
+	if strings.TrimSpace(clusterName) == "" {
+		return "", fmt.Errorf("cluster name cannot be empty")
+	}
+	d, err := digest.Parse(desiredStateDigest)
+	if err != nil {
+		return "", fmt.Errorf("parse desired state digest %q: %w", desiredStateDigest, err)
+	}
+	return filepath.Join(BundleStorePath(clusterName), RevisionsDirName, digestPathName(d)), nil
 }
 
 func MaterializeFile(path string, opts Options) (*Result, error) {
@@ -132,15 +145,27 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	provenance := opts.RenderProvenance
 	provenance.LocalRepoRevision = localRepoRevision(opts.LocalRepo)
 	provenance.LocalPatchRevision = opts.LocalPatchRevision
-	renderedBundle, bundlePath, err := materializeBundle(plan, opts.ClusterName, opts.Sources, topology, provenance, opts.SourcePreflight)
+	renderedBundle, stagePath, err := materializeBundle(plan, opts.ClusterName, opts.Sources, topology, provenance, opts.SourcePreflight)
 	if err != nil {
 		return nil, err
 	}
+	stagePromoted := false
+	defer func() {
+		if !stagePromoted {
+			_ = os.RemoveAll(stagePath)
+		}
+	}()
 
-	desiredStateDigest, err := hydrate.DigestBundle(bundlePath)
+	desiredStateDigest, err := hydrate.DigestBundle(stagePath)
 	if err != nil {
-		return nil, fmt.Errorf("digest bundle %q: %w", bundlePath, err)
+		return nil, fmt.Errorf("digest bundle %q: %w", stagePath, err)
 	}
+
+	bundlePath, err := promoteRenderedBundle(stagePath, opts.ClusterName, desiredStateDigest)
+	if err != nil {
+		return nil, err
+	}
+	stagePromoted = true
 
 	ref, err := newBOMReference(doc)
 	if err != nil {
@@ -259,8 +284,11 @@ func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.S
 	if err != nil {
 		return nil, "", fmt.Errorf("create staged bundle path in %q: %w", storePath, err)
 	}
+	keepStage := false
 	defer func() {
-		_ = os.RemoveAll(stagePath)
+		if !keepStage {
+			_ = os.RemoveAll(stagePath)
+		}
 	}()
 
 	renderedBundle, err := hydrate.RenderPlan(plan, sources, stagePath)
@@ -274,17 +302,41 @@ func materializeBundle(plan *hydrate.Plan, clusterName string, sources hydrate.S
 		return nil, "", fmt.Errorf("write bundle manifest %q: %w", filepath.Join(stagePath, hydrate.BundleFileName), err)
 	}
 
-	currentPath := CurrentBundlePath(clusterName)
-	if err := promoteBundle(stagePath, currentPath); err != nil {
-		return nil, "", err
+	keepStage = true
+	return renderedBundle, stagePath, nil
+}
+
+func promoteRenderedBundle(stagePath, clusterName string, desiredStateDigest digest.Digest) (string, error) {
+	revisionPath, err := RevisionBundlePath(clusterName, desiredStateDigest.String())
+	if err != nil {
+		return "", err
 	}
-	return renderedBundle, currentPath, nil
+	if _, err := os.Stat(revisionPath); err == nil {
+		if err := os.RemoveAll(stagePath); err != nil {
+			return "", fmt.Errorf("cleanup duplicate staged bundle %q: %w", stagePath, err)
+		}
+	} else if errors.Is(err, os.ErrNotExist) {
+		if err := promoteBundle(stagePath, revisionPath); err != nil {
+			return "", err
+		}
+	} else {
+		return "", err
+	}
+
+	currentPath := CurrentBundlePath(clusterName)
+	if err := mirrorBundle(revisionPath, currentPath); err != nil {
+		return "", err
+	}
+	return currentPath, nil
 }
 
 func promoteBundle(stagePath, currentPath string) error {
 	backupPath := currentPath + ".bak"
 	if err := os.RemoveAll(backupPath); err != nil {
 		return fmt.Errorf("cleanup backup bundle %q: %w", backupPath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
+		return fmt.Errorf("create bundle parent %q: %w", filepath.Dir(currentPath), err)
 	}
 
 	currentExists := true
@@ -315,6 +367,24 @@ func promoteBundle(stagePath, currentPath string) error {
 		}
 	}
 	return nil
+}
+
+func mirrorBundle(src, dst string) error {
+	stagePath := dst + ".stage"
+	if err := os.RemoveAll(stagePath); err != nil {
+		return fmt.Errorf("cleanup staged bundle mirror %q: %w", stagePath, err)
+	}
+	if err := copyDir(src, stagePath); err != nil {
+		return fmt.Errorf("copy bundle %q to %q: %w", src, stagePath, err)
+	}
+	if err := promoteBundle(stagePath, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+func digestPathName(d digest.Digest) string {
+	return strings.ReplaceAll(d.String(), ":", "-")
 }
 
 func newBOMReference(doc *bom.BOM) (state.BOMReference, error) {

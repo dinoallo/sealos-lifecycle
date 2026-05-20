@@ -19,4 +19,9 @@ metadata:
 spec:
   strategy:
     batchSize: 1
+    canary:
+      batchSize: 1
+    pause:
+      afterCanary: true
     healthGate: true
+    failureAction: Rollback

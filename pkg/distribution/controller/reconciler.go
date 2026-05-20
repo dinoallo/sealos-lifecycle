@@ -73,6 +73,52 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	target.Status.LastReconcileTime = &now
 	target.Status.LastResult = resultFromAgent(result)
 	if err != nil {
+		if reconcile.IsRolloutPaused(err) {
+			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+				Type:               DistributionTargetConditionReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: target.Generation,
+				LastTransitionTime: now,
+				Reason:             DistributionTargetReasonRolloutPaused,
+				Message:            err.Error(),
+			})
+			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+				Type:               DistributionTargetConditionDegraded,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: target.Generation,
+				LastTransitionTime: now,
+				Reason:             DistributionTargetReasonRolloutPaused,
+				Message:            err.Error(),
+			})
+			updateErr := r.Client.Status().Update(ctx, &target)
+			if updateErr != nil {
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{RequeueAfter: requeueDuration(&target)}, nil
+		}
+		if reconcile.IsRolloutRolledBack(err) {
+			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+				Type:               DistributionTargetConditionReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: target.Generation,
+				LastTransitionTime: now,
+				Reason:             DistributionTargetReasonRolloutRolledBack,
+				Message:            err.Error(),
+			})
+			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+				Type:               DistributionTargetConditionDegraded,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: target.Generation,
+				LastTransitionTime: now,
+				Reason:             DistributionTargetReasonRolloutRolledBack,
+				Message:            err.Error(),
+			})
+			updateErr := r.Client.Status().Update(ctx, &target)
+			if updateErr != nil {
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{RequeueAfter: requeueDuration(&target)}, nil
+		}
 		target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
 			Type:               DistributionTargetConditionReady,
 			Status:             metav1.ConditionFalse,

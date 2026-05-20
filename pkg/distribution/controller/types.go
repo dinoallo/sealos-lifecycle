@@ -37,6 +37,8 @@ const (
 
 	DistributionTargetReasonReconcileSucceeded = "ReconcileSucceeded"
 	DistributionTargetReasonReconcileFailed    = "ReconcileFailed"
+	DistributionTargetReasonRolloutPaused      = "RolloutPaused"
+	DistributionTargetReasonRolloutRolledBack  = "RolloutRolledBack"
 )
 
 var GroupVersion = schema.GroupVersion{Group: distribution.GroupName, Version: distribution.Version}

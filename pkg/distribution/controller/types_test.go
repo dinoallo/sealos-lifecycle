@@ -138,3 +138,14 @@ func TestDistributionRolloutPolicySpecValidateRejectsNegativeBatch(t *testing.T)
 		t.Fatal("Validate() error = nil, want negative batch size error")
 	}
 }
+
+func TestDistributionRolloutPolicySpecValidateRejectsInvalidFailureAction(t *testing.T) {
+	t.Parallel()
+
+	err := (DistributionRolloutPolicySpec{
+		Strategy: reconcile.RolloutStrategy{FailureAction: "DeleteEverything"},
+	}).Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want invalid failure action error")
+	}
+}

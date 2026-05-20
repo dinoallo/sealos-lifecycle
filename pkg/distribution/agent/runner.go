@@ -175,6 +175,9 @@ func (r Runner) runOnce(ctx context.Context, opts Options) (*Result, error) {
 	}
 	applied, err := apply(applyOpts)
 	if err != nil {
+		if reconcile.IsRolloutPaused(err) || reconcile.IsRolloutRolledBack(err) {
+			return resultFromApply(opts.ClusterName, applied), err
+		}
 		return nil, markDegraded(opts.ClusterName, "ApplyFailed", err)
 	}
 	return resultFromApply(opts.ClusterName, applied), nil

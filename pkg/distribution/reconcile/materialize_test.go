@@ -164,6 +164,21 @@ func TestMaterializeReplacesCurrentBundle(t *testing.T) {
 	if got, want := loaded.Spec.DesiredStateDigest, second.DesiredStateDigest; got != want {
 		t.Fatalf("loaded.spec.desiredStateDigest = %q, want %q", got, want)
 	}
+
+	firstRevisionPath, err := RevisionBundlePath("cluster-a", first.DesiredStateDigest)
+	if err != nil {
+		t.Fatalf("RevisionBundlePath(first) error = %v", err)
+	}
+	if _, err := os.Stat(firstRevisionPath); err != nil {
+		t.Fatalf("Stat(first revision bundle) error = %v", err)
+	}
+	secondRevisionPath, err := RevisionBundlePath("cluster-a", second.DesiredStateDigest)
+	if err != nil {
+		t.Fatalf("RevisionBundlePath(second) error = %v", err)
+	}
+	if _, err := os.Stat(secondRevisionPath); err != nil {
+		t.Fatalf("Stat(second revision bundle) error = %v", err)
+	}
 }
 
 func TestMaterializeSnapshotsClusterInventoryTopology(t *testing.T) {

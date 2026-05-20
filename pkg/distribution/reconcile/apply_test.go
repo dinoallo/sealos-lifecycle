@@ -3,6 +3,7 @@ package reconcile
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1801,6 +1802,42 @@ func TestRolloutHostBatches(t *testing.T) {
 	if got, want := strings.Join(batches[0], ","), "host-a,host-b"; got != want {
 		t.Fatalf("default batch = %q, want %q", got, want)
 	}
+
+	executor.rollout = RolloutStrategy{BatchSize: 2, Canary: RolloutCanary{BatchSize: 3}}
+	batches = executor.rolloutHostBatches([]string{"host-a", "host-b", "host-c", "host-d", "host-e"})
+	if got, want := len(batches), 2; got != want {
+		t.Fatalf("canary len(batches) = %d, want %d", got, want)
+	}
+	if got, want := strings.Join(batches[0], ","), "host-a,host-b,host-c"; got != want {
+		t.Fatalf("canary batch 0 = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(batches[1], ","), "host-d,host-e"; got != want {
+		t.Fatalf("canary batch 1 = %q, want %q", got, want)
+	}
+}
+
+func TestRolloutPauseAfterCanary(t *testing.T) {
+	t.Parallel()
+
+	executor := &bundleExecutor{
+		rollout: RolloutStrategy{
+			BatchSize: 2,
+			Canary:    RolloutCanary{BatchSize: 1},
+			Pause:     RolloutPause{AfterCanary: true},
+		},
+		stderr: io.Discard,
+	}
+	var visited []string
+	err := executor.forEachHostBatch([]string{"host-a", "host-b", "host-c"}, func(batch []string) error {
+		visited = append(visited, batch...)
+		return nil
+	})
+	if !IsRolloutPaused(err) {
+		t.Fatalf("forEachHostBatch() error = %v, want rollout paused", err)
+	}
+	if got, want := strings.Join(visited, ","), "host-a"; got != want {
+		t.Fatalf("visited hosts = %q, want %q", got, want)
+	}
 }
 
 func TestApplyRolloutBatchSizeLogsHostWaves(t *testing.T) {
@@ -2124,6 +2161,80 @@ func TestApplyRolloutHealthGateRunsHealthAfterEachHostWave(t *testing.T) {
 	}
 }
 
+func TestApplyRolloutCanaryPauseStopsBeforeLaterHosts(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	fakeRemote := &fakeApplyRemoteExecutor{}
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"},
+			firstMaster: "10.0.0.10:22",
+		}, nil
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	bundleDir := filepath.Join(t.TempDir(), "bundle")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	bundle := rolloutRuntimeBundle("rollout-canary-pause-runtime", "rev-1", []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"}, []hydrate.RenderedStep{
+		{
+			Name:        "runtime-rootfs",
+			Kind:        hydrate.StepContent,
+			BundlePath:  "components/runtime/files/rootfs",
+			SourcePath:  "rootfs/",
+			ContentType: packageformat.ContentRootfs,
+		},
+		{
+			Name:           "configure",
+			Kind:           hydrate.StepHook,
+			BundlePath:     "components/runtime/files/hooks/configure.sh",
+			SourcePath:     "hooks/configure.sh",
+			HookPhase:      packageformat.PhaseConfigure,
+			Target:         packageformat.TargetAllNodes,
+			TimeoutSeconds: 5,
+		},
+	})
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	persistRenderedStateForBundle(t, "rollout-canary-pause-cluster", bundleDir, bundle)
+
+	stderr := bytes.NewBuffer(nil)
+	_, err := Apply(ApplyOptions{
+		ClusterName: "rollout-canary-pause-cluster",
+		BundlePath:  bundleDir,
+		Stderr:      stderr,
+		Rollout: RolloutStrategy{
+			BatchSize: 2,
+			Canary:    RolloutCanary{BatchSize: 1},
+			Pause:     RolloutPause{AfterCanary: true},
+		},
+	})
+	if !IsRolloutPaused(err) {
+		t.Fatalf("Apply() error = %v, want rollout paused", err)
+	}
+	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); strings.Contains(got, "configure.sh") {
+		t.Fatalf("non-canary host was configured before pause\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+	if !strings.Contains(stderr.String(), "running rollout batch 1/2 (canary)") {
+		t.Fatalf("canary batch log missing\nlog:\n%s", stderr.String())
+	}
+}
+
 func TestApplyRolloutBatchSizeDoesNotRepeatScopedHooks(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	constants.DefaultRuntimeRootDir = t.TempDir()
@@ -2220,6 +2331,117 @@ func TestApplyRolloutBatchSizeDoesNotRepeatScopedHooks(t *testing.T) {
 	}
 }
 
+func TestApplyRolloutFailureActionRollbackRestoresLastSuccessfulBundle(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	clusterName := "rollout-rollback-cluster"
+	tmpDir := t.TempDir()
+	hostRoot := filepath.Join(tmpDir, "host")
+	kubeconfigPath := filepath.Join(tmpDir, "admin.conf")
+	if err := os.WriteFile(kubeconfigPath, []byte("apiVersion: v1\nkind: Config\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(kubeconfig) error = %v", err)
+	}
+	writeExecutable(t, filepath.Join(tmpDir, "bin", "kubectl"), `#!/bin/sh
+if [ "$1" = "--kubeconfig" ]; then
+  shift 2
+fi
+case "$1" in
+  get)
+    if [ "$2" = "--raw=/readyz" ]; then
+      exit 0
+    fi
+    if [ "$2" = "nodes" ]; then
+      printf 'node-a'
+      exit 0
+    fi
+    ;;
+  taint|apply)
+    exit 0
+    ;;
+esac
+exit 0
+`)
+	writeExecutable(t, filepath.Join(tmpDir, "bin", "systemctl"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", filepath.Join(tmpDir, "bin")+":"+os.Getenv("PATH"))
+
+	previousBundleDir := filepath.Join(tmpDir, "previous-bundle")
+	previousBundle := localRuntimeBundle("rollback-runtime", "rev-1")
+	writeLocalRuntimeBundle(t, previousBundleDir, previousBundle, "previous\n", "#!/bin/sh\nexit 0\n")
+	previousDigest, err := hydrate.DigestBundle(previousBundleDir)
+	if err != nil {
+		t.Fatalf("DigestBundle(previous) error = %v", err)
+	}
+	previousRevisionPath, err := RevisionBundlePath(clusterName, previousDigest.String())
+	if err != nil {
+		t.Fatalf("RevisionBundlePath(previous) error = %v", err)
+	}
+	if err := copyDir(previousBundleDir, previousRevisionPath); err != nil {
+		t.Fatalf("copy previous revision bundle error = %v", err)
+	}
+	if err := mirrorBundle(previousRevisionPath, CurrentBundlePath(clusterName)); err != nil {
+		t.Fatalf("mirror previous bundle error = %v", err)
+	}
+	if _, err := state.PersistSuccessfulApply(
+		clusterName,
+		state.BOMReference{
+			Name:     previousBundle.Spec.BOMName,
+			Revision: previousBundle.Spec.Revision,
+			Channel:  previousBundle.Spec.Channel,
+			Digest:   "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		},
+		previousDigest.String(),
+		"",
+		"local-rev-1",
+	); err != nil {
+		t.Fatalf("PersistSuccessfulApply(previous) error = %v", err)
+	}
+
+	nextBundleDir := filepath.Join(tmpDir, "next-bundle")
+	nextBundle := localRuntimeBundle("rollback-runtime", "rev-2")
+	writeLocalRuntimeBundle(t, nextBundleDir, nextBundle, "next\n", "#!/bin/sh\nexit 1\n")
+	if err := mirrorBundle(nextBundleDir, CurrentBundlePath(clusterName)); err != nil {
+		t.Fatalf("mirror next bundle error = %v", err)
+	}
+	persistRenderedStateForBundle(t, clusterName, nextBundleDir, nextBundle)
+
+	result, err := Apply(ApplyOptions{
+		ClusterName:    clusterName,
+		BundlePath:     nextBundleDir,
+		KubeconfigPath: kubeconfigPath,
+		HostRoot:       hostRoot,
+		Rollout: RolloutStrategy{
+			FailureAction: RolloutFailureActionRollback,
+		},
+	})
+	if !IsRolloutRolledBack(err) {
+		t.Fatalf("Apply() error = %v, want rollback error", err)
+	}
+	if result == nil || result.AppliedRevision == nil {
+		t.Fatal("Apply() result/appliedRevision = nil, want rollback result")
+	}
+	if got, want := result.AppliedRevision.Spec.BOM.Revision, "rev-1"; got != want {
+		t.Fatalf("rolled back revision = %q, want %q", got, want)
+	}
+	content, err := os.ReadFile(filepath.Join(hostRoot, "etc", "demo", "version"))
+	if err != nil {
+		t.Fatalf("ReadFile(host version) error = %v", err)
+	}
+	if got, want := string(content), "previous\n"; got != want {
+		t.Fatalf("host version = %q, want %q", got, want)
+	}
+	loaded, err := state.LoadAppliedRevision(clusterName)
+	if err != nil {
+		t.Fatalf("LoadAppliedRevision() error = %v", err)
+	}
+	if got, want := loaded.Spec.DesiredStateDigest, previousDigest.String(); got != want {
+		t.Fatalf("loaded.spec.desiredStateDigest = %q, want %q", got, want)
+	}
+}
+
 func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, bundle *hydrate.Bundle) {
 	t.Helper()
 
@@ -2240,6 +2462,60 @@ func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, 
 		"local-rev-1",
 	); err != nil {
 		t.Fatalf("PersistRenderedState() error = %v", err)
+	}
+}
+
+func rolloutRuntimeBundle(name, revision string, hosts []string, steps []hydrate.RenderedStep) *hydrate.Bundle {
+	return &hydrate.Bundle{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindHydratedBundle,
+		Spec: hydrate.BundleSpec{
+			BOMName:  name,
+			Revision: revision,
+			Channel:  bom.ChannelAlpha,
+			ExecutionTopology: hydrate.ExecutionTopology{
+				AllNodes:    hosts,
+				FirstMaster: hosts[0],
+			},
+			Components: []hydrate.RenderedComponent{{
+				Name:        "runtime",
+				PackageName: "runtime-rootfs",
+				Version:     "v0.1.0",
+				Class:       packageformat.ClassRootfs,
+				RootPath:    "components/runtime/files",
+				Steps:       steps,
+			}},
+		},
+	}
+}
+
+func localRuntimeBundle(name, revision string) *hydrate.Bundle {
+	return rolloutRuntimeBundle(name, revision, []string{"localhost"}, []hydrate.RenderedStep{
+		{
+			Name:        "runtime-rootfs",
+			Kind:        hydrate.StepContent,
+			BundlePath:  "components/runtime/files/rootfs",
+			SourcePath:  "rootfs/",
+			ContentType: packageformat.ContentRootfs,
+		},
+		{
+			Name:           "configure",
+			Kind:           hydrate.StepHook,
+			BundlePath:     "components/runtime/files/hooks/configure.sh",
+			SourcePath:     "hooks/configure.sh",
+			HookPhase:      packageformat.PhaseConfigure,
+			Target:         packageformat.TargetAllNodes,
+			TimeoutSeconds: 5,
+		},
+	})
+}
+
+func writeLocalRuntimeBundle(t *testing.T, bundleDir string, bundle *hydrate.Bundle, versionContent, configureHook string) {
+	t.Helper()
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "etc", "demo", "version"), versionContent, 0o644)
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), configureHook)
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
 }
 

@@ -235,9 +235,30 @@ spec:
                       type: integer
                       minimum: 0
                       description: Maximum hosts processed per eligible host rollout batch; 0 means all hosts.
+                    canary:
+                      type: object
+                      description: First rollout batch settings used to limit initial blast radius.
+                      properties:
+                        batchSize:
+                          type: integer
+                          minimum: 0
+                          description: Hosts processed in the first canary batch before normal rollout batches; 0 disables canary.
+                    pause:
+                      type: object
+                      description: Rollout pause gates for manual operator approval.
+                      properties:
+                        afterCanary:
+                          type: boolean
+                          description: Pause after the canary batch completes instead of advancing to later rollout batches.
                     healthGate:
                       type: boolean
                       description: Run component healthcheck hooks after each eligible host rollout batch before advancing.
+                    failureAction:
+                      type: string
+                      enum:
+                        - Stop
+                        - Rollback
+                      description: Stop leaves the failed desired state recorded; Rollback re-applies the last successful rendered revision when apply fails.
             status:
               type: object
               properties:

@@ -128,7 +128,13 @@ func TestReconcilerUsesReferencedRolloutPolicy(t *testing.T) {
 			Namespace: "sealos-system",
 		},
 		Spec: DistributionRolloutPolicySpec{
-			Strategy: reconcile.RolloutStrategy{BatchSize: 2, HealthGate: true},
+			Strategy: reconcile.RolloutStrategy{
+				BatchSize:     2,
+				Canary:        reconcile.RolloutCanary{BatchSize: 1},
+				Pause:         reconcile.RolloutPause{AfterCanary: true},
+				HealthGate:    true,
+				FailureAction: reconcile.RolloutFailureActionRollback,
+			},
 		},
 	}
 	cl := fake.NewClientBuilder().
@@ -152,6 +158,15 @@ func TestReconcilerUsesReferencedRolloutPolicy(t *testing.T) {
 	}
 	if !runner.calls[0].ApplyOptions.Rollout.HealthGate {
 		t.Fatal("rollout health gate = false, want policy value true")
+	}
+	if got, want := runner.calls[0].ApplyOptions.Rollout.Canary.BatchSize, 1; got != want {
+		t.Fatalf("rollout canary batch size = %d, want policy value %d", got, want)
+	}
+	if !runner.calls[0].ApplyOptions.Rollout.Pause.AfterCanary {
+		t.Fatal("rollout pause after canary = false, want policy value true")
+	}
+	if got, want := runner.calls[0].ApplyOptions.Rollout.FailureAction, reconcile.RolloutFailureActionRollback; got != want {
+		t.Fatalf("rollout failure action = %q, want %q", got, want)
 	}
 }
 
@@ -239,6 +254,49 @@ func TestReconcilerUpdatesDegradedStatusOnRunnerError(t *testing.T) {
 	}
 	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonReconcileFailed)
 	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionTrue, DistributionTargetReasonReconcileFailed)
+}
+
+func TestReconcilerMarksPausedRolloutWithoutDegraded(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	target := &DistributionTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "platform",
+			Namespace:  "sealos-system",
+			Generation: 1,
+		},
+		Spec: DistributionTargetSpec{
+			ClusterName: "cluster-a",
+			BOMPath:     "bom.yaml",
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&DistributionTarget{}).
+		WithObjects(target).
+		Build()
+
+	result, err := (&Reconciler{
+		Client: cl,
+		Runner: &recordingRunner{err: reconcile.NewRolloutPausedError("rollout paused after canary batch")},
+	}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(target)})
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v, want nil paused result", err)
+	}
+	if !result.IsZero() {
+		t.Fatalf("result = %#v, want zero", result)
+	}
+
+	var updated DistributionTarget
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: target.Name, Namespace: target.Namespace}, &updated); err != nil {
+		t.Fatalf("Get(updated) error = %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonRolloutPaused)
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonRolloutPaused)
 }
 
 func TestReconcilerIgnoresMissingTarget(t *testing.T) {

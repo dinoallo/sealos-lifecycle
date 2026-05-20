@@ -112,10 +112,13 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-cha
 
 controller 要求 `spec.bomPath` 和 `spec.distributionChannelPath` 必须二选一，且不能同时设置。
 这两个路径都必须能在 controller pod 内读取。示例 `DistributionRolloutPolicy` 设置了
-`spec.strategy.batchSize: 1` 和 `spec.strategy.healthGate: true`，会让符合条件的
-host-targeted steps 一次滚动一个 host，并在进入下一批之前运行该 component 的
-`healthcheck` hooks。如果 target 没有设置 `spec.rolloutPolicyRef`，仍可使用旧的 inline
-`spec.rolloutBatchSize` fallback。
+`spec.strategy.batchSize: 1`、`spec.strategy.canary.batchSize: 1`、
+`spec.strategy.pause.afterCanary: true`、`spec.strategy.healthGate: true` 和
+`spec.strategy.failureAction: Rollback`。这会让符合条件的 host-targeted steps 一次滚动一个
+host，把第一批当作 canary，在进入后续批次前暂停，每批完成后运行该 component 的
+`healthcheck` hooks，并在 apply 失败时重新 apply 上一次成功的 rendered revision。
+如果 target 没有设置 `spec.rolloutPolicyRef`，仍可使用旧的 inline `spec.rolloutBatchSize`
+fallback。
 
 ## 检查状态
 
@@ -132,7 +135,8 @@ desired state digest 和 applied revision path。
 ## 当前边界
 
 这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
-rendered-bundle executor 使用的 host rollout batch size，以及可选的逐批 health gate。
-它还没有加入 registry-backed `DistributionChannel` lookup、带 health gate 的
-channel promotion、canary pause 或自动 rollback。controller 仍然委托给现有 BOM
-驱动的 render/apply agent 路径。
+rendered-bundle executor 使用的 host rollout batch size、第一批 canary size、可选的
+post-canary pause、可选的逐批 health gate，以及 stop-or-rollback failure action。这些设置只作用于符合条件的
+all-node runtime-rootfs host batches。它还没有加入 registry-backed `DistributionChannel`
+lookup、带 health gate 的 channel promotion，也不是覆盖所有 multi-node workflow 的
+package 级安全模型。controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。

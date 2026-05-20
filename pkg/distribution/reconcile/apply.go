@@ -58,13 +58,81 @@ type ApplyResult struct {
 }
 
 type RolloutStrategy struct {
-	BatchSize  int  `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
-	HealthGate bool `json:"healthGate,omitempty" yaml:"healthGate,omitempty"`
+	BatchSize     int                  `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
+	Canary        RolloutCanary        `json:"canary,omitempty" yaml:"canary,omitempty"`
+	Pause         RolloutPause         `json:"pause,omitempty" yaml:"pause,omitempty"`
+	HealthGate    bool                 `json:"healthGate,omitempty" yaml:"healthGate,omitempty"`
+	FailureAction RolloutFailureAction `json:"failureAction,omitempty" yaml:"failureAction,omitempty"`
+}
+
+type RolloutCanary struct {
+	BatchSize int `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
+}
+
+type RolloutPause struct {
+	AfterCanary bool `json:"afterCanary,omitempty" yaml:"afterCanary,omitempty"`
+}
+
+type RolloutFailureAction string
+
+const (
+	RolloutFailureActionStop     RolloutFailureAction = "Stop"
+	RolloutFailureActionRollback RolloutFailureAction = "Rollback"
+)
+
+type rolloutPausedError struct {
+	message string
+}
+
+type rolloutRollbackError struct {
+	cause error
+}
+
+func (e rolloutPausedError) Error() string {
+	return e.message
+}
+
+func (e rolloutPausedError) Is(target error) bool {
+	_, ok := target.(rolloutPausedError)
+	return ok
+}
+
+func (e rolloutRollbackError) Error() string {
+	return fmt.Sprintf("rollout failed and rolled back to last successful revision: %v", e.cause)
+}
+
+func (e rolloutRollbackError) Unwrap() error {
+	return e.cause
+}
+
+func (e rolloutRollbackError) Is(target error) bool {
+	_, ok := target.(rolloutRollbackError)
+	return ok
+}
+
+func IsRolloutPaused(err error) bool {
+	return errors.Is(err, rolloutPausedError{})
+}
+
+func NewRolloutPausedError(message string) error {
+	return rolloutPausedError{message: message}
+}
+
+func IsRolloutRolledBack(err error) bool {
+	return errors.Is(err, rolloutRollbackError{})
 }
 
 func (s RolloutStrategy) Validate() error {
 	if s.BatchSize < 0 {
 		return fmt.Errorf("rollout.batchSize cannot be negative")
+	}
+	if s.Canary.BatchSize < 0 {
+		return fmt.Errorf("rollout.canary.batchSize cannot be negative")
+	}
+	switch s.FailureAction {
+	case "", RolloutFailureActionStop, RolloutFailureActionRollback:
+	default:
+		return fmt.Errorf("rollout.failureAction must be %q, %q, or empty", RolloutFailureActionStop, RolloutFailureActionRollback)
 	}
 	return nil
 }
@@ -153,6 +221,25 @@ func Apply(opts ApplyOptions) (*ApplyResult, error) {
 	}
 
 	if err := executor.applyBundle(bundle); err != nil {
+		if opts.Rollout.FailureAction == RolloutFailureActionRollback && !errors.Is(err, rolloutPausedError{}) {
+			if rollbackErr := executor.rollbackToLastSuccessfulRevision(); rollbackErr != nil {
+				return nil, errors.Join(err, rollbackErr)
+			}
+			appliedRevision, stateErr := state.LoadAppliedRevision(opts.ClusterName)
+			if stateErr != nil {
+				return nil, errors.Join(rolloutRollbackError{cause: err}, stateErr)
+			}
+			rollbackBundle, bundleErr := LoadBundle(CurrentBundlePath(opts.ClusterName))
+			if bundleErr != nil {
+				return nil, errors.Join(rolloutRollbackError{cause: err}, bundleErr)
+			}
+			return &ApplyResult{
+				Bundle:             rollbackBundle,
+				BundlePath:         CurrentBundlePath(opts.ClusterName),
+				DesiredStateDigest: appliedRevision.Spec.DesiredStateDigest,
+				AppliedRevision:    appliedRevision,
+			}, rolloutRollbackError{cause: err}
+		}
 		return nil, err
 	}
 
@@ -249,6 +336,59 @@ func (e *bundleExecutor) applyBundle(bundle *hydrate.Bundle) error {
 		if err := e.applyComponent(bundle, component); err != nil {
 			return fmt.Errorf("apply component %q: %w", component.Name, err)
 		}
+	}
+	return nil
+}
+
+func (e *bundleExecutor) rollbackToLastSuccessfulRevision() error {
+	applied, err := state.LoadAppliedRevision(e.clusterName)
+	if err != nil {
+		return fmt.Errorf("load applied revision for rollback: %w", err)
+	}
+	if applied.Status.LastSuccessfulRevision == nil {
+		return fmt.Errorf("rollback requested but no last successful revision is recorded")
+	}
+
+	lastSuccessful := applied.Status.LastSuccessfulRevision
+	rollbackBundlePath, err := RevisionBundlePath(e.clusterName, lastSuccessful.DesiredStateDigest)
+	if err != nil {
+		return err
+	}
+	rollbackBundle, err := LoadBundle(rollbackBundlePath)
+	if err != nil {
+		return fmt.Errorf("load rollback bundle %q: %w", rollbackBundlePath, err)
+	}
+
+	e.logf("rolling back to last successful revision %q (%s)", lastSuccessful.BOM.Revision, lastSuccessful.DesiredStateDigest)
+	rollbackExecutor := *e
+	rollbackExecutor.bundle = rollbackBundle
+	rollbackExecutor.bundlePath = rollbackBundlePath
+	rollbackExecutor.desiredStateDigest = lastSuccessful.DesiredStateDigest
+	rollbackExecutor.stagedBundleRoots = make(map[string]string)
+	rollbackExecutor.localResourcesApplied = false
+	rollbackExecutor.untaintAttempted = false
+	rollbackExecutor.rollout = RolloutStrategy{
+		BatchSize:  e.rollout.BatchSize,
+		HealthGate: e.rollout.HealthGate,
+	}
+	if err := rollbackExecutor.applyBundle(rollbackBundle); err != nil {
+		return fmt.Errorf("rollback to last successful revision failed: %w", err)
+	}
+
+	restored := *applied
+	restored.Spec.BOM = lastSuccessful.BOM
+	restored.Spec.LocalRepoRevision = lastSuccessful.LocalRepoRevision
+	restored.Spec.LocalPatchRevision = lastSuccessful.LocalPatchRevision
+	restored.Spec.DesiredStateDigest = lastSuccessful.DesiredStateDigest
+	restored.Status.State = state.StateDirty
+	if err := mirrorBundle(rollbackBundlePath, CurrentBundlePath(e.clusterName)); err != nil {
+		return fmt.Errorf("restore current bundle after rollback: %w", err)
+	}
+	if err := state.SaveAppliedRevision(&restored); err != nil {
+		return fmt.Errorf("record rollback target: %w", err)
+	}
+	if _, err := state.MarkSuccessfulApply(e.clusterName); err != nil {
+		return fmt.Errorf("mark rollback apply successful: %w", err)
 	}
 	return nil
 }
@@ -1425,12 +1565,16 @@ func (e *bundleExecutor) forEachHostBatch(hosts []string, fn func([]string) erro
 		return fmt.Errorf("host batch function cannot be nil")
 	}
 	batches := e.rolloutHostBatches(hosts)
+	canaryBatchCount := e.rolloutCanaryBatchCount(len(hosts))
 	for i, batch := range batches {
 		if len(batches) > 1 {
-			e.logf("running rollout batch %d/%d on hosts: %s", i+1, len(batches), strings.Join(batch, ","))
+			e.logf("running rollout batch %d/%d%s on hosts: %s", i+1, len(batches), rolloutBatchLabel(i, canaryBatchCount), strings.Join(batch, ","))
 		}
 		if err := fn(batch); err != nil {
 			return err
+		}
+		if e.rollout.Pause.AfterCanary && canaryBatchCount > 0 && i+1 == canaryBatchCount && i+1 < len(batches) {
+			return rolloutPausedError{message: "rollout paused after canary batch"}
 		}
 	}
 	return nil
@@ -1438,7 +1582,22 @@ func (e *bundleExecutor) forEachHostBatch(hosts []string, fn func([]string) erro
 
 func (e *bundleExecutor) rolloutHostBatches(hosts []string) [][]string {
 	batchSize := e.rollout.BatchSize
+	canarySize := e.rollout.Canary.BatchSize
+	if canarySize > 0 && canarySize < len(hosts) {
+		batches := [][]string{slices.Clone(hosts[:canarySize])}
+		for _, batch := range splitRolloutHosts(hosts[canarySize:], batchSize) {
+			batches = append(batches, batch)
+		}
+		return batches
+	}
+	return splitRolloutHosts(hosts, batchSize)
+}
+
+func splitRolloutHosts(hosts []string, batchSize int) [][]string {
 	if batchSize <= 0 || batchSize >= len(hosts) {
+		if len(hosts) == 0 {
+			return nil
+		}
 		return [][]string{slices.Clone(hosts)}
 	}
 	var batches [][]string
@@ -1450,6 +1609,23 @@ func (e *bundleExecutor) rolloutHostBatches(hosts []string) [][]string {
 		batches = append(batches, slices.Clone(hosts[start:end]))
 	}
 	return batches
+}
+
+func (e *bundleExecutor) rolloutCanaryBatchCount(hostCount int) int {
+	if e.rollout.Canary.BatchSize <= 0 || e.rollout.Canary.BatchSize >= hostCount {
+		return 0
+	}
+	return 1
+}
+
+func rolloutBatchLabel(index, canaryBatchCount int) string {
+	if index < 0 {
+		return ""
+	}
+	if index < canaryBatchCount {
+		return " (canary)"
+	}
+	return ""
 }
 
 func (e *bundleExecutor) hookEnvironment(host, componentRoot, bundleRoot string) []string {
