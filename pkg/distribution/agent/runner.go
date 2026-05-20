@@ -114,10 +114,16 @@ func (r Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		result, err := r.runOnce(ctx, opts)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return result, ctxErr
+				if result != nil {
+					return result, ctxErr
+				}
+				return last, ctxErr
 			}
 			if isContextError(err) {
-				return result, err
+				if result != nil {
+					return result, err
+				}
+				return last, err
 			}
 			if result != nil {
 				last = result

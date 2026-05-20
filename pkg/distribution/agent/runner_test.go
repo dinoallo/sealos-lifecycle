@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -308,6 +309,60 @@ func TestRunnerLoopRetriesAfterApplyFailure(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "temporary apply failure") {
 		t.Fatalf("retry log = %q, want temporary failure", log.String())
+	}
+}
+
+func TestRunnerLoopReturnsLastResultWhenNextPassSeesCancellation(t *testing.T) {
+	withRuntimeRoot(t)
+	root := t.TempDir()
+	packageRoot := writeAgentPackage(t, root)
+	doc := agentBOM()
+	bomPath := filepath.Join(root, "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	runner := Runner{
+		Materialize: func(*bom.BOM, reconcile.Options) (*reconcile.Result, error) {
+			attempts++
+			return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
+		},
+		Apply: func(opts reconcile.ApplyOptions) (*reconcile.ApplyResult, error) {
+			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
+				Name:     doc.Metadata.Name,
+				Revision: doc.Spec.Revision,
+				Channel:  doc.Spec.Channel,
+			}, "sha256:1616161616161616161616161616161616161616161616161616161616161616", "", "")
+			if err != nil {
+				return nil, err
+			}
+			return &reconcile.ApplyResult{
+				BundlePath:         opts.BundlePath,
+				DesiredStateDigest: applied.Spec.DesiredStateDigest,
+				AppliedRevision:    applied,
+			}, nil
+		},
+		Sleep: func(context.Context, time.Duration) error {
+			cancel()
+			return nil
+		},
+	}
+
+	result, err := runner.Run(ctx, Options{
+		ClusterName:    "agent-cancel-after-success",
+		Target:         TargetOptions{BOMPath: bomPath},
+		PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
+		Interval:       time.Second,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if got, want := attempts, 1; got != want {
+		t.Fatalf("attempts = %d, want %d", got, want)
+	}
+	if result == nil || result.Revision != doc.Spec.Revision {
+		t.Fatalf("result = %#v, want last successful result", result)
 	}
 }
 
