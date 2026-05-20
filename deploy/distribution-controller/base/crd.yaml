@@ -235,6 +235,9 @@ spec:
                       type: integer
                       minimum: 0
                       description: Maximum hosts processed per eligible host rollout batch; 0 means all hosts.
+                    healthGate:
+                      type: boolean
+                      description: Run component healthcheck hooks after each eligible host rollout batch before advancing.
             status:
               type: object
               properties:

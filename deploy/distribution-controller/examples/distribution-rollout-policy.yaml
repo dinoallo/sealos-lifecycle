@@ -19,3 +19,4 @@ metadata:
 spec:
   strategy:
     batchSize: 1
+    healthGate: true

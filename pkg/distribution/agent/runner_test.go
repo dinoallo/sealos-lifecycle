@@ -376,13 +376,13 @@ func TestRunnerForwardsRolloutStrategy(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 
-	var gotBatchSize int
+	var gotRollout reconcile.RolloutStrategy
 	runner := Runner{
 		Materialize: func(*bom.BOM, reconcile.Options) (*reconcile.Result, error) {
 			return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
 		},
 		Apply: func(opts reconcile.ApplyOptions) (*reconcile.ApplyResult, error) {
-			gotBatchSize = opts.Rollout.BatchSize
+			gotRollout = opts.Rollout
 			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
 				Name:     doc.Metadata.Name,
 				Revision: doc.Spec.Revision,
@@ -404,15 +404,18 @@ func TestRunnerForwardsRolloutStrategy(t *testing.T) {
 		Target:         TargetOptions{BOMPath: bomPath},
 		PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
 		ApplyOptions: reconcile.ApplyOptions{
-			Rollout: reconcile.RolloutStrategy{BatchSize: 2},
+			Rollout: reconcile.RolloutStrategy{BatchSize: 2, HealthGate: true},
 		},
 		Once: true,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got, want := gotBatchSize, 2; got != want {
+	if got, want := gotRollout.BatchSize, 2; got != want {
 		t.Fatalf("rollout batch size = %d, want %d", got, want)
+	}
+	if !gotRollout.HealthGate {
+		t.Fatal("rollout health gate = false, want true")
 	}
 }
 

@@ -128,7 +128,7 @@ func TestReconcilerUsesReferencedRolloutPolicy(t *testing.T) {
 			Namespace: "sealos-system",
 		},
 		Spec: DistributionRolloutPolicySpec{
-			Strategy: reconcile.RolloutStrategy{BatchSize: 2},
+			Strategy: reconcile.RolloutStrategy{BatchSize: 2, HealthGate: true},
 		},
 	}
 	cl := fake.NewClientBuilder().
@@ -149,6 +149,9 @@ func TestReconcilerUsesReferencedRolloutPolicy(t *testing.T) {
 	}
 	if got, want := runner.calls[0].ApplyOptions.Rollout.BatchSize, 2; got != want {
 		t.Fatalf("rollout batch size = %d, want policy value %d", got, want)
+	}
+	if !runner.calls[0].ApplyOptions.Rollout.HealthGate {
+		t.Fatal("rollout health gate = false, want policy value true")
 	}
 }
 

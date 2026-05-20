@@ -83,6 +83,7 @@ func newRootCmd() *cobra.Command {
 		kubeconfigPath          string
 		hostRoot                string
 		rolloutBatchSize        int
+		rolloutHealthGate       bool
 		interval                time.Duration
 		once                    bool
 		output                  string
@@ -145,7 +146,8 @@ func newRootCmd() *cobra.Command {
 					HostRoot:       flags.hostRoot,
 					Stderr:         cmd.ErrOrStderr(),
 					Rollout: reconcile.RolloutStrategy{
-						BatchSize: flags.rolloutBatchSize,
+						BatchSize:  flags.rolloutBatchSize,
+						HealthGate: flags.rolloutHealthGate,
 					},
 				},
 				Interval: flags.interval,
@@ -172,6 +174,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for Kubernetes apply steps")
 	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for host apply steps")
 	cmd.Flags().IntVar(&flags.rolloutBatchSize, "rollout-batch-size", 0, "maximum hosts to process per rollout batch for host-targeted steps; 0 means all hosts")
+	cmd.Flags().BoolVar(&flags.rolloutHealthGate, "rollout-health-gate", false, "run component healthcheck hooks after each eligible host rollout batch before advancing")
 	cmd.Flags().DurationVar(&flags.interval, "interval", time.Minute, "reconcile interval when running continuously")
 	cmd.Flags().BoolVar(&flags.once, "once", false, "run one reconcile pass and exit")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or json")

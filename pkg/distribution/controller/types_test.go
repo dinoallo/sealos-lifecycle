@@ -69,6 +69,9 @@ func TestDistributionTargetSpecAgentOptions(t *testing.T) {
 	if got, want := opts.ApplyOptions.Rollout.BatchSize, 2; got != want {
 		t.Fatalf("Rollout.BatchSize = %d, want %d", got, want)
 	}
+	if opts.ApplyOptions.Rollout.HealthGate {
+		t.Fatal("Rollout.HealthGate = true, want false for inline fallback")
+	}
 	if !opts.Once {
 		t.Fatal("Once = false, want true")
 	}

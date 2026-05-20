@@ -171,6 +171,9 @@ func TestDistributionRolloutPolicyCRDMatchesControllerContract(t *testing.T) {
 	if _, ok := strategy.Properties["batchSize"]; !ok {
 		t.Fatal("CRD rollout policy strategy schema missing batchSize")
 	}
+	if _, ok := strategy.Properties["healthGate"]; !ok {
+		t.Fatal("CRD rollout policy strategy schema missing healthGate")
+	}
 }
 
 func TestDistributionControllerDeploymentContract(t *testing.T) {

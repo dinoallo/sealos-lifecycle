@@ -2007,6 +2007,123 @@ func TestApplyRolloutBatchSizeCompletesHostWaveBeforeNext(t *testing.T) {
 	}
 }
 
+func TestApplyRolloutHealthGateRunsHealthAfterEachHostWave(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousLoadTopology := loadApplyExecutionTopology
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		loadApplyExecutionTopology = previousLoadTopology
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+
+	fakeRemote := &fakeApplyRemoteExecutor{}
+	loadApplyExecutionTopology = func(clusterName string) (*clusterExecutionTopology, error) {
+		return &clusterExecutionTopology{
+			clusterName: clusterName,
+			allNodes:    []string{"10.0.0.10:22", "10.0.0.11:22"},
+			firstMaster: "10.0.0.10:22",
+		}, nil
+	}
+	newApplyRemoteExecutor = func(topology *clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+
+	bundleDir := filepath.Join(t.TempDir(), "bundle")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	bundle := &hydrate.Bundle{
+		APIVersion: distribution.APIVersion,
+		Kind:       distribution.KindHydratedBundle,
+		Spec: hydrate.BundleSpec{
+			BOMName:  "rollout-health-gate-runtime",
+			Revision: "rev-1",
+			Channel:  bom.ChannelAlpha,
+			ExecutionTopology: hydrate.ExecutionTopology{
+				AllNodes:    []string{"10.0.0.10:22", "10.0.0.11:22"},
+				FirstMaster: "10.0.0.10:22",
+			},
+			Components: []hydrate.RenderedComponent{{
+				Name:        "runtime",
+				PackageName: "runtime-rootfs",
+				Version:     "v0.1.0",
+				Class:       packageformat.ClassRootfs,
+				RootPath:    "components/runtime/files",
+				Steps: []hydrate.RenderedStep{
+					{
+						Name:        "runtime-rootfs",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/runtime/files/rootfs",
+						SourcePath:  "rootfs/",
+						ContentType: packageformat.ContentRootfs,
+					},
+					{
+						Name:           "configure",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/runtime/files/hooks/configure.sh",
+						SourcePath:     "hooks/configure.sh",
+						HookPhase:      packageformat.PhaseConfigure,
+						Target:         packageformat.TargetAllNodes,
+						TimeoutSeconds: 5,
+					},
+					{
+						Name:           "healthcheck",
+						Kind:           hydrate.StepHook,
+						BundlePath:     "components/runtime/files/hooks/healthcheck.sh",
+						SourcePath:     "hooks/healthcheck.sh",
+						HookPhase:      packageformat.PhaseHealth,
+						Target:         packageformat.TargetAllNodes,
+						TimeoutSeconds: 5,
+					},
+				},
+			}},
+		},
+	}
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	persistRenderedStateForBundle(t, "rollout-health-gate-cluster", bundleDir, bundle)
+
+	if _, err := Apply(ApplyOptions{
+		ClusterName: "rollout-health-gate-cluster",
+		BundlePath:  bundleDir,
+		Rollout: RolloutStrategy{
+			BatchSize:  1,
+			HealthGate: true,
+		},
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	firstConfigure := -1
+	firstHealth := -1
+	secondConfigure := -1
+	secondHealth := -1
+	for i, op := range fakeRemote.cmdOps {
+		switch {
+		case op.host == "10.0.0.10:22" && strings.Contains(op.cmd, "configure.sh") && firstConfigure < 0:
+			firstConfigure = i
+		case op.host == "10.0.0.10:22" && strings.Contains(op.cmd, "healthcheck.sh") && firstHealth < 0:
+			firstHealth = i
+		case op.host == "10.0.0.11:22" && strings.Contains(op.cmd, "configure.sh") && secondConfigure < 0:
+			secondConfigure = i
+		case op.host == "10.0.0.11:22" && strings.Contains(op.cmd, "healthcheck.sh") && secondHealth < 0:
+			secondHealth = i
+		}
+	}
+	if firstConfigure < 0 || firstHealth < 0 || secondConfigure < 0 || secondHealth < 0 {
+		t.Fatalf("missing expected health-gated rollout hooks\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+	if !(firstConfigure < firstHealth && firstHealth < secondConfigure && secondConfigure < secondHealth) {
+		t.Fatalf("health-gated rollout order is wrong\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+	}
+}
+
 func TestApplyRolloutBatchSizeDoesNotRepeatScopedHooks(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	constants.DefaultRuntimeRootDir = t.TempDir()

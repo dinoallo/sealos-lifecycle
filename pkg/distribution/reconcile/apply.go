@@ -58,7 +58,8 @@ type ApplyResult struct {
 }
 
 type RolloutStrategy struct {
-	BatchSize int `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
+	BatchSize  int  `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
+	HealthGate bool `json:"healthGate,omitempty" yaml:"healthGate,omitempty"`
 }
 
 func (s RolloutStrategy) Validate() error {
@@ -659,6 +660,17 @@ func (e *bundleExecutor) applyRuntimeRootfsComponent(component hydrate.RenderedC
 			return err
 		}
 		return e.runHooks(component, hooks.healthcheck)
+	}
+	if e.rollout.HealthGate {
+		if len(provisioningHosts) == 0 {
+			return e.runHooks(component, hooks.healthcheck)
+		}
+		return e.forEachHostBatch(provisioningHosts, func(batch []string) error {
+			if err := e.applyRuntimeRootfsHostBatch(component, files, hooks, batch); err != nil {
+				return err
+			}
+			return e.runHooksForHosts(component, hooks.healthcheck, batch)
+		})
 	}
 	if err := e.forEachHostBatch(provisioningHosts, func(batch []string) error {
 		return e.applyRuntimeRootfsHostBatch(component, files, hooks, batch)
