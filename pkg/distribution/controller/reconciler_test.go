@@ -1,0 +1,187 @@
+// Copyright 2026 sealos.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package controller
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/labring/sealos/pkg/distribution/agent"
+)
+
+func TestReconcilerUpdatesReadyStatus(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	target := &DistributionTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "platform",
+			Namespace:  "sealos-system",
+			Generation: 3,
+		},
+		Spec: DistributionTargetSpec{
+			ClusterName:      "cluster-a",
+			BOMPath:          "bom.yaml",
+			RequeueAfter:     &metav1.Duration{Duration: 5 * time.Second},
+			RolloutBatchSize: 2,
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&DistributionTarget{}).
+		WithObjects(target).
+		Build()
+	runner := &recordingRunner{
+		result: &agent.Result{
+			ClusterName:        "cluster-a",
+			BOMName:            "default-platform",
+			Revision:           "rev-1",
+			Channel:            "beta",
+			BundlePath:         "/var/lib/sealos/data/default/run/default/distribution/current",
+			DesiredStateDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			AppliedRevision:    "/var/lib/sealos/data/default/run/default/distribution/applied-revision.yaml",
+		},
+	}
+
+	result, err := (&Reconciler{
+		Client: cl,
+		Runner: runner,
+	}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(target)})
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if got, want := result.RequeueAfter, 5*time.Second; got != want {
+		t.Fatalf("RequeueAfter = %s, want %s", got, want)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("runner calls = %d, want 1", len(runner.calls))
+	}
+	if got, want := runner.calls[0].ApplyOptions.Rollout.BatchSize, 2; got != want {
+		t.Fatalf("rollout batch size = %d, want %d", got, want)
+	}
+
+	var updated DistributionTarget
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: target.Name, Namespace: target.Namespace}, &updated); err != nil {
+		t.Fatalf("Get(updated) error = %v", err)
+	}
+	if got, want := updated.Status.ObservedGeneration, int64(3); got != want {
+		t.Fatalf("ObservedGeneration = %d, want %d", got, want)
+	}
+	if updated.Status.LastResult == nil {
+		t.Fatal("LastResult = nil, want value")
+	}
+	if got, want := updated.Status.LastResult.Revision, "rev-1"; got != want {
+		t.Fatalf("LastResult.Revision = %q, want %q", got, want)
+	}
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionTrue, DistributionTargetReasonReconcileSucceeded)
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonReconcileSucceeded)
+}
+
+func TestReconcilerUpdatesDegradedStatusOnRunnerError(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	target := &DistributionTarget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "platform",
+			Namespace:  "sealos-system",
+			Generation: 1,
+		},
+		Spec: DistributionTargetSpec{
+			ClusterName: "cluster-a",
+			BOMPath:     "bom.yaml",
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&DistributionTarget{}).
+		WithObjects(target).
+		Build()
+	wantErr := errors.New("apply failed")
+
+	_, err := (&Reconciler{
+		Client: cl,
+		Runner: &recordingRunner{err: wantErr},
+	}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(target)})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Reconcile() error = %v, want %v", err, wantErr)
+	}
+
+	var updated DistributionTarget
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: target.Name, Namespace: target.Namespace}, &updated); err != nil {
+		t.Fatalf("Get(updated) error = %v", err)
+	}
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonReconcileFailed)
+	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionTrue, DistributionTargetReasonReconcileFailed)
+}
+
+func TestReconcilerIgnoresMissingTarget(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	result, err := (&Reconciler{Client: cl}).Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "missing", Namespace: "sealos-system"},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if !result.IsZero() {
+		t.Fatalf("result = %#v, want zero", result)
+	}
+}
+
+type recordingRunner struct {
+	calls  []agent.Options
+	result *agent.Result
+	err    error
+}
+
+func (r *recordingRunner) Run(_ context.Context, opts agent.Options) (*agent.Result, error) {
+	r.calls = append(r.calls, opts)
+	return r.result, r.err
+}
+
+func assertCondition(t *testing.T, conditions []metav1.Condition, conditionType string, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+	for _, condition := range conditions {
+		if condition.Type != conditionType {
+			continue
+		}
+		if condition.Status != status || condition.Reason != reason {
+			t.Fatalf("condition %q = (%s, %s), want (%s, %s)", conditionType, condition.Status, condition.Reason, status, reason)
+		}
+		return
+	}
+	t.Fatalf("condition %q not found in %#v", conditionType, conditions)
+}
