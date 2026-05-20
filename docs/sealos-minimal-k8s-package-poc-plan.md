@@ -305,6 +305,21 @@ The smoke script validates the report with `check-report.sh` before returning
 success, using `safe`, `apply`, or `revert` mode according to the selected
 mutation flags.
 
+When a mutating apply or revert acceptance run is being used as release
+evidence, convert the report into a local promotion proof with:
+
+```bash
+sealos sync health-proof \
+  --file scripts/poc/minimal-single-node/bom.yaml \
+  --acceptance-report "${WORKDIR}/acceptance-report.yaml" \
+  --output-file proofs/minimal-single-node-health.yaml
+```
+
+The generated `DistributionHealthProof` is conservative: safe smoke reports
+without mutating apply evidence, failed stages, blocked preflight, or missing
+clean post-apply state produce `spec.passed: false` and should not satisfy
+beta/stable promotion policy.
+
 Host mutation is deliberately opt-in:
 
 ```bash

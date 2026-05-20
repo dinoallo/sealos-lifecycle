@@ -355,6 +355,28 @@ sealos sync promote \
 这会阻止未经验证的 `alpha` 候选直接跳到 `stable`，也会把 beta/stable
 promotion 缺失 proof 视为 policy failure，而不是默认批准。
 
+### 从 acceptance report 生成 proof
+
+对于 package lifecycle automation，`sealos sync health-proof` 可以把最小
+single-node smoke 流程产出的 `PackageAcceptanceReport` 转成 promotion 可用的
+`DistributionHealthProof`：
+
+```bash
+sealos sync health-proof \
+  --file boms/default-platform/rev-008.yaml \
+  --acceptance-report workdir/acceptance-report.yaml \
+  --output-file proofs/default-platform-rev-008-health.yaml \
+  --summary "beta cohort passed apply and drift recovery validation"
+```
+
+生成出来的 proof 会使用 `--file` 指向的 BOM 里的 line 和 revision。它是保守
+判定：只有 report 本身通过且 exit code 为 `0`、source/runtime preflight
+没有 blocking、确实跑过 mutating apply、post-apply state 是 `Clean`、
+`revertCheck: true` 时 post-revert state 也是 `Clean`，并且没有失败 stage，
+proof 才会是 `spec.passed: true`。只跑 safe smoke、没有 mutating apply 的
+report 仍然可以生成 evidence，但会得到 `spec.passed: false`，不应该满足
+beta/stable promotion policy。
+
 最小 health proof 形态如下：
 
 ```yaml

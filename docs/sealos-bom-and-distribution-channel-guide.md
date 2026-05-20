@@ -370,6 +370,28 @@ This blocks an unvalidated `alpha` candidate from skipping directly to
 `stable`, and it treats missing proof for `beta` or `stable` as a policy
 failure rather than an implicit approval.
 
+### Generate Proof From Acceptance Reports
+
+For package lifecycle automation, `sealos sync health-proof` can turn the
+`PackageAcceptanceReport` emitted by the minimal single-node smoke flow into a
+promotion-ready `DistributionHealthProof`:
+
+```bash
+sealos sync health-proof \
+  --file boms/default-platform/rev-008.yaml \
+  --acceptance-report workdir/acceptance-report.yaml \
+  --output-file proofs/default-platform-rev-008-health.yaml \
+  --summary "beta cohort passed apply and drift recovery validation"
+```
+
+The generated proof targets the line and revision from the BOM passed with
+`--file`. It is conservative: the proof passes only when the report passed with
+exit code `0`, source and runtime preflight were non-blocking, mutating apply
+was exercised, post-apply state is `Clean`, post-revert state is `Clean` when
+`revertCheck: true`, and no recorded stage failed. Safe smoke reports that do
+not run a mutating apply still generate useful evidence, but they produce
+`spec.passed: false` and should not satisfy beta/stable promotion policy.
+
 A minimal health proof looks like:
 
 ```yaml
