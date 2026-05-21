@@ -1,13 +1,15 @@
 #!/bin/bash
 
-IMAGE=localhost:5000/${OWNER}/lvscare:$GIT_COMMIT_SHORT_SHA-$ARCH
-PATCH=ghcr.io/${OWNER}/sealos-patch:$GIT_COMMIT_SHORT_SHA-$ARCH
+set -euo pipefail
+
+: "${OWNER:?OWNER is required}"
+: "${GIT_COMMIT_SHORT_SHA:?GIT_COMMIT_SHORT_SHA is required}"
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PATCH_DIR=${SCRIPT_DIR}
-SEALOS=sudo sealos
 SEALOS_VERSION=4.1.7
 
-if [ -z "${ARCH}" ]; then
+if [ -z "${ARCH:-}" ]; then
   ARCH=$(uname -m)
 fi
 
@@ -26,14 +28,31 @@ case "${ARCH}" in
     ;;
 esac
 
+IMAGE=localhost:5000/${OWNER}/lvscare:$GIT_COMMIT_SHORT_SHA-$ARCH
+PATCH=ghcr.io/${OWNER}/sealos-patch:$GIT_COMMIT_SHORT_SHA-$ARCH
+SEALOS_RELEASE_URL=https://github.com/labring/sealos/releases/download/v${SEALOS_VERSION}
+SEALOS_ARCHIVE=sealos_${SEALOS_VERSION}_linux_${SEALOS_ARCH}.tar.gz
+SEALOS_CHECKSUM_FILE=sealos_checksums.txt
+
 # download sealos
-wget https://github.com/labring/sealos/releases/download/v${SEALOS_VERSION}/sealos_${SEALOS_VERSION}_linux_${SEALOS_ARCH}.tar.gz
-tar -zxf sealos_${SEALOS_VERSION}_linux_${SEALOS_ARCH}.tar.gz sealos
+wget -O "${SEALOS_ARCHIVE}" "${SEALOS_RELEASE_URL}/${SEALOS_ARCHIVE}"
+wget -O "${SEALOS_CHECKSUM_FILE}" "${SEALOS_RELEASE_URL}/${SEALOS_CHECKSUM_FILE}"
+expected_checksum=$(awk -v name="${SEALOS_ARCHIVE}" '$2 == name {print $1}' "${SEALOS_CHECKSUM_FILE}")
+if [ -z "${expected_checksum}" ]; then
+  echo "Checksum for ${SEALOS_ARCHIVE} not found in ${SEALOS_CHECKSUM_FILE}" >&2
+  exit 1
+fi
+actual_checksum=$(sha256sum "${SEALOS_ARCHIVE}" | awk '{print $1}')
+if [ "${actual_checksum}" != "${expected_checksum}" ]; then
+  echo "Checksum verification failed for ${SEALOS_ARCHIVE}" >&2
+  exit 1
+fi
+tar -zxf "${SEALOS_ARCHIVE}" sealos
 chmod +x sealos && sudo mv sealos /usr/bin/sealos
 
 # resolve buildah conflicts
-sudo apt remove buildah
-sudo apt autoremove
+sudo apt remove -y buildah
+sudo apt autoremove -y
 
 # use correct image name
 # shellcheck disable=SC2164
