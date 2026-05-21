@@ -22,6 +22,7 @@ set -o noglob
 #
 FILE_NAME=sealos
 BIN_DIR=/usr/bin
+INSTALL=
 
 info() {
     echo '[INFO] ' "$@"
@@ -40,7 +41,6 @@ verify_url() {
     case "${SEALOS_URL}" in
     "") ;;
     https://*) ;;
-    http://*) ;;
     *)
         fatal "Only https:// URLs are supported for SEALOS_URL (have ${SEALOS_URL})"
         ;;
@@ -79,7 +79,9 @@ verify_downloader() {
     if [ -n "$PROXY_PREFIX" ]; then
         DOWNLOADER_PREFIX="${PROXY_PREFIX%/}/${DOWNLOADER_PREFIX}"
     fi
-    DOWNLOADER_URL=${DOWNLOADER_PREFIX}${VERSION}/${FILE_NAME}_${VERSION##v}_linux_${ARCH}.tar.gz
+    ARCHIVE_NAME=${FILE_NAME}_${VERSION##v}_linux_${ARCH}.tar.gz
+    DOWNLOADER_URL=${DOWNLOADER_PREFIX}${VERSION}/${ARCHIVE_NAME}
+    CHECKSUM_URL=${DOWNLOADER_PREFIX}${VERSION}/${FILE_NAME}_checksums.txt
     return 0
 }
 
@@ -124,9 +126,39 @@ download_binary() {
     download "${TMP_TAR}" "${DOWNLOADER_URL}"
 }
 
+verify_checksum() {
+    if [ "${SEALOS_INSTALL_SKIP_CHECKSUM:-false}" = "true" ]; then
+        warn "Skipping release checksum verification because SEALOS_INSTALL_SKIP_CHECKSUM=true"
+        return 0
+    fi
+
+    info "Downloading checksum ${DOWNLOADER} ${CHECKSUM_URL}"
+    download "${TMP_CHECKSUM}" "${CHECKSUM_URL}"
+
+    expected_checksum=$(awk -v name="${ARCHIVE_NAME}" '$2 == name {print $1}' "${TMP_CHECKSUM}")
+    if [ -z "${expected_checksum}" ]; then
+        fatal "Checksum for ${ARCHIVE_NAME} not found in ${FILE_NAME}_checksums.txt"
+    fi
+
+    if [ -x "$(command -v sha256sum)" ]; then
+        actual_checksum=$(sha256sum "${TMP_TAR}" | awk '{print $1}')
+    elif [ -x "$(command -v shasum)" ]; then
+        actual_checksum=$(shasum -a 256 "${TMP_TAR}" | awk '{print $1}')
+    else
+        fatal "Can not find sha256sum or shasum for checksum verification"
+    fi
+
+    if [ "${actual_checksum}" != "${expected_checksum}" ]; then
+        fatal "Checksum verification failed for ${ARCHIVE_NAME}"
+    fi
+
+    info "Verified checksum for ${ARCHIVE_NAME}"
+}
+
 setup_tmp() {
     TMP_DIR=$(mktemp -d -t sealos-install.XXXXXXXXXX)
     TMP_TAR=${TMP_DIR}/sealos.tar.gz
+    TMP_CHECKSUM=${TMP_DIR}/sealos_checksums.txt
     TMP_BIN=${TMP_DIR}/sealos
     cleanup() {
         code=$?
@@ -147,16 +179,28 @@ cleanup_tmp() {
 
 setup_binary() {
     cd "${TMP_DIR}"
-    chmod 755 "${TMP_TAR}"
-    tar -zxvf "${TMP_TAR}" "${FILE_NAME}"
+    tar -zxf "${TMP_TAR}" "${FILE_NAME}"
     chmod 755 "${FILE_NAME}"
     info "Installing sealos to ${BIN_DIR}/${FILE_NAME}"
-    sudo chown "$(whoami)":"$(whoami)" "${TMP_BIN}"
-    sudo mv -f "${TMP_BIN}" "${BIN_DIR}/${FILE_NAME}"
+    if [ "$(id -u)" -eq 0 ]; then
+        INSTALL="install"
+    else
+        if ! [ -x "$(command -v sudo)" ]; then
+            fatal "sudo is required to install sealos to ${BIN_DIR}"
+        fi
+        INSTALL="sudo_install"
+    fi
+    if [ "${INSTALL}" = "sudo_install" ]; then
+        sudo install -d -m 0755 "${BIN_DIR}"
+        sudo install -o root -g root -m 0755 "${TMP_BIN}" "${BIN_DIR}/${FILE_NAME}"
+    else
+        install -d -m 0755 "${BIN_DIR}"
+        install -o root -g root -m 0755 "${TMP_BIN}" "${BIN_DIR}/${FILE_NAME}"
+    fi
 }
 
 verify_binary() {
-    "${FILE_NAME}" version || fatal 'failed to verify binary'
+    "${BIN_DIR}/${FILE_NAME}" version || fatal 'failed to verify binary'
 }
 
 {
@@ -166,6 +210,7 @@ verify_binary() {
     verify_downloader curl || verify_downloader wget || fatal 'Can not find curl or wget for downloading files'
     setup_tmp
     download_binary
+    verify_checksum
     setup_binary
     verify_binary
     cleanup_tmp

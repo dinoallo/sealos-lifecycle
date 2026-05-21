@@ -5,24 +5,33 @@ on:
   pull_request:
     types: [labeled]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-k8s-multi-node-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   TERRAFORM_VERSION: "1.5.7"
 
 jobs:
   call_ci_workflow:
     uses: ./.github/workflows/import-patch-image.yml
-    if: ${{ github.repository_owner == 'labring' && github.event.action == 'labeled' && github.event.label.name == 'need-e2e-apply-test' }}
+    if: ${{ github.repository_owner == 'labring' && (github.event_name == 'workflow_dispatch' || (github.event.action == 'labeled' && github.event.label.name == 'need-e2e-apply-test' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     with:
       arch: amd64,arm64
       e2e: true
       image: true
-      target_pull: true
+      target_pull: ${{ github.event_name == 'pull_request' }}
   e2e_apply_test:
-    if: github.repository_owner == 'labring'
+    if: ${{ github.repository_owner == 'labring' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     needs: [call_ci_workflow]
     runs-on: ubuntu-24.04
+    timeout-minutes: 180
     permissions:
-      issues: write
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +68,11 @@ jobs:
         with:
           name: e2e.test
           path: /tmp/
+      - name: Resolve patch image tag
+        id: patch_tag
+        env:
+          PATCH_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short_sha=${PATCH_SOURCE_SHA::7}" >> "$GITHUB_OUTPUT"
       - name: Install ginkgo && Run e2e apply test
         id: apply_test
         shell: bash
@@ -66,15 +80,14 @@ jobs:
           SEALOS_TEST_ARCH: ${{ matrix.arch }}
           SEALOS_E2E_TEST_IMAGE_NAME: registry.cn-shanghai.aliyuncs.com/labring/kubernetes:v1.28.4
           SEALOS_E2E_TEST_PATCH_IMAGE_TAR: /tmp/sealos/images/patch-${{ matrix.arch }}.tar.gz
-          SEALOS_E2E_TEST_PATCH_IMAGE_NAME: ghcr.io/labring/sealos-patch:${{ env.GIT_COMMIT_SHORT_SHA }}-${{ matrix.arch }}
+          SEALOS_E2E_TEST_PATCH_IMAGE_NAME: ghcr.io/labring/sealos-patch:${{ steps.patch_tag.outputs.short_sha }}-${{ matrix.arch }}
           SEALOS_E2E_TEST_SEALOS_BIN_PATH: /tmp/sealos/bin/sealos
           ALIYUN_ACCESS_KEY_ID: ${{ secrets.E2E_ALIYUN_ACCESS_KEY_ID }}
           ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.E2E_ALIYUN_ACCESS_KEY_SECRET }}
           ALIYUN_RESOURCE_GROUP_ID: ${{ secrets.E2E_ALIYUN_RESOURCE_GROUP_ID }}
           ALIYUN_REGION_ID: ${{ secrets.E2E_ALIYUN_REGION_ID }}
         run: |
-          set -ex
-          sudo su
+          set -euo pipefail
           chmod a+x /tmp/e2e.test
           gzip /tmp/sealos/images/patch-"${SEALOS_TEST_ARCH}".tar
           /tmp/e2e.test --ginkgo.v --ginkgo.focus="E2E_sealos_multi_node_test"
@@ -82,9 +95,10 @@ jobs:
   issue_commit:
     needs: [e2e_apply_test]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       issues: write
-    if: ${{ always() && github.repository_owner == 'labring' && github.event.label.name == 'need-e2e-apply-test' }} #success() || failure()
+    if: ${{ always() && github.repository_owner == 'labring' && github.event_name == 'pull_request' && github.event.label.name == 'need-e2e-apply-test' && github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Add comment to PR with test status
         uses: peter-evans/create-or-update-comment@v1
