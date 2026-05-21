@@ -19,6 +19,7 @@ set -o noglob
 # Usage:
 #   curl ... | ENV_VAR=... sh -
 #   curl -sfL https://raw.githubusercontent.com/labring/sealos/main/scripts/install.sh | sh -s latest labring/sealos
+#   SEALOS_URL=https://example.com/releases/download/v1.0.0/sealos_1.0.0_linux_amd64.tar.gz sh install.sh
 #
 FILE_NAME=sealos
 BIN_DIR=/usr/bin
@@ -83,6 +84,19 @@ setup_verify_arch() {
 verify_downloader() {
     [ -x "$(command -v "$1")" ] || return 1
     DOWNLOADER=$1
+    if [ -n "$SEALOS_URL" ]; then
+        DOWNLOADER_URL=${SEALOS_URL}
+        ARCHIVE_NAME=${DOWNLOADER_URL##*/}
+        case "${ARCHIVE_NAME}" in
+        *.tar.gz) ;;
+        *)
+            fatal "SEALOS_URL must point to a .tar.gz archive (have ${SEALOS_URL})"
+            ;;
+        esac
+        CHECKSUM_URL=${DOWNLOADER_URL%/*}/${FILE_NAME}_checksums.txt
+        return 0
+    fi
+
     DOWNLOADER_PREFIX=https://github.com/${OWN_REPO}/releases/download/
     if [ -n "$PROXY_PREFIX" ]; then
         DOWNLOADER_PREFIX="${PROXY_PREFIX%/}/${DOWNLOADER_PREFIX}"
