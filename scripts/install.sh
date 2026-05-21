@@ -94,12 +94,15 @@ verify_downloader() {
             ;;
         esac
         CHECKSUM_URL=${DOWNLOADER_URL%/*}/${FILE_NAME}_checksums.txt
+        RELEASE_API_URL=
         return 0
     fi
 
     DOWNLOADER_PREFIX=https://github.com/${OWN_REPO}/releases/download/
+    RELEASE_API_URL=https://api.github.com/repos/${OWN_REPO}/releases/tags/${VERSION}
     if [ -n "$PROXY_PREFIX" ]; then
         DOWNLOADER_PREFIX="${PROXY_PREFIX%/}/${DOWNLOADER_PREFIX}"
+        RELEASE_API_URL="${PROXY_PREFIX%/}/${RELEASE_API_URL}"
     fi
     ARCHIVE_NAME=${FILE_NAME}_${VERSION##v}_linux_${ARCH}.tar.gz
     DOWNLOADER_URL=${DOWNLOADER_PREFIX}${VERSION}/${ARCHIVE_NAME}
@@ -126,21 +129,34 @@ get_release_version() {
 
 download() {
     [ $# -eq 2 ] || fatal 'download needs exactly 2 arguments'
+    try_download "$1" "$2" || fatal 'Download failed'
+}
+
+try_download() {
+    [ $# -eq 2 ] || fatal 'download needs exactly 2 arguments'
     info "Downloading sealos, waiting..."
     case $DOWNLOADER in
     curl)
-        status_code=$(curl -L "$2" -o "$1" --progress-bar -w "%{http_code}\n") || fatal 'Download failed'
+        status_code=$(curl -L "$2" -o "$1" --progress-bar -w "%{http_code}\n") || {
+            rm -f "$1"
+            return 1
+        }
         if [ "$status_code" != "200" ]; then
-            fatal "Download failed, status code: $status_code"
+            rm -f "$1"
+            return 1
         fi
         ;;
     wget)
-        wget -qO "$1" "$2" || fatal 'Download failed'
+        wget -qO "$1" "$2" || {
+            rm -f "$1"
+            return 1
+        }
         ;;
     *)
         fatal "Incorrect executable '$DOWNLOADER'"
         ;;
     esac
+    return 0
 }
 
 download_binary() {
@@ -155,11 +171,45 @@ verify_checksum() {
     fi
 
     info "Downloading checksum ${DOWNLOADER} ${CHECKSUM_URL}"
-    download "${TMP_CHECKSUM}" "${CHECKSUM_URL}"
+    if try_download "${TMP_CHECKSUM}" "${CHECKSUM_URL}"; then
+        expected_checksum=$(awk -v name="${ARCHIVE_NAME}" '$2 == name {print $1}' "${TMP_CHECKSUM}")
+    else
+        warn "Checksum file is unavailable at ${CHECKSUM_URL}"
+        expected_checksum=
+    fi
 
-    expected_checksum=$(awk -v name="${ARCHIVE_NAME}" '$2 == name {print $1}' "${TMP_CHECKSUM}")
+    if [ -z "${expected_checksum}" ] && [ -n "${RELEASE_API_URL}" ]; then
+        info "Downloading release metadata ${DOWNLOADER} ${RELEASE_API_URL}"
+        download "${TMP_RELEASE}" "${RELEASE_API_URL}"
+        asset_digest=$(awk -v name="${ARCHIVE_NAME}" '
+            /"name"[[:space:]]*:/ {
+                asset_name = $0
+                sub(/^.*"name"[[:space:]]*:[[:space:]]*"/, "", asset_name)
+                sub(/".*$/, "", asset_name)
+                in_asset = (asset_name == name)
+            }
+            in_asset && /"digest"[[:space:]]*:[[:space:]]*"[^"]+"/ {
+                digest = $0
+                sub(/^.*"digest"[[:space:]]*:[[:space:]]*"/, "", digest)
+                sub(/".*$/, "", digest)
+                print digest
+                exit
+            }
+        ' "${TMP_RELEASE}")
+        case "${asset_digest}" in
+        sha256:*)
+            expected_checksum=${asset_digest#sha256:}
+            ;;
+        "")
+            ;;
+        *)
+            fatal "Unsupported digest for ${ARCHIVE_NAME}: ${asset_digest}"
+            ;;
+        esac
+    fi
+
     if [ -z "${expected_checksum}" ]; then
-        fatal "Checksum for ${ARCHIVE_NAME} not found in ${FILE_NAME}_checksums.txt"
+        fatal "Checksum for ${ARCHIVE_NAME} not found in ${FILE_NAME}_checksums.txt or release metadata"
     fi
 
     if [ -x "$(command -v sha256sum)" ]; then
@@ -181,6 +231,7 @@ setup_tmp() {
     TMP_DIR=$(mktemp -d -t sealos-install.XXXXXXXXXX)
     TMP_TAR=${TMP_DIR}/sealos.tar.gz
     TMP_CHECKSUM=${TMP_DIR}/sealos_checksums.txt
+    TMP_RELEASE=${TMP_DIR}/release.json
     TMP_BIN=${TMP_DIR}/sealos
     cleanup() {
         code=$?
