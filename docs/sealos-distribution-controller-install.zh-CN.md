@@ -90,6 +90,33 @@ kustomize edit set image labring/sealos-agent:dev=example.com/sealos-agent:dev
 kubectl apply -k .
 ```
 
+## 升级 Controller
+
+升级已有安装时，先发布新的 controller 镜像，再应用新的 CRD 和 RBAC，最后把 deployment
+滚动到新镜像。升级时不要删除 CRD；已有 `DistributionTarget` 和
+`DistributionRolloutPolicy` 对象会由 API server 保留。
+
+```bash
+kubectl apply -f deploy/distribution-controller/base/crd.yaml
+kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
+kubectl apply -f deploy/distribution-controller/base/rbac.yaml
+kubectl -n sealos-system set image \
+  -f deploy/distribution-controller/base/deployment.yaml \
+  sealos-agent=example.com/sealos-agent:vNEXT \
+  --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
+kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+如果继续复用同一个可变镜像 tag，应用 manifest 后重启 deployment，让 pod 按
+`imagePullPolicy` 和节点镜像缓存状态重新拉取：
+
+```bash
+kubectl -n sealos-system rollout restart deploy/sealos-distribution-controller
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
 ## 创建 Distribution Target
 
 先创建示例 targets 引用的 rollout policy：

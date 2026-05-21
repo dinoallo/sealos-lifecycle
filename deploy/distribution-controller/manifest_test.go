@@ -257,6 +257,31 @@ func TestDistributionControllerImageDockerfileContract(t *testing.T) {
 	}
 }
 
+func TestDistributionControllerInstallGuideDocumentsUpgrade(t *testing.T) {
+	t.Parallel()
+
+	for _, relPath := range []string{
+		filepath.Join("..", "..", "docs", "sealos-distribution-controller-install.md"),
+		filepath.Join("..", "..", "docs", "sealos-distribution-controller-install.zh-CN.md"),
+	} {
+		data, err := os.ReadFile(relPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", relPath, err)
+		}
+		guide := string(data)
+		for _, want := range []string{
+			"kubectl apply -f deploy/distribution-controller/base/crd.yaml",
+			"kubectl apply -f deploy/distribution-controller/base/rbac.yaml",
+			"kubectl -n sealos-system set image",
+			"kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s",
+		} {
+			if !strings.Contains(guide, want) {
+				t.Fatalf("%s missing upgrade command %q", relPath, want)
+			}
+		}
+	}
+}
+
 func TestDistributionControllerRBACContract(t *testing.T) {
 	t.Parallel()
 

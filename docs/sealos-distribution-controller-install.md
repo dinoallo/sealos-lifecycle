@@ -97,6 +97,35 @@ kustomize edit set image labring/sealos-agent:dev=example.com/sealos-agent:dev
 kubectl apply -k .
 ```
 
+## Upgrade The Controller
+
+To upgrade an existing installation, publish the new controller image, apply the
+new CRDs and RBAC, then roll the deployment to the new image. Do not delete the
+CRDs during upgrade; existing `DistributionTarget` and `DistributionRolloutPolicy`
+objects are kept by the API server.
+
+```bash
+kubectl apply -f deploy/distribution-controller/base/crd.yaml
+kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
+kubectl apply -f deploy/distribution-controller/base/rbac.yaml
+kubectl -n sealos-system set image \
+  -f deploy/distribution-controller/base/deployment.yaml \
+  sealos-agent=example.com/sealos-agent:vNEXT \
+  --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
+kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+If you reuse the same mutable image tag, restart the deployment after applying
+the manifest so the pod pulls according to its `imagePullPolicy` and node cache
+state:
+
+```bash
+kubectl -n sealos-system rollout restart deploy/sealos-distribution-controller
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
 ## Create A Distribution Target
 
 Create the rollout policy referenced by the examples:
