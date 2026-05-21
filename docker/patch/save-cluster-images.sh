@@ -48,7 +48,7 @@ if [ "${actual_checksum}" != "${expected_checksum}" ]; then
   exit 1
 fi
 tar -zxf "${SEALOS_ARCHIVE}" sealos
-chmod +x sealos && sudo mv sealos /usr/bin/sealos
+sudo install -o root -g root -m 0755 sealos /usr/bin/sealos
 
 # resolve buildah conflicts
 sudo apt remove -y buildah
