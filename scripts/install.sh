@@ -45,6 +45,14 @@ verify_url() {
         fatal "Only https:// URLs are supported for SEALOS_URL (have ${SEALOS_URL})"
         ;;
     esac
+
+    case "${PROXY_PREFIX}" in
+    "") ;;
+    https://*) ;;
+    *)
+        fatal "Only https:// URLs are supported for PROXY_PREFIX (have ${PROXY_PREFIX})"
+        ;;
+    esac
 }
 
 verify_is_executable() {
