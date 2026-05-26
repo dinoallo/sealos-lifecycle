@@ -29,11 +29,12 @@ deployment that is `/host/etc/kubernetes/admin.conf`.
 ## Prerequisites
 
 - A Kubernetes cluster that can pull or preload the controller image.
-- A controller image that contains `/usr/bin/sealos-agent`. This repository
-  ships a minimal image definition at
+- A controller image that contains `/usr/bin/sealos-agent`. Tagged releases
+  publish `ghcr.io/<owner>/sealos-agent:<tag>` as a multi-arch image, and this
+  repository also ships a minimal image definition at
   [`docker/sealos-agent/Dockerfile`](../docker/sealos-agent/Dockerfile). The
-  base deployment also puts mounted host paths on `PATH`, so `kubectl` and hook
-  tools can either be baked into a derived image or supplied by the host.
+  base deployment puts mounted host paths on `PATH`, so `kubectl` and hook tools
+  can either be baked into a derived image or supplied by the host.
 - The selected BOM or local `DistributionChannel` file staged under
   `/var/lib/sealos/distribution/...` on the node running the controller pod.
 - A cluster-local repo staged under `/var/lib/sealos/distribution/...` when the
@@ -55,8 +56,18 @@ present.
 
 ## Install The Controller
 
-Build or publish an image that contains the `sealos-agent` binary, then set that
-image in the deployment before applying the manifests:
+For a tagged release, set the deployment image to the released controller image:
+
+```bash
+kubectl -n sealos-system set image \
+  -f deploy/distribution-controller/base/deployment.yaml \
+  sealos-agent=ghcr.io/labring/sealos-agent:vNEXT \
+  --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
+```
+
+For local development, build or publish an image that contains the
+`sealos-agent` binary, then set that image in the deployment before applying the
+manifests:
 
 ```bash
 PLATFORM=linux_$(go env GOARCH)

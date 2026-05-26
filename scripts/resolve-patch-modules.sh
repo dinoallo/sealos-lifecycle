@@ -2,7 +2,7 @@
 
 arch_list=$1
 only_arch=$2
-binary_list="sealos,sealctl,lvscare,image-cri-shim"
+binary_list="sealos,sealctl,lvscare,image-cri-shim,sealos-agent"
 
 if [ -z "$arch_list" ]; then
   echo "Please provide a comma-separated list of architectures as an argument"

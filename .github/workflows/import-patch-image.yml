@@ -190,6 +190,12 @@ jobs:
           name: sealos-${{ matrix.arch }}
           path: ${{ env.PROJECT_PATH }}/docker/sealos
 
+      - name: Download sealos-agent
+        uses: actions/download-artifact@v4
+        with:
+          name: sealos-agent-${{ matrix.arch }}
+          path: ${{ env.PROJECT_PATH }}/docker/sealos-agent
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -202,6 +208,7 @@ jobs:
           chmod a+x "${PROJECT_PATH}/docker/sealos"/*
           chmod a+x "${PROJECT_PATH}/docker/patch"/*
           chmod a+x "${PROJECT_PATH}/docker/lvscare"/*
+          chmod a+x "${PROJECT_PATH}/docker/sealos-agent"/*
 
       - name: Build and Push lvscare Image
         uses: docker/build-push-action@v6
@@ -212,6 +219,30 @@ jobs:
           build-args: Bin=lvscare
           platforms: linux/${{ matrix.arch }}
           tags: localhost:5000/${{ github.repository_owner }}/lvscare:${{ env.GIT_COMMIT_SHORT_SHA }}-${{ matrix.arch }}
+
+      - name: Build sealos-agent controller image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.PROJECT_PATH }}/docker/sealos-agent
+          file: ${{ env.PROJECT_PATH }}/docker/sealos-agent/Dockerfile
+          push: false
+          load: true
+          platforms: linux/${{ matrix.arch }}
+          tags: localhost:5000/${{ github.repository_owner }}/sealos-agent:${{ env.GIT_COMMIT_SHORT_SHA }}-${{ matrix.arch }}
+
+      - name: Save sealos-agent controller image
+        env:
+          PROJECT_PATH: ${{ env.PROJECT_PATH }}
+        run: |
+          docker save \
+            "localhost:5000/${{ github.repository_owner }}/sealos-agent:${{ env.GIT_COMMIT_SHORT_SHA }}-${{ matrix.arch }}" \
+            -o "${PROJECT_PATH}/sealos-agent-controller-${{ matrix.arch }}.tar"
+
+      - name: Upload sealos-agent controller image
+        uses: actions/upload-artifact@v4
+        with:
+          name: sealos-agent-controller-image-${{ matrix.arch }}.tar
+          path: ${{ env.PROJECT_PATH }}/sealos-agent-controller-${{ matrix.arch }}.tar
 
       - name: Build and Save Cluster Images
         env:
@@ -234,4 +265,5 @@ jobs:
             lvscare-${{ matrix.arch }}
             sealctl-${{ matrix.arch }}
             image-cri-shim-${{ matrix.arch }}
+            sealos-agent-${{ matrix.arch }}
           failOnError: false

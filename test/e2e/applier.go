@@ -40,19 +40,22 @@ import (
 )
 
 type Applier struct {
-	LocalCmd        cmd2.Interface
-	RemoteCmd       cmd2.Interface
-	RemoteSealosCmd *cmd2.SealosCmd
-	k8sClient       kube.K8s
-	Infra           *terraform.InfraDetail
-	RunImages       []string
-	ClusterName     string
-	ImageName       string
-	PatchImageName  string
-	PatchImageTar   string
-	ImageTar        string
-	TestDir         string
-	SSH             *v1beta1.SSH
+	LocalCmd                          cmd2.Interface
+	RemoteCmd                         cmd2.Interface
+	RemoteSealosCmd                   *cmd2.SealosCmd
+	k8sClient                         kube.K8s
+	Infra                             *terraform.InfraDetail
+	RunImages                         []string
+	ClusterName                       string
+	ImageName                         string
+	PatchImageName                    string
+	PatchImageTar                     string
+	DistributionControllerImageName   string
+	DistributionControllerImageTar    string
+	DistributionControllerManifestDir string
+	ImageTar                          string
+	TestDir                           string
+	SSH                               *v1beta1.SSH
 }
 
 func NewApplier(infra *terraform.InfraDetail) (*Applier, error) {
@@ -64,18 +67,21 @@ func NewApplier(infra *terraform.InfraDetail) (*Applier, error) {
 	remoteSSH := cmd2.NewRemoteCmd(infra.Public.PublicIP, publicSSHConfig)
 	remoteSealosCmd := cmd2.NewSealosCmd(settings.E2EConfig.SealosBinPath, remoteSSH)
 	a := &Applier{
-		Infra:           infra,
-		SSH:             publicSSHConfig,
-		RemoteSealosCmd: remoteSealosCmd,
-		RemoteCmd:       remoteSSH,
-		LocalCmd:        cmd2.LocalCmd{},
-		ClusterName:     settings.GetEnvWithDefault(settings.TestClusterName, "default"),
-		ImageName:       os.Getenv(settings.TestImageName),
-		RunImages:       strings.Split(os.Getenv(settings.TestRunImages), ","),
-		ImageTar:        os.Getenv(settings.TestImageTar),
-		PatchImageName:  os.Getenv(settings.TestPatchImageName),
-		PatchImageTar:   os.Getenv(settings.TestPatchImageTar),
-		TestDir:         settings.DefaultTestDir,
+		Infra:                             infra,
+		SSH:                               publicSSHConfig,
+		RemoteSealosCmd:                   remoteSealosCmd,
+		RemoteCmd:                         remoteSSH,
+		LocalCmd:                          cmd2.LocalCmd{},
+		ClusterName:                       settings.GetEnvWithDefault(settings.TestClusterName, "default"),
+		ImageName:                         os.Getenv(settings.TestImageName),
+		RunImages:                         strings.Split(os.Getenv(settings.TestRunImages), ","),
+		ImageTar:                          os.Getenv(settings.TestImageTar),
+		PatchImageName:                    os.Getenv(settings.TestPatchImageName),
+		PatchImageTar:                     os.Getenv(settings.TestPatchImageTar),
+		DistributionControllerImageName:   os.Getenv(settings.TestDistributionControllerImageName),
+		DistributionControllerImageTar:    os.Getenv(settings.TestDistributionControllerImageTar),
+		DistributionControllerManifestDir: os.Getenv(settings.TestDistributionControllerManifestDir),
+		TestDir:                           settings.DefaultTestDir,
 	}
 	if len(a.RunImages) == 0 {
 		a.RunImages = []string{settings.HelmImageName}
@@ -236,6 +242,62 @@ func (a *Applier) CheckNodeNum(num int) {
 	utils.CheckEqual(len(nodes.Items), num)
 }
 
+func (a *Applier) InstallDistributionController() error {
+	if a.DistributionControllerImageName == "" && a.DistributionControllerImageTar == "" {
+		logger.Info("skip distribution controller install smoke: controller image env is empty")
+		return nil
+	}
+	if a.DistributionControllerImageName == "" {
+		return fmt.Errorf("%s is required when %s is set", settings.TestDistributionControllerImageName, settings.TestDistributionControllerImageTar)
+	}
+	if a.DistributionControllerManifestDir == "" {
+		a.DistributionControllerManifestDir = filepath.Join("deploy", "distribution-controller")
+	}
+	if info, err := os.Stat(a.DistributionControllerManifestDir); err != nil {
+		return fmt.Errorf("stat distribution controller manifest dir: %v", err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("distribution controller manifest path %s is not a directory", a.DistributionControllerManifestDir)
+	}
+
+	remoteRoot := "/tmp/sealos-distribution-controller"
+	remoteManifestDir := remoteRoot + "/distribution-controller"
+	if err := a.RemoteCmd.AsyncExec("rm -rf " + shellQuote(remoteRoot) + " && mkdir -p " + shellQuote(remoteRoot)); err != nil {
+		return fmt.Errorf("prepare remote distribution controller dir: %v", err)
+	}
+	if err := a.RemoteCmd.Copy(a.DistributionControllerManifestDir, remoteManifestDir); err != nil {
+		return fmt.Errorf("copy distribution controller manifests: %v", err)
+	}
+	if a.DistributionControllerImageTar != "" {
+		remoteImageTar := remoteRoot + "/" + filepath.Base(a.DistributionControllerImageTar)
+		if err := a.RemoteCmd.Copy(a.DistributionControllerImageTar, remoteImageTar); err != nil {
+			return fmt.Errorf("copy distribution controller image tar: %v", err)
+		}
+		if err := a.RemoteCmd.AsyncExec("ctr -n k8s.io images import " + shellQuote(remoteImageTar)); err != nil {
+			return fmt.Errorf("import distribution controller image tar: %v", err)
+		}
+	}
+
+	deployment := remoteRoot + "/deployment.yaml"
+	commands := []string{
+		"kubectl apply -f " + shellQuote(remoteManifestDir+"/base/namespace.yaml"),
+		"kubectl apply -f " + shellQuote(remoteManifestDir+"/base/crd.yaml"),
+		"kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s",
+		"kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s",
+		"kubectl apply -f " + shellQuote(remoteManifestDir+"/base/rbac.yaml"),
+		"kubectl -n sealos-system set image -f " + shellQuote(remoteManifestDir+"/base/deployment.yaml") +
+			" sealos-agent=" + shellQuote(a.DistributionControllerImageName) + " --local -o yaml > " + shellQuote(deployment),
+		"kubectl apply -f " + shellQuote(deployment),
+		"kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s",
+		"kubectl -n sealos-system get pods -l app.kubernetes.io/name=sealos-distribution-controller",
+	}
+	for _, command := range commands {
+		if err := a.RemoteCmd.AsyncExec(command); err != nil {
+			return fmt.Errorf("run distribution controller install command %q: %v", command, err)
+		}
+	}
+	return nil
+}
+
 func (a *Applier) WaitSSHReady() error {
 	var err error
 	for i := 0; i < 10; i++ {
@@ -245,4 +307,8 @@ func (a *Applier) WaitSSHReady() error {
 		time.Sleep(time.Duration(i) * time.Second)
 	}
 	return fmt.Errorf("wait for host %s ssh ready timeout: %v", a.Infra.Public.PublicIP, err)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

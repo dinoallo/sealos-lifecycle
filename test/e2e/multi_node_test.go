@@ -83,6 +83,9 @@ var _ = Describe("E2E_sealos_multi_node_test", func() {
 			applier.FetchRemoteKubeConfig()
 			//check result
 			applier.CheckNodeNum(2)
+			By("install distribution controller", func() {
+				utils.CheckErr(applier.InstallDistributionController())
+			})
 			By("add nodes test", func() {
 				// add ip3, ip4
 				addOpts := &cmd2.AddOptions{

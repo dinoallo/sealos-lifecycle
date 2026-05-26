@@ -270,6 +270,7 @@ func TestDistributionControllerInstallGuideDocumentsUpgrade(t *testing.T) {
 		}
 		guide := string(data)
 		for _, want := range []string{
+			"ghcr.io/labring/sealos-agent:vNEXT",
 			"kubectl apply -f deploy/distribution-controller/base/crd.yaml",
 			"kubectl apply -f deploy/distribution-controller/base/rbac.yaml",
 			"kubectl -n sealos-system set image",
@@ -277,6 +278,65 @@ func TestDistributionControllerInstallGuideDocumentsUpgrade(t *testing.T) {
 		} {
 			if !strings.Contains(guide, want) {
 				t.Fatalf("%s missing upgrade command %q", relPath, want)
+			}
+		}
+	}
+}
+
+func TestDistributionControllerReleasePackagingContract(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yml"))
+	if err != nil {
+		t.Fatalf("read goreleaser config: %v", err)
+	}
+	config := string(data)
+	for _, want := range []string{
+		"id: sealos-agent",
+		"main: ./cmd/sealos-agent",
+		"binary: sealos-agent",
+		"dockerfile: docker/sealos-agent/Dockerfile",
+		"ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}-amd64",
+		"ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}-arm64",
+		"name_template: ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}",
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("goreleaser config missing %q", want)
+		}
+	}
+}
+
+func TestDistributionControllerE2EWorkflowContract(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		relPath string
+		wants   []string
+	}{
+		{
+			relPath: filepath.Join("..", "..", ".github", "workflows", "import-patch-image.yml"),
+			wants: []string{
+				"name: sealos-agent-${{ matrix.arch }}",
+				"sealos-agent-controller-image-${{ matrix.arch }}.tar",
+			},
+		},
+		{
+			relPath: filepath.Join("..", "..", ".github", "workflows", "e2e_k8s_multi_node.yml"),
+			wants: []string{
+				"sealos-agent-controller-image-${{ matrix.arch }}.tar",
+				"SEALOS_E2E_TEST_DISTRIBUTION_CONTROLLER_IMAGE_TAR",
+				"SEALOS_E2E_TEST_DISTRIBUTION_CONTROLLER_IMAGE_NAME",
+			},
+		},
+	} {
+		data, err := os.ReadFile(tt.relPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", tt.relPath, err)
+		}
+		workflow := string(data)
+		for _, want := range tt.wants {
+			if !strings.Contains(workflow, want) {
+				t.Fatalf("%s missing controller e2e contract %q", tt.relPath, want)
 			}
 		}
 	}

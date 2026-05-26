@@ -1,3 +1,4 @@
+version: 2
 project_name: sealos
 #gomod:
 #  # Proxy a module from proxy.golang.org, making the builds verifiable.
@@ -139,6 +140,31 @@ builds:
       - -X github.com/labring/sealos/pkg/version.buildDate={{.Date}}
       - -s -w
       - -extldflags '-static --static'
+  - id: sealos-agent
+    env:
+      - CGO_ENABLED=0
+    main: ./cmd/sealos-agent
+    binary: sealos-agent
+    goos:
+      - linux
+    goarch:
+      - arm64
+      - amd64
+    flags:
+      - -trimpath
+    tags:
+      - containers_image_openpgp
+      - netgo
+      - exclude_graphdriver_devicemapper
+      - static
+      - osusergo
+      - exclude_graphdriver_btrfs
+    ldflags:
+      - -X github.com/labring/sealos/pkg/version.gitVersion={{.Version}}
+      - -X github.com/labring/sealos/pkg/version.gitCommit={{.ShortCommit}}
+      - -X github.com/labring/sealos/pkg/version.buildDate={{.Date}}
+      - -s -w
+      - -extldflags '-static --static'
   - id: sreg
     env:
       - CGO_ENABLED=1
@@ -241,6 +267,38 @@ dockers:
       - --label=io.sealos.image.auth={{ .Env.USERNAME }}
   - use: buildx
     ids:
+      - sealos-agent
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}-amd64
+    dockerfile: docker/sealos-agent/Dockerfile
+    build_flag_templates:
+      - --pull
+      - --platform=linux/amd64
+      - --label=io.sealos.image.created={{.Date}}
+      - --label=io.sealos.image.title=sealos-agent
+      - --label=io.sealos.image.revision={{.ShortCommit}}
+      - --label=io.sealos.image.version={{.Tag }}
+      - --label=io.sealos.image.auth={{ .Env.USERNAME }}
+  - use: buildx
+    ids:
+      - sealos-agent
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}-arm64
+    dockerfile: docker/sealos-agent/Dockerfile
+    build_flag_templates:
+      - --pull
+      - --platform=linux/arm64
+      - --label=io.sealos.image.created={{.Date}}
+      - --label=io.sealos.image.title=sealos-agent
+      - --label=io.sealos.image.revision={{.ShortCommit}}
+      - --label=io.sealos.image.version={{.Tag }}
+      - --label=io.sealos.image.auth={{ .Env.USERNAME }}
+  - use: buildx
+    ids:
       - sreg
     goos: linux
     goarch: amd64
@@ -316,6 +374,10 @@ docker_manifests:
     image_templates:
       - ghcr.io/{{ .Env.USERNAME }}/sealos:{{ .Tag }}-amd64
       - ghcr.io/{{ .Env.USERNAME }}/sealos:{{ .Tag }}-arm64
+  - name_template: ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}
+    image_templates:
+      - ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}-amd64
+      - ghcr.io/{{ .Env.USERNAME }}/sealos-agent:{{ .Tag }}-arm64
   - name_template: ghcr.io/{{ .Env.USERNAME }}/sreg:{{ .Tag }}
     image_templates:
       - ghcr.io/{{ .Env.USERNAME }}/sreg:{{ .Tag }}-amd64
@@ -327,7 +389,7 @@ docker_manifests:
 
 nfpms:
   - id: packages
-    builds:
+    ids:
       - sealos
     vendor: labring
     homepage: https://github.com/labring/sealos
@@ -351,7 +413,8 @@ publishers:
         echo "Skipping deployment: Non-production release detected"
       fi'
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     builds_info:
       group: root
       owner: root
@@ -367,7 +430,7 @@ checksum:
     - archive
 
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-next"
 
 changelog:
   sort: asc
