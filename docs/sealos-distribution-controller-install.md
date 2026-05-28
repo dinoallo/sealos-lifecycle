@@ -56,7 +56,23 @@ present.
 
 ## Install The Controller
 
-For a tagged release, set the deployment image to the released controller image:
+For a tagged release, render a release bundle with the published controller
+image:
+
+```bash
+make render-distribution-controller-bundle \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT
+```
+
+The rendered bundle is written to `dist/distribution-controller/` by default.
+Install it with:
+
+```bash
+kubectl apply -f dist/distribution-controller/install.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+You can also set the deployment image manually:
 
 ```bash
 kubectl -n sealos-system set image \
@@ -70,11 +86,9 @@ For local development, build or publish an image that contains the
 manifests:
 
 ```bash
-PLATFORM=linux_$(go env GOARCH)
-make build BINS=sealos-agent PLATFORM="${PLATFORM}"
-cp "bin/${PLATFORM}/sealos-agent" docker/sealos-agent/sealos-agent
-docker build -t example.com/sealos-agent:dev docker/sealos-agent
-docker push example.com/sealos-agent:dev
+make build-distribution-controller-image \
+  DISTRIBUTION_CONTROLLER_IMAGE=example.com/sealos-agent:dev \
+  DISTRIBUTION_CONTROLLER_PUSH_IMAGE=1
 ```
 
 ```bash
@@ -107,6 +121,46 @@ cd deploy/distribution-controller/base
 kustomize edit set image labring/sealos-agent:dev=example.com/sealos-agent:dev
 kubectl apply -k .
 ```
+
+## Verify The Install Path
+
+Use the non-mutating manifest gate for local validation:
+
+```bash
+make verify-distribution-controller-manifests
+```
+
+To run the real-cluster install smoke, select a kubeconfig and opt in
+explicitly. This installs or upgrades the controller in the selected cluster,
+creates a temporary `DistributionTarget` and `DistributionRolloutPolicy`, waits
+for the controller to reconcile that target into `Degraded=True`, and then
+removes the temporary target and policy.
+
+```bash
+make verify-distribution-controller-real-cluster \
+  I_UNDERSTAND_THIS_MUTATES_HOST=1 \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT \
+  DISTRIBUTION_CONTROLLER_SMOKE_ARGS="--kubeconfig ~/.kube/config --artifact-dir /tmp/controller-smoke"
+```
+
+When the smoke fails after cluster access begins, the script writes diagnostics
+under the requested artifact directory: controller Deployment and Pod
+descriptions, recent controller logs, CRD state, smoke target/policy YAML, and
+recent `sealos-system` resources/events.
+
+The repository also includes the `E2E Distribution Controller` GitHub Actions
+workflow. Pull requests and `main` pushes run the non-mutating manifest gate:
+manifest contract tests, Kustomize rendering, release bundle rendering, and the
+smoke script's local render path without cluster access.
+
+The same workflow can be triggered manually for real-cluster smoke. Manual runs
+expect a published controller image and a repository or
+`distribution-controller-e2e` environment secret containing the target
+kubeconfig. The real-cluster job is attached to the
+`distribution-controller-e2e` environment so repository maintainers can protect
+cluster access with GitHub environment approvals. It uploads the rendered bundle
+as a short-lived artifact after each run, and uploads smoke diagnostics when the
+real-cluster check fails.
 
 ## Upgrade The Controller
 

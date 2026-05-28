@@ -1,0 +1,170 @@
+name: E2E Distribution Controller
+
+on:
+  workflow_dispatch:
+    inputs:
+      controller_image:
+        description: "Published sealos-agent controller image to install"
+        required: true
+        type: string
+      kubeconfig_secret_name:
+        description: "Repository or environment secret name that stores the target kubeconfig"
+        required: false
+        default: "E2E_DISTRIBUTION_CONTROLLER_KUBECONFIG"
+        type: string
+      timeout_minutes:
+        description: "Job timeout in minutes"
+        required: false
+        default: 20
+        type: number
+      keep_resources:
+        description: "Keep smoke DistributionTarget/Policy after the run"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/e2e_distribution_controller.yml"
+      - ".github/workflows/release.yml"
+      - ".goreleaser.yml"
+      - "Makefile"
+      - "cmd/sealos-agent/**"
+      - "deploy/distribution-controller/**"
+      - "docker/sealos-agent/**"
+      - "docs/sealos-distribution-controller-install*.md"
+      - "pkg/distribution/**"
+      - "scripts/distribution-controller/**"
+  pull_request:
+    branches: ["*"]
+    paths:
+      - ".github/workflows/e2e_distribution_controller.yml"
+      - ".github/workflows/release.yml"
+      - ".goreleaser.yml"
+      - "Makefile"
+      - "cmd/sealos-agent/**"
+      - "deploy/distribution-controller/**"
+      - "docker/sealos-agent/**"
+      - "docs/sealos-distribution-controller-install*.md"
+      - "pkg/distribution/**"
+      - "scripts/distribution-controller/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-distribution-controller-${{ github.head_ref || github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+env:
+  GO_VERSION: "1.25"
+  DEFAULT_CONTROLLER_IMAGE: "example.com/sealos-agent:v0.0.0"
+
+jobs:
+  manifest-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Golang with cache
+        uses: magnetikonline/action-golang-cache@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Validate controller manifests
+        run: make verify-distribution-controller-manifests
+
+      - name: Render controller bundle
+        env:
+          DISTRIBUTION_CONTROLLER_IMAGE: ${{ inputs.controller_image || env.DEFAULT_CONTROLLER_IMAGE }}
+        run: make render-distribution-controller-bundle
+
+      - name: Render real-cluster smoke manifests without cluster access
+        env:
+          DISTRIBUTION_CONTROLLER_IMAGE: ${{ inputs.controller_image || env.DEFAULT_CONTROLLER_IMAGE }}
+        run: scripts/distribution-controller/real-cluster-smoke.sh --image "${DISTRIBUTION_CONTROLLER_IMAGE}"
+
+  real-cluster-smoke:
+    needs: manifest-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout_minutes || 20 }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == 'labring' }}
+    environment: distribution-controller-e2e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Golang with cache
+        uses: magnetikonline/action-golang-cache@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Prepare kubeconfig
+        shell: bash
+        env:
+          KUBECONFIG_SECRET: ${{ secrets[inputs.kubeconfig_secret_name] }}
+          KUBECONFIG_SECRET_NAME: ${{ inputs.kubeconfig_secret_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${KUBECONFIG_SECRET}" ]]; then
+            echo "Secret ${KUBECONFIG_SECRET_NAME} is empty or unavailable" >&2
+            exit 1
+          fi
+          install -d -m 0700 "${RUNNER_TEMP}/kube"
+          printf '%s' "${KUBECONFIG_SECRET}" > "${RUNNER_TEMP}/kube/config"
+          chmod 0600 "${RUNNER_TEMP}/kube/config"
+
+      - name: Render controller bundle
+        env:
+          DISTRIBUTION_CONTROLLER_IMAGE: ${{ inputs.controller_image }}
+        run: make render-distribution-controller-bundle
+
+      - name: Validate controller manifests
+        run: make verify-distribution-controller-manifests
+
+      - name: Run real-cluster smoke
+        shell: bash
+        env:
+          DISTRIBUTION_CONTROLLER_IMAGE: ${{ inputs.controller_image }}
+          KUBECONFIG: ${{ runner.temp }}/kube/config
+          I_UNDERSTAND_THIS_MUTATES_HOST: "1"
+          KEEP_RESOURCES: ${{ inputs.keep_resources && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(--artifact-dir "${RUNNER_TEMP}/distribution-controller-diagnostics")
+          if [[ "${KEEP_RESOURCES}" == "true" ]]; then
+            args+=(--keep-resources)
+          fi
+          DISTRIBUTION_CONTROLLER_SMOKE_ARGS="${args[*]}" make verify-distribution-controller-real-cluster
+
+      - name: Upload smoke diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: distribution-controller-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/distribution-controller-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload rendered controller bundle
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: distribution-controller-bundle-${{ github.run_id }}
+          path: dist/distribution-controller
+          if-no-files-found: warn
+          retention-days: 7

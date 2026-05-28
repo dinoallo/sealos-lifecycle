@@ -181,6 +181,70 @@ Important current rules:
 Those validations are enforced in
 [pkg/distribution/bom/types.go](../pkg/distribution/bom/types.go).
 
+## Local Test Registry
+
+For local Distribution package tests, you can run the upstream
+[`distribution/distribution`](https://github.com/distribution/distribution)
+registry on the same host and address it as `registry.sealos.local:5000`.
+This keeps the package image references close to production OCI references
+without requiring a remote registry account.
+
+Create a host entry:
+
+```bash
+echo "127.0.0.1 registry.sealos.local" | sudo tee -a /etc/hosts
+```
+
+Start a local registry container:
+
+```bash
+docker run -d --restart=always \
+  --name sealos-local-registry \
+  -p 5000:5000 \
+  registry:2
+```
+
+The local registry above is plain HTTP. For test-only `sealos sync package`
+build and push commands, point Sealos/buildah at an insecure registry config:
+
+```bash
+cat > /tmp/sealos-local-registries.conf <<'EOF'
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+location = "registry.sealos.local:5000"
+insecure = true
+EOF
+```
+
+Build and push a Kubernetes rootfs component package:
+
+```bash
+sealos --registries-conf /tmp/sealos-local-registries.conf \
+  sync package build \
+  --package-dir scripts/poc/minimal-single-node/packages/kubernetes \
+  --image registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3 \
+  --platform linux/amd64
+
+sealos --registries-conf /tmp/sealos-local-registries.conf \
+  sync package push \
+  --image registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3 \
+  --destination registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3
+```
+
+Capture the digest printed by `sync package push`, then pin the BOM component
+to the local registry image:
+
+```yaml
+artifact:
+  name: kubernetes-rootfs
+  image: registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3
+  digest: sha256:<digest>
+```
+
+Use TLS and a real registry policy for shared or production environments. The
+insecure registry config above is intended only for local development.
+
 ## About `baseArtifacts`
 
 The BOM schema also includes `spec.baseArtifacts`, but the current PoC and the

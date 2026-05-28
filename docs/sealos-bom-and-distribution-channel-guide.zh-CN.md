@@ -175,6 +175,69 @@ spec:
 这些校验都已经在
 [pkg/distribution/bom/types.go](../pkg/distribution/bom/types.go) 里实现了。
 
+## 本地测试 Registry
+
+本地验证 Distribution package 时，可以直接跑 upstream
+[`distribution/distribution`](https://github.com/distribution/distribution)
+registry，并通过 `registry.sealos.local:5000` 访问。这样 package image reference
+会更接近生产里的 OCI 引用，同时不需要远端 registry 账号。
+
+先加本机 hosts：
+
+```bash
+echo "127.0.0.1 registry.sealos.local" | sudo tee -a /etc/hosts
+```
+
+启动本地 registry 容器：
+
+```bash
+docker run -d --restart=always \
+  --name sealos-local-registry \
+  -p 5000:5000 \
+  registry:2
+```
+
+上面的本地 registry 是 HTTP。仅用于测试的 `sealos sync package build/push`
+可以给 Sealos/buildah 指定一份 insecure registry 配置：
+
+```bash
+cat > /tmp/sealos-local-registries.conf <<'EOF'
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+location = "registry.sealos.local:5000"
+insecure = true
+EOF
+```
+
+构建并推送 Kubernetes rootfs component package：
+
+```bash
+sealos --registries-conf /tmp/sealos-local-registries.conf \
+  sync package build \
+  --package-dir scripts/poc/minimal-single-node/packages/kubernetes \
+  --image registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3 \
+  --platform linux/amd64
+
+sealos --registries-conf /tmp/sealos-local-registries.conf \
+  sync package push \
+  --image registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3 \
+  --destination registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3
+```
+
+记录 `sync package push` 输出里的 digest，然后把 BOM 里的组件引用 pin 到本地
+registry 镜像：
+
+```yaml
+artifact:
+  name: kubernetes-rootfs
+  image: registry.sealos.local:5000/sealos/kubernetes-rootfs:v1.30.3
+  digest: sha256:<digest>
+```
+
+共享环境或生产环境应该使用 TLS 和正式 registry policy。这里的 insecure registry
+配置只用于本地开发验证。
+
 ## 关于 `baseArtifacts`
 
 BOM schema 里还有 `spec.baseArtifacts`，但当前 PoC 和大多数现有文档都围绕

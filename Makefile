@@ -62,6 +62,23 @@ Options:
                    Must be set to 1 for verify-sync-package-apply and
                    verify-sync-package-revert.
 
+  DISTRIBUTION_CONTROLLER_IMAGE
+                   Controller image used by render-distribution-controller-bundle
+                   and verify-distribution-controller-real-cluster.
+                   Example: ghcr.io/labring/sealos-agent:v0.0.0
+
+  DISTRIBUTION_CONTROLLER_BUNDLE_DIR
+                   Output directory for render-distribution-controller-bundle.
+                   Default is dist/distribution-controller.
+
+  DISTRIBUTION_CONTROLLER_PUSH_IMAGE
+                   Set to 1 with build-distribution-controller-image to push the
+                   built image after docker build.
+
+  DISTRIBUTION_CONTROLLER_SMOKE_ARGS
+                   Extra arguments passed to scripts/distribution-controller/real-cluster-smoke.sh.
+                   Example: "--kubeconfig ~/.kube/config --artifact-dir /tmp/controller-smoke --keep-resources"
+
   PLATFORMS        Platform to build for. Default is linux_arm64 and linux_amd64.
                    This option is available when using: make {build}.multiarch
                    Example: make build.multiarch PLATFORMS="linux_arm64 linux_amd64"
@@ -144,6 +161,53 @@ verify-sync-package-revert:
 		exit 1; \
 	fi; \
 	scripts/poc/minimal-single-node/smoke.sh --apply --revert-check $(SYNC_PACKAGE_SMOKE_ARGS)
+
+## build-distribution-controller-image: Build the sealos-agent controller image for testing or release preparation.
+.PHONY: build-distribution-controller-image
+build-distribution-controller-image:
+	@set -eu; \
+	if [ -z "$(DISTRIBUTION_CONTROLLER_IMAGE)" ]; then \
+		echo "DISTRIBUTION_CONTROLLER_IMAGE is required" >&2; \
+		exit 1; \
+	fi; \
+	set -- --image "$(DISTRIBUTION_CONTROLLER_IMAGE)" --build-image; \
+	if [ "$(DISTRIBUTION_CONTROLLER_PUSH_IMAGE)" = "1" ]; then set -- "$$@" --push-image; fi; \
+	scripts/distribution-controller/render-release-bundle.sh "$$@"
+
+## render-distribution-controller-bundle: Render release-ready controller install manifests.
+.PHONY: render-distribution-controller-bundle
+render-distribution-controller-bundle:
+	@set -eu; \
+	if [ -z "$(DISTRIBUTION_CONTROLLER_IMAGE)" ]; then \
+		echo "DISTRIBUTION_CONTROLLER_IMAGE is required" >&2; \
+		exit 1; \
+	fi; \
+	scripts/distribution-controller/render-release-bundle.sh \
+		--image "$(DISTRIBUTION_CONTROLLER_IMAGE)" \
+		$(if $(DISTRIBUTION_CONTROLLER_BUNDLE_DIR),--output-dir "$(DISTRIBUTION_CONTROLLER_BUNDLE_DIR)")
+
+## verify-distribution-controller-manifests: Validate controller manifests and controller wiring.
+.PHONY: verify-distribution-controller-manifests
+verify-distribution-controller-manifests:
+	TMPDIR=/tmp GOCACHE=$(TMP_DIR)/go-build go test ./deploy/distribution-controller ./pkg/distribution/controller ./cmd/sealos-agent/cmd -count=1
+	kubectl kustomize deploy/distribution-controller/base >/dev/null
+
+## verify-distribution-controller-real-cluster: Run the mutating controller install smoke against a real cluster.
+.PHONY: verify-distribution-controller-real-cluster
+verify-distribution-controller-real-cluster:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target mutates a Kubernetes cluster" >&2; \
+		exit 1; \
+	fi; \
+	if [ -z "$(DISTRIBUTION_CONTROLLER_IMAGE)" ]; then \
+		echo "DISTRIBUTION_CONTROLLER_IMAGE is required" >&2; \
+		exit 1; \
+	fi; \
+	scripts/distribution-controller/real-cluster-smoke.sh \
+		--image "$(DISTRIBUTION_CONTROLLER_IMAGE)" \
+		--apply \
+		$(DISTRIBUTION_CONTROLLER_SMOKE_ARGS)
 
 ## verify-local-patch-policy: Validate LocalPatchPolicy parsing, provenance, and materialization guards.
 .PHONY: verify-local-patch-policy

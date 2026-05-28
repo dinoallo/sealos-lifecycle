@@ -342,6 +342,69 @@ func TestDistributionControllerE2EWorkflowContract(t *testing.T) {
 	}
 }
 
+func TestDistributionControllerReleaseAndE2EEntrypoints(t *testing.T) {
+	t.Parallel()
+
+	files := map[string][]string{
+		filepath.Join("..", "..", "Makefile"): {
+			"build-distribution-controller-image",
+			"render-distribution-controller-bundle",
+			"verify-distribution-controller-manifests",
+			"verify-distribution-controller-real-cluster",
+			"DISTRIBUTION_CONTROLLER_PUSH_IMAGE",
+			"--artifact-dir",
+			"I_UNDERSTAND_THIS_MUTATES_HOST=1",
+		},
+		filepath.Join("..", "..", "scripts", "distribution-controller", "render-release-bundle.sh"): {
+			"kubectl kustomize",
+			"docker build",
+			"install.yaml",
+			"labring/sealos-agent:dev",
+		},
+		filepath.Join("..", "..", "scripts", "distribution-controller", "real-cluster-smoke.sh"): {
+			"collect_diagnostics",
+			"controller-deployment.describe.txt",
+			"controller-smoke-target.yaml",
+			"kubectl_cmd apply -f",
+			"rollout status deploy/sealos-distribution-controller",
+			"distributiontarget/controller-smoke",
+			"Degraded",
+		},
+		filepath.Join("..", "..", ".github", "workflows", "e2e_distribution_controller.yml"): {
+			"workflow_dispatch",
+			"pull_request",
+			"push",
+			"manifest-gate",
+			"DEFAULT_CONTROLLER_IMAGE",
+			"controller_image",
+			"kubeconfig_secret_name",
+			"azure/setup-kubectl@v4",
+			"environment: distribution-controller-e2e",
+			"distribution-controller-diagnostics",
+			"Render real-cluster smoke manifests without cluster access",
+			"make verify-distribution-controller-real-cluster",
+		},
+		filepath.Join("..", "..", ".github", "workflows", "release.yml"): {
+			"Render distribution controller bundle",
+			"distribution-controller-${GITHUB_REF_NAME}.tar.gz",
+			"gh release upload",
+		},
+	}
+
+	for relPath, wants := range files {
+		data, err := os.ReadFile(relPath)
+		if err != nil {
+			t.Fatalf("read %s: %v", relPath, err)
+		}
+		text := string(data)
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q", relPath, want)
+			}
+		}
+	}
+}
+
 func TestDistributionControllerRBACContract(t *testing.T) {
 	t.Parallel()
 
