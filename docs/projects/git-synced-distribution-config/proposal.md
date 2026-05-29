@@ -319,6 +319,99 @@ delivery:
 
 Changing delivery mode must not change the package graph, feature resolution, profile defaults, input merge order, or patch order. If local build and prebuilt artifact fulfillment produce different desired state for the same BOM, that is a validation failure.
 
+## Package Build Workflow
+
+Fulfillment mode is not the build process. The package build workflow is the
+canonical transformation from a package source revision to a materialized
+package payload. The same workflow should be used by CI prebuilds, source-first
+local builds, disconnected mirror builds, and any future build service.
+
+The build workflow inputs are:
+
+| Input | Required | Purpose |
+| --- | --- | --- |
+| package identity | yes | The `category`, `name`, and `version` selected by the BOM. |
+| `source.path` | yes | Repository-relative package source directory. |
+| `source.digest` | yes | Digest of the normalized source facts used by the build. |
+| `build.class` | yes | Versioned build class that selects the builder implementation and output kind. |
+| `build.platform` | when platform-specific | Target platform such as `linux/amd64`. |
+| `build.profile` | when the class uses it | Distribution profile or build profile data that affects the package payload. |
+| `build.options` | optional | Deterministic non-secret options explicitly recorded in the BOM. |
+
+The build workflow should run in this order:
+
+1. Resolve the BOM package entry by full package identity.
+2. Resolve `source.path` and the referenced `build.class`.
+3. Resolve any build profile or platform fields named by the build contract.
+4. Normalize the source facts used by the build. This includes `package.yaml`
+   and declared package source files, and excludes generated output, local
+   caches, downloaded artifacts, and ignored workspace state.
+5. Compute `source.digest` from the normalized source facts and compare it with
+   the BOM.
+6. Validate `package.yaml`, package paths, package class, and dependency
+   declarations before running the builder.
+7. Execute the build class in a clean workspace to produce a materialized
+   package root or OCI-compatible package artifact.
+8. Validate the materialized package root: it must contain `package.yaml`, its
+   manifest identity must match the BOM entry, all paths must stay inside the
+   package root, and no cluster-local secret values may be included.
+9. Compute the materialized package digest and record build provenance.
+10. Store or expose the output according to the selected fulfillment mode.
+
+The build class is the reusable contract that keeps this workflow
+implementation-independent. A build class version should declare:
+
+- the builder implementation or command family
+- the output kind, such as package root, OCI artifact, OCI layout, or local
+  registry image
+- supported package classes and platforms
+- source include and exclude rules that affect `source.digest`
+- required non-secret build options
+- provenance fields that must be written into the output metadata
+
+Build class versions should be treated as immutable. If a class changes in a
+way that can change package bytes, source selection, or output metadata, it
+should get a new class version. Builders must not read `cluster-config`, live
+cluster state, undeclared host files, or secret values. Network inputs are
+allowed only when they are declared and digest-pinned, or when they are
+pre-staged into the source facts. Source-first local build mode must be able to
+run without an undeclared remote fetch.
+
+The build output should carry enough provenance to prove which inputs produced
+it:
+
+```yaml
+provenance:
+  package: infra/kubernetes@v1.30.3
+  source:
+    path: packages/infra/kubernetes/v1.30.3
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  build:
+    class: rootfs-image/v1
+    profile: prod-amd64
+    platform: linux/amd64
+  output:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+```
+
+The fulfillment modes consume this workflow differently:
+
+| Mode | Relationship to the build workflow |
+| --- | --- |
+| `artifact` | Uses an artifact that was already produced by this workflow. The agent verifies the artifact digest and provenance before render/apply. |
+| `localBuild` | Runs this workflow locally from the pinned source facts and build contract, then uses the local output for render/apply. |
+| `preferArtifact` | Tries `artifact` first. If the artifact is unavailable, optional, and policy allows fallback, it runs `localBuild`. |
+
+For the same BOM package entry and build contract, `artifact` and `localBuild`
+must produce equivalent materialized package payloads. If both paths are
+available and their package digests or render-visible payloads differ, the
+release is invalid until the source, build class, or artifact provenance is
+corrected.
+
+Cluster-local inputs, patches, secret bindings, and delivery policy are not
+part of package build. They are applied after package materialization during
+the render/apply workflow.
+
 ## Distribution Resolution Contract
 
 Given a distribution, channel, profile, and delivery mode selected by `cluster-config`, an agent or operator should resolve distribution content in a deterministic order:
@@ -338,8 +431,8 @@ Resolution should fail closed if a referenced file is missing, a required source
 Recommended Day 0 and Day N flow:
 
 1. A package author updates `packages/<category>/<name>/<version>/`.
-2. CI validates `package.yaml`, computes the source digest, and checks the build contract.
-3. In prebuilt artifact mode, CI builds the package artifact and pushes it to the registry. In source-first local build mode, CI may only validate or test-build the source facts.
+2. CI validates `package.yaml`, computes the source digest, checks the build contract, and runs the canonical package build workflow in a clean workspace.
+3. In prebuilt artifact mode, CI publishes the built package artifact and records its digest. In source-first local build mode, CI may stop after validation and test-build evidence, because clusters can rebuild from the pinned source facts.
 4. Release automation writes or updates a BOM under `releases/<distribution>/<revision>/` with source digests and optional artifact digests.
 5. Reviewers approve the BOM with digest-pinned source and artifact references.
 6. Promotion updates a channel pointer under `channels/<distribution>/`.
@@ -382,9 +475,15 @@ CI for the distribution configuration repository should validate:
 - every `category/name` tuple is unique
 - every buildable BOM package points to a source path and source digest
 - every buildable BOM package names a supported build class
+- every build class version declares an output kind, supported package classes, supported platforms, and required provenance fields
+- every source digest can be recomputed from the normalized source facts
+- every build contract uses only deterministic, non-secret options recorded in the BOM
+- every buildable package can be built in a clean workspace without reading `cluster-config`, live cluster state, undeclared host files, or secret values
 - every `artifact` mode package points to an image and digest
 - every digest is well-formed and no mutable tag is accepted without a digest pin
 - every BOM package has a matching package source or approved external artifact
+- every produced or approved artifact records provenance that matches the BOM source and build contract
+- when both local build and artifact paths are available, they resolve to equivalent materialized package payloads
 - every channel target revision matches the referenced BOM revision
 - every channel pointer references an existing BOM path
 - every profile references existing defaults, masks, full package identities, and supported features
@@ -415,7 +514,8 @@ Rejected because that mixes global package ownership with environment-specific c
 ## Open Questions
 
 - Should Sealos define a first-class `ReleaseChannel` schema, or should channel pointers remain a repository convention at first?
-- How should `source.digest` be computed for a package source tree so it remains deterministic across platforms?
+- What exact canonicalization algorithm should compute `source.digest` for a package source tree so it remains deterministic across platforms?
+- Should the BOM also pin an explicit build class digest, or is an immutable class version plus the selected Git revision sufficient?
 - How should validation discover externally produced package artifacts that do not have source under `packages/`?
 - Should rendered bundle snapshots be allowed in a dedicated audit repository for regulated environments?
 

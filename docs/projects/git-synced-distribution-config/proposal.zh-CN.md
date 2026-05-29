@@ -319,6 +319,88 @@ delivery:
 
 改变 delivery mode 不应改变 package graph、feature resolution、profile defaults、input merge order 或 patch order。如果同一个 BOM 下 local build 和预构建 artifact fulfillment 生成了不同 desired state，应视为校验失败。
 
+## Package 构建流程
+
+Fulfillment mode 不是构建流程本身。package 构建流程是从 package source
+revision 到 materialized package payload 的标准转换。CI 预构建、源优先本地构建、
+离线镜像构建以及未来的 build service 都应使用同一套流程。
+
+构建流程输入如下：
+
+| 输入 | 是否必需 | 目的 |
+| --- | --- | --- |
+| package identity | 是 | BOM 选择的 `category`、`name` 和 `version`。 |
+| `source.path` | 是 | 仓库内相对 package 源目录。 |
+| `source.digest` | 是 | build 使用的标准化 source facts digest。 |
+| `build.class` | 是 | 选择 builder 实现和 output kind 的版本化 build class。 |
+| `build.platform` | 平台相关时必需 | 目标平台，例如 `linux/amd64`。 |
+| `build.profile` | class 使用时必需 | 会影响 package payload 的 distribution profile 或 build profile 数据。 |
+| `build.options` | 可选 | BOM 中显式记录的确定性、非 secret 构建选项。 |
+
+构建流程应按以下顺序执行：
+
+1. 通过完整 package identity 解析 BOM package entry。
+2. 解析 `source.path` 和被引用的 `build.class`。
+3. 解析 build contract 中声明的 build profile 或 platform 字段。
+4. 标准化 build 使用的 source facts。它包括 `package.yaml` 和声明的 package
+   source files，排除 generated output、local cache、downloaded artifacts 和被
+   ignore 的 workspace state。
+5. 基于标准化 source facts 计算 `source.digest`，并与 BOM 中的值比较。
+6. 在运行 builder 之前校验 `package.yaml`、package paths、package class 和依赖声明。
+7. 在干净 workspace 中执行 build class，生成 materialized package root 或
+   OCI-compatible package artifact。
+8. 校验 materialized package root：它必须包含 `package.yaml`，manifest identity
+   必须匹配 BOM entry，所有路径都必须留在 package root 内，且不能包含 cluster-local
+   secret values。
+9. 计算 materialized package digest，并记录 build provenance。
+10. 根据选中的 fulfillment mode 存储或暴露输出。
+
+build class 是让这套流程不绑定具体实现的可复用契约。一个 build class version 应声明：
+
+- builder implementation 或 command family
+- output kind，例如 package root、OCI artifact、OCI layout 或 local registry image
+- 支持的 package classes 和 platforms
+- 会影响 `source.digest` 的 source include/exclude 规则
+- 必需的非 secret build options
+- 必须写入 output metadata 的 provenance fields
+
+build class version 应被视为不可变。只要 class 的改变可能影响 package bytes、source
+selection 或 output metadata，就应发布新的 class version。builder 不能读取
+`cluster-config`、live cluster state、未声明的 host files 或 secret values。只有在
+网络输入被声明并按 digest pin，或者已经预先纳入 source facts 时，才允许使用网络输入。
+源优先本地构建模式必须能在不进行未声明远程 fetch 的情况下运行。
+
+构建输出应携带足够 provenance，用来证明它由哪些输入产生：
+
+```yaml
+provenance:
+  package: infra/kubernetes@v1.30.3
+  source:
+    path: packages/infra/kubernetes/v1.30.3
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  build:
+    class: rootfs-image/v1
+    profile: prod-amd64
+    platform: linux/amd64
+  output:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+```
+
+三种 fulfillment mode 以不同方式消费这套构建流程：
+
+| 模式 | 与构建流程的关系 |
+| --- | --- |
+| `artifact` | 使用已经由该流程产出的 artifact。agent 在 render/apply 前校验 artifact digest 和 provenance。 |
+| `localBuild` | 从 pinned source facts 和 build contract 在本地运行该流程，然后使用本地输出执行 render/apply。 |
+| `preferArtifact` | 先尝试 `artifact`。如果 artifact 不可用、是 optional，并且策略允许 fallback，则运行 `localBuild`。 |
+
+对于同一个 BOM package entry 和 build contract，`artifact` 与 `localBuild` 必须生成等价的
+materialized package payload。如果两条路径都可用，但 package digest 或 render-visible
+payload 不一致，则 release 无效，直到 source、build class 或 artifact provenance 被修正。
+
+Cluster-local inputs、patches、secret bindings 和 delivery policy 不属于 package build。
+它们在 package materialization 之后，作为 render/apply workflow 的一部分再应用。
+
 ## Distribution 解析契约
 
 给定 `cluster-config` 选择的 distribution、channel、profile 和 delivery mode 后，agent 或 operator 应按确定性顺序解析 distribution 内容：
@@ -338,8 +420,8 @@ delivery:
 推荐 Day 0 和 Day N 流程：
 
 1. package author 更新 `packages/<category>/<name>/<version>/`。
-2. CI 校验 `package.yaml`，计算 source digest，并检查 build contract。
-3. 在预构建 artifact 模式下，CI 构建 package artifact 并推送到 registry。在源优先本地构建模式下，CI 可以只校验或 test-build source facts。
+2. CI 校验 `package.yaml`，计算 source digest，检查 build contract，并在干净 workspace 中运行标准 package 构建流程。
+3. 在预构建 artifact 模式下，CI 发布构建出的 package artifact 并记录 digest。在源优先本地构建模式下，CI 可以在 validation 和 test-build evidence 后停止，因为集群可以从 pinned source facts 重新构建。
 4. release automation 在 `releases/<distribution>/<revision>/` 下写入或更新带 source digest 和可选 artifact digest 的 BOM。
 5. reviewer 审批带 source 和 artifact digest pin 的 BOM。
 6. promotion 更新 `channels/<distribution>/` 下的 channel 指针。
@@ -382,9 +464,15 @@ distribution configuration 仓库的 CI 应校验：
 - 每个 `category/name` tuple 都唯一
 - 每个可构建 BOM package 都指向 source path 和 source digest
 - 每个可构建 BOM package 都声明受支持的 build class
+- 每个 build class version 都声明 output kind、支持的 package classes、支持的平台，以及必需 provenance fields
+- 每个 source digest 都可以从标准化 source facts 重新计算
+- 每个 build contract 只使用 BOM 中记录的确定性、非 secret options
+- 每个可构建 package 都可以在干净 workspace 中构建，且不读取 `cluster-config`、live cluster state、未声明 host files 或 secret values
 - 每个 `artifact` 模式 package 都指向 image 和 digest
 - 每个 digest 格式正确，并且不接受缺少 digest pin 的可变 tag
 - 每个 BOM package 都有匹配的 package source 或已批准的外部 artifact
+- 每个产出或批准的 artifact 都记录与 BOM source 和 build contract 匹配的 provenance
+- 当 local build 和 artifact 两条路径都可用时，它们解析到等价的 materialized package payload
 - 每个 channel target revision 都与被引用 BOM 的 revision 一致
 - 每个 channel pointer 都引用已存在的 BOM path
 - 每个 profile 引用已存在的默认值、mask、完整 package identity 和受支持 feature
@@ -415,7 +503,8 @@ distribution configuration 仓库的 CI 应校验：
 ## 开放问题
 
 - Sealos 是否应定义一等的 `ReleaseChannel` schema，还是先把 channel pointer 作为仓库约定？
-- `source.digest` 应如何基于 package source tree 计算，才能跨平台保持确定性？
+- 应使用什么精确 canonicalization algorithm 计算 package source tree 的 `source.digest`，才能跨平台保持确定性？
+- BOM 是否也应该 pin 显式 build class digest，还是 immutable class version 加选中的 Git revision 已经足够？
 - validation 如何发现没有 source under `packages/` 的外部 package artifact？
 - 对于强监管环境，是否允许将 rendered bundle snapshot 放入专用 audit repository？
 
