@@ -292,8 +292,8 @@ data:
 `operatorAction` 是怎么来的、`bundleMatchesRecordedDesiredStateDigest`
 这类护栏具体怎么起作用，请直接看：
 
-- [sealos-sync-drift-walkthrough.md](../../sealos-sync-drift-walkthrough.md)
-- [sealos-sync-operator-action-reference.md](../../sealos-sync-operator-action-reference.md)
+- [Sync drift guide](../../guides/sync-drift.md)
+- [Sync operator actions reference](../../reference/sync-operator-actions.md)
 - `sync-diff.example.yaml`
 - `sync-status.example.yaml`
 

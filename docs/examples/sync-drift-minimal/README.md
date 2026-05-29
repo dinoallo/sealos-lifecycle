@@ -301,8 +301,8 @@ This section only pins the exact command forms against this example directory.
 For why a command is appropriate, how `operatorAction` is derived, or how
 guardrails such as `bundleMatchesRecordedDesiredStateDigest` work, use:
 
-- [sealos-sync-drift-walkthrough.md](../../sealos-sync-drift-walkthrough.md)
-- [sealos-sync-operator-action-reference.md](../../sealos-sync-operator-action-reference.md)
+- [Sync drift guide](../../guides/sync-drift.md)
+- [Sync operator actions reference](../../reference/sync-operator-actions.md)
 - `sync-diff.example.yaml`
 - `sync-status.example.yaml`
 

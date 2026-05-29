@@ -1,0 +1,254 @@
+# Sealos Distribution Controller Install Guide
+
+This guide shows how to install the current `DistributionTarget` controller
+manifests and start a minimal controller-driven reconcile loop.
+
+## What This Installs
+
+The base manifests in
+[`deploy/distribution-controller/base`](../../deploy/distribution-controller/base)
+install:
+
+- the `distribution.sealos.io/v1alpha1` `DistributionTarget` and
+  `DistributionRolloutPolicy` CRDs
+- a `sealos-system` namespace
+- the `sealos-distribution-controller` service account, role, and role binding
+- a `sealos-agent --controller` deployment
+
+The controller watches `DistributionTarget` objects in `sealos-system`, maps
+each target to one existing agent reconcile pass, and writes `Ready` and
+`Degraded` status conditions. A target can reference a same-namespace
+`DistributionRolloutPolicy` through `spec.rolloutPolicyRef`; policy updates
+enqueue the referencing targets for another reconcile pass.
+
+The service account RBAC is scoped to the watched API, status updates, leader
+election leases, and events. Rendered bundle apply still uses the kubeconfig
+selected by `spec.kubeconfigPath` or the deployment default; in the base
+deployment that is `/host/etc/kubernetes/admin.conf`.
+
+## Prerequisites
+
+- A Kubernetes cluster that can pull or preload the controller image.
+- A controller image that contains `/usr/bin/sealos-agent`. Tagged releases
+  publish `ghcr.io/<owner>/sealos-agent:<tag>` as a multi-arch image, and this
+  repository also ships a minimal image definition at
+  [`docker/sealos-agent/Dockerfile`](../../docker/sealos-agent/Dockerfile). The
+  base deployment puts mounted host paths on `PATH`, so `kubectl` and hook tools
+  can either be baked into a derived image or supplied by the host.
+- The selected BOM or local `DistributionChannel` file staged under
+  `/var/lib/sealos/distribution/...` on the node running the controller pod.
+- A cluster-local repo staged under `/var/lib/sealos/distribution/...` when the
+  selected BOM expects local inputs, resources, or patches.
+
+The base deployment mounts:
+
+- `/` from the host at `/host`
+- `/var/lib/sealos` from the host at `/var/lib/sealos`
+- `/run` from the host at `/run`
+
+Those mounts are intentional. The current agent apply path can mutate host
+files and can call host tools while applying rendered bundles. The sample
+deployment therefore runs privileged and points `--kubeconfig` at
+`/host/etc/kubernetes/admin.conf`. It also requires scheduling on nodes labeled
+`node-role.kubernetes.io/control-plane` or `node-role.kubernetes.io/master` and
+tolerates the matching `NoSchedule` taints so that the host admin kubeconfig is
+present.
+
+## Install The Controller
+
+For a tagged release, render a release bundle with the published controller
+image:
+
+```bash
+make render-distribution-controller-bundle \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT
+```
+
+The rendered bundle is written to `dist/distribution-controller/` by default.
+Install it with:
+
+```bash
+kubectl apply -f dist/distribution-controller/install.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+You can also set the deployment image manually:
+
+```bash
+kubectl -n sealos-system set image \
+  -f deploy/distribution-controller/base/deployment.yaml \
+  sealos-agent=ghcr.io/labring/sealos-agent:vNEXT \
+  --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
+```
+
+For local development, build or publish an image that contains the
+`sealos-agent` binary, then set that image in the deployment before applying the
+manifests:
+
+```bash
+make build-distribution-controller-image \
+  DISTRIBUTION_CONTROLLER_IMAGE=example.com/sealos-agent:dev \
+  DISTRIBUTION_CONTROLLER_PUSH_IMAGE=1
+```
+
+```bash
+kubectl -n sealos-system set image \
+  -f deploy/distribution-controller/base/deployment.yaml \
+  sealos-agent=example.com/sealos-agent:dev \
+  --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
+```
+
+Apply the CRD, RBAC, namespace, and adjusted deployment:
+
+```bash
+kubectl apply -f deploy/distribution-controller/base/namespace.yaml
+kubectl apply -f deploy/distribution-controller/base/crd.yaml
+kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
+kubectl apply -f deploy/distribution-controller/base/rbac.yaml
+kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
+```
+
+Apply those files individually when using `-f`. Do not apply the whole
+`deploy/distribution-controller/base` directory with `kubectl apply -f`; it also
+contains `kustomization.yaml`, which must be rendered with `kubectl apply -k`.
+
+If you are using Kustomize, you can also update the image from the base
+directory and apply the rendered output:
+
+```bash
+cd deploy/distribution-controller/base
+kustomize edit set image labring/sealos-agent:dev=example.com/sealos-agent:dev
+kubectl apply -k .
+```
+
+## Verify The Install Path
+
+Use the non-mutating manifest gate for local validation:
+
+```bash
+make verify-distribution-controller-manifests
+```
+
+To run the real-cluster install smoke, select a kubeconfig and opt in
+explicitly. This installs or upgrades the controller in the selected cluster,
+creates a temporary `DistributionTarget` and `DistributionRolloutPolicy`, waits
+for the controller to reconcile that target into `Degraded=True`, and then
+removes the temporary target and policy.
+
+```bash
+make verify-distribution-controller-real-cluster \
+  I_UNDERSTAND_THIS_MUTATES_HOST=1 \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT \
+  DISTRIBUTION_CONTROLLER_SMOKE_ARGS="--kubeconfig ~/.kube/config --artifact-dir /tmp/controller-smoke"
+```
+
+When the smoke fails after cluster access begins, the script writes diagnostics
+under the requested artifact directory: controller Deployment and Pod
+descriptions, recent controller logs, CRD state, smoke target/policy YAML, and
+recent `sealos-system` resources/events.
+
+The repository also includes the `E2E Distribution Controller` GitHub Actions
+workflow. Pull requests and `main` pushes run the non-mutating manifest gate:
+manifest contract tests, Kustomize rendering, release bundle rendering, and the
+smoke script's local render path without cluster access.
+
+The same workflow can be triggered manually for real-cluster smoke. Manual runs
+expect a published controller image and a repository or
+`distribution-controller-e2e` environment secret containing the target
+kubeconfig. The real-cluster job is attached to the
+`distribution-controller-e2e` environment so repository maintainers can protect
+cluster access with GitHub environment approvals. It uploads the rendered bundle
+as a short-lived artifact after each run, and uploads smoke diagnostics when the
+real-cluster check fails.
+
+## Upgrade The Controller
+
+To upgrade an existing installation, publish the new controller image, apply the
+new CRDs and RBAC, then roll the deployment to the new image. Do not delete the
+CRDs during upgrade; existing `DistributionTarget` and `DistributionRolloutPolicy`
+objects are kept by the API server.
+
+```bash
+kubectl apply -f deploy/distribution-controller/base/crd.yaml
+kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
+kubectl apply -f deploy/distribution-controller/base/rbac.yaml
+kubectl -n sealos-system set image \
+  -f deploy/distribution-controller/base/deployment.yaml \
+  sealos-agent=example.com/sealos-agent:vNEXT \
+  --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
+kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+If you reuse the same mutable image tag, restart the deployment after applying
+the manifest so the pod pulls according to its `imagePullPolicy` and node cache
+state:
+
+```bash
+kubectl -n sealos-system rollout restart deploy/sealos-distribution-controller
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+## Create A Distribution Target
+
+Create the rollout policy referenced by the examples:
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-rollout-policy.yaml
+```
+
+Use a pinned BOM target when the cluster should apply one explicit BOM file:
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-target-bom.yaml
+```
+
+Use a local `DistributionChannel` target when the cluster should follow a local
+channel selection file:
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-target-channel.yaml
+```
+
+The controller requires exactly one of `spec.bomPath` or
+`spec.distributionChannelPath`. Both paths must be readable inside the
+controller pod. The sample `DistributionRolloutPolicy` sets
+`spec.strategy.batchSize: 1`, `spec.strategy.canary.batchSize: 1`,
+`spec.strategy.pause.afterCanary: true`, `spec.strategy.healthGate: true`, and
+`spec.strategy.failureAction: Rollback`. That rolls eligible host-targeted
+steps one host at a time, treats the first host batch as the canary, pauses
+before later batches, runs component `healthcheck` hooks after each batch, and
+re-applies the last successful rendered revision if apply fails. Paused and
+rolled-back controller targets do not use periodic requeue; update the target
+or its referenced rollout policy, for example by clearing `pause.afterCanary`
+or selecting a new desired revision, to continue. If a target does not set
+`spec.rolloutPolicyRef`, it can still use the older inline
+`spec.rolloutBatchSize` fallback.
+
+## Check Status
+
+```bash
+kubectl -n sealos-system get distributionrolloutpolicies
+kubectl -n sealos-system get distributiontargets
+kubectl -n sealos-system describe distributiontarget default-platform
+kubectl -n sealos-system logs deploy/sealos-distribution-controller -c sealos-agent
+```
+
+On success, the target reports `Ready=True`, `Degraded=False`, the resolved BOM
+revision, the desired state digest, and the applied revision path.
+
+## Current Boundaries
+
+This is a minimal controller install path. `DistributionRolloutPolicy` currently
+persists host rollout batch size, a first-batch canary size, an optional
+post-canary pause, an optional per-batch health gate, and a stop-or-rollback
+failure action used by the rendered-bundle executor. These settings only apply
+to eligible all-node runtime-rootfs host batches. The pause gate and rollback
+result are operator action holds, not per-host rollout cursors; continuing
+re-enters the eligible apply path with an updated target or policy. It does not
+add registry-backed `DistributionChannel` lookup, controller-driven promotion
+automation, or a package-level safety model for every multi-node workflow.
+Local channel files can be advanced separately with `sealos sync promote`; the
+controller still delegates to the existing BOM-driven render/apply agent path.

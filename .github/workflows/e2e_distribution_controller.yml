@@ -32,7 +32,7 @@ on:
       - "cmd/sealos-agent/**"
       - "deploy/distribution-controller/**"
       - "docker/sealos-agent/**"
-      - "docs/sealos-distribution-controller-install*.md"
+      - "docs/guides/controller-install*.md"
       - "pkg/distribution/**"
       - "scripts/distribution-controller/**"
   pull_request:
@@ -45,7 +45,7 @@ on:
       - "cmd/sealos-agent/**"
       - "deploy/distribution-controller/**"
       - "docker/sealos-agent/**"
-      - "docs/sealos-distribution-controller-install*.md"
+      - "docs/guides/controller-install*.md"
       - "pkg/distribution/**"
       - "scripts/distribution-controller/**"
 
