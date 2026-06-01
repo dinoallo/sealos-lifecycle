@@ -52,26 +52,28 @@ status: {}
 
 ## Catalog
 
+每个 kind 的详细契约位于 [`kinds/`](./kinds/) 目录。下面的目录表会链接到对应详情页。
+
 | Kind | 分类 | Owner | 常见位置 | 状态 |
 | --- | --- | --- | --- | --- |
-| `ComponentPackage` | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`、materialized package root | 已实现文件 schema |
-| `BuildClass` | Repository source document | Platform team | `classes/<class>/<version>.yaml` | Proposed |
-| `BOM` | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | 已实现文件 schema |
-| `ReleaseChannel` | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | 推荐的新名称，代码已接受 |
-| `DistributionChannel` | Repository source document | Release manager | 现有本地 channel 文件 | 已实现兼容名称 |
-| `DistributionHealthProof` | Evidence document | Release automation | CI artifact 或 promotion evidence path | 已实现文件 schema |
-| `ClusterTarget` | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/target.yaml` | Proposed |
-| `ComponentInput` | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/inputs/*.yaml` | Proposed |
-| `LocalPatchPolicy` | Local source document | Platform 或 cluster owner | package source、BOM reference 或 local repo `policy/local-patch-policy.yaml` | 已实现文件 schema |
-| `LocalPatchPolicyGateApproval` | Evidence document | Policy reviewer | local repo policy evidence 或 CI artifact | 已实现文件 schema |
-| `HydratedBundle` | Generated document | Agent 或 CI | render workspace `bundle.yaml` | 已实现生成 schema |
-| `AppliedRevision` | Generated runtime document | Agent | cluster runtime state store `applied-revision.yaml` | 已实现 runtime schema |
-| `AppliedInventory` | Generated runtime document | Agent | rendered 或 applied inventory output | Proposed |
-| `PackageAcceptanceReport` | Evidence document | Package test automation | smoke 或 acceptance artifact | 已实现文件 schema |
-| `DistributionTarget` | Kubernetes CRD | Cluster operator | Kubernetes API，namespaced | 已实现 CRD |
-| `DistributionRolloutPolicy` | Kubernetes CRD | Cluster operator | Kubernetes API，namespaced | 已实现 CRD |
-| `LocalRepo` | Local source document | Cluster owner | local repo metadata | 示例性质，未实现 |
-| `LocalRepoRevision` | Local source document | Cluster owner | local repo revision metadata | 示例性质，未实现 |
+| [`ComponentPackage`](./kinds/component-package.zh-CN.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`、materialized package root | 已实现文件 schema |
+| [`BuildClass`](./kinds/build-class.zh-CN.md) | Repository source document | Platform team | `build-classes/<name>.yaml` | Proposed |
+| [`BOM`](./kinds/bom.zh-CN.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | 已实现文件 schema |
+| [`ReleaseChannel`](./kinds/release-channel.zh-CN.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | 已实现推荐名称，代码接受旧别名 |
+| [`DistributionChannel`](./kinds/distribution-channel.zh-CN.md) | Repository source document | Release manager | 现有本地 channel 文件 | 已实现兼容名称 |
+| [`DistributionHealthProof`](./kinds/distribution-health-proof.zh-CN.md) | Evidence document | Release automation | CI artifact 或 promotion evidence path | 已实现文件 schema |
+| [`ClusterTarget`](./kinds/cluster-target.zh-CN.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/target.yaml` | Proposed |
+| [`ComponentInput`](./kinds/component-input.zh-CN.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/inputs/*.yaml` | Proposed |
+| [`LocalPatchPolicy`](./kinds/local-patch-policy.zh-CN.md) | Local source document | Platform 或 cluster owner | package source、BOM reference 或 local repo `policy/local-patch-policy.yaml` | 已实现文件 schema |
+| [`LocalPatchPolicyGateApproval`](./kinds/local-patch-policy-gate-approval.zh-CN.md) | Evidence document | Policy reviewer | local repo policy evidence 或 CI artifact | 已实现文件 schema |
+| [`HydratedBundle`](./kinds/hydrated-bundle.zh-CN.md) | Generated document | Agent 或 CI | render workspace `bundle.yaml` | 已实现生成 schema |
+| [`AppliedRevision`](./kinds/applied-revision.zh-CN.md) | Generated runtime document | Agent | cluster runtime state store `applied-revision.yaml` | 已实现 runtime schema |
+| [`AppliedInventory`](./kinds/applied-inventory.zh-CN.md) | Generated runtime document | Agent | rendered 或 applied inventory output | Proposed |
+| [`PackageAcceptanceReport`](./kinds/package-acceptance-report.zh-CN.md) | Evidence document | Package test automation | smoke 或 acceptance artifact | 已实现文件 schema |
+| [`DistributionTarget`](./kinds/distribution-target.zh-CN.md) | Kubernetes CRD | Cluster operator | Kubernetes API，namespaced | 已实现 CRD |
+| [`DistributionRolloutPolicy`](./kinds/distribution-rollout-policy.zh-CN.md) | Kubernetes CRD | Cluster operator | Kubernetes API，namespaced | 已实现 CRD |
+| [`LocalRepo`](./kinds/local-repo.zh-CN.md) | Local source document | Cluster owner | local repo metadata | 示例性质，未实现 |
+| [`LocalRepoRevision`](./kinds/local-repo-revision.zh-CN.md) | Local source document | Cluster owner | local repo revision metadata | 示例性质，未实现 |
 
 ## Source Document Kinds
 
@@ -108,7 +110,7 @@ materialized package payload。
 常见位置：
 
 ```text
-classes/<class>/<version>.yaml
+build-classes/<name>.yaml
 ```
 
 最小契约：

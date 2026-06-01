@@ -56,26 +56,29 @@ Common rules:
 
 ## Catalog
 
+Detailed per-kind contracts live under [`kinds/`](./kinds/). The catalog below
+links each kind to its detailed page.
+
 | Kind | Class | Owner | Normal Location | Status |
 | --- | --- | --- | --- | --- |
-| `ComponentPackage` | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`, materialized package roots | Implemented file schema |
-| `BuildClass` | Repository source document | Platform team | `classes/<class>/<version>.yaml` | Proposed |
-| `BOM` | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | Implemented file schema |
-| `ReleaseChannel` | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | Proposed preferred name, code accepts it |
-| `DistributionChannel` | Repository source document | Release manager | Existing local channel files | Implemented compatibility name |
-| `DistributionHealthProof` | Evidence document | Release automation | CI artifacts or promotion evidence paths | Implemented file schema |
-| `ClusterTarget` | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/target.yaml` | Proposed |
-| `ComponentInput` | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/inputs/*.yaml` | Proposed |
-| `LocalPatchPolicy` | Local source document | Platform or cluster owner | package source, BOM reference, or local repo `policy/local-patch-policy.yaml` | Implemented file schema |
-| `LocalPatchPolicyGateApproval` | Evidence document | Policy reviewer | local repo policy evidence or CI artifact | Implemented file schema |
-| `HydratedBundle` | Generated document | Agent or CI | render workspace `bundle.yaml` | Implemented generated schema |
-| `AppliedRevision` | Generated runtime document | Agent | cluster runtime state store `applied-revision.yaml` | Implemented runtime schema |
-| `AppliedInventory` | Generated runtime document | Agent | rendered or applied inventory output | Proposed |
-| `PackageAcceptanceReport` | Evidence document | Package test automation | smoke or acceptance artifact | Implemented file schema |
-| `DistributionTarget` | Kubernetes CRD | Cluster operator | Kubernetes API, namespaced | Implemented CRD |
-| `DistributionRolloutPolicy` | Kubernetes CRD | Cluster operator | Kubernetes API, namespaced | Implemented CRD |
-| `LocalRepo` | Local source document | Cluster owner | local repo metadata | Illustrative, not implemented |
-| `LocalRepoRevision` | Local source document | Cluster owner | local repo revision metadata | Illustrative, not implemented |
+| [`ComponentPackage`](./kinds/component-package.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`, materialized package roots | Implemented file schema |
+| [`BuildClass`](./kinds/build-class.md) | Repository source document | Platform team | `build-classes/<name>.yaml` | Proposed |
+| [`BOM`](./kinds/bom.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | Implemented file schema |
+| [`ReleaseChannel`](./kinds/release-channel.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | Implemented preferred name, code accepts legacy alias |
+| [`DistributionChannel`](./kinds/distribution-channel.md) | Repository source document | Release manager | Existing local channel files | Implemented compatibility name |
+| [`DistributionHealthProof`](./kinds/distribution-health-proof.md) | Evidence document | Release automation | CI artifacts or promotion evidence paths | Implemented file schema |
+| [`ClusterTarget`](./kinds/cluster-target.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/target.yaml` | Proposed |
+| [`ComponentInput`](./kinds/component-input.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/inputs/*.yaml` | Proposed |
+| [`LocalPatchPolicy`](./kinds/local-patch-policy.md) | Local source document | Platform or cluster owner | package source, BOM reference, or local repo `policy/local-patch-policy.yaml` | Implemented file schema |
+| [`LocalPatchPolicyGateApproval`](./kinds/local-patch-policy-gate-approval.md) | Evidence document | Policy reviewer | local repo policy evidence or CI artifact | Implemented file schema |
+| [`HydratedBundle`](./kinds/hydrated-bundle.md) | Generated document | Agent or CI | render workspace `bundle.yaml` | Implemented generated schema |
+| [`AppliedRevision`](./kinds/applied-revision.md) | Generated runtime document | Agent | cluster runtime state store `applied-revision.yaml` | Implemented runtime schema |
+| [`AppliedInventory`](./kinds/applied-inventory.md) | Generated runtime document | Agent | rendered or applied inventory output | Proposed |
+| [`PackageAcceptanceReport`](./kinds/package-acceptance-report.md) | Evidence document | Package test automation | smoke or acceptance artifact | Implemented file schema |
+| [`DistributionTarget`](./kinds/distribution-target.md) | Kubernetes CRD | Cluster operator | Kubernetes API, namespaced | Implemented CRD |
+| [`DistributionRolloutPolicy`](./kinds/distribution-rollout-policy.md) | Kubernetes CRD | Cluster operator | Kubernetes API, namespaced | Implemented CRD |
+| [`LocalRepo`](./kinds/local-repo.md) | Local source document | Cluster owner | local repo metadata | Illustrative, not implemented |
+| [`LocalRepoRevision`](./kinds/local-repo-revision.md) | Local source document | Cluster owner | local repo revision metadata | Illustrative, not implemented |
 
 ## Source Document Kinds
 
@@ -112,7 +115,7 @@ source facts into a materialized package payload.
 Normal location:
 
 ```text
-classes/<class>/<version>.yaml
+build-classes/<name>.yaml
 ```
 
 Minimum contract:
