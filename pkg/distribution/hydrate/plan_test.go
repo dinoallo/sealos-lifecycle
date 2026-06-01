@@ -73,7 +73,7 @@ func TestBuildPlanRejectsDependencyCycle(t *testing.T) {
 	t.Parallel()
 
 	doc := testBOM()
-	doc.Spec.Components[0].Dependencies = []string{"ingress-nginx"}
+	doc.Spec.Packages[0].Dependencies = []string{"ingress-nginx"}
 
 	_, err := BuildPlan(doc, packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
 		switch image {
@@ -92,11 +92,11 @@ func TestBuildPlanRejectsDependencyCycle(t *testing.T) {
 
 func testBOM() *bom.BOM {
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "calico",
-			Kind:    "infra",
-			Version: "3.28.0",
+			Name:     "calico",
+			Category: "infra",
+			Version:  "3.28.0",
 			Artifact: bom.ArtifactReference{
 				Name:   "calico-artifact",
 				Image:  "registry.example.io/sealos/calico:3.28.0",
@@ -105,7 +105,7 @@ func testBOM() *bom.BOM {
 		},
 		{
 			Name:         "ingress-nginx",
-			Kind:         "infra",
+			Category:     "infra",
 			Version:      "1.10.1",
 			Dependencies: []string{"calico"},
 			Artifact: bom.ArtifactReference{

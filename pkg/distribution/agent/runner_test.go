@@ -43,7 +43,7 @@ func TestRunnerRunOnceWithExplicitBOM(t *testing.T) {
 			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
 				Name:     doc.Metadata.Name,
 				Revision: doc.Spec.Revision,
-				Channel:  doc.Spec.Channel,
+				Channel:  doc.Channel(),
 			}, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "")
 			if err != nil {
 				return nil, err
@@ -83,7 +83,6 @@ func TestRunnerRunOnceWithDistributionChannel(t *testing.T) {
 	root := t.TempDir()
 	packageRoot := writeAgentPackage(t, root)
 	doc := agentBOM()
-	doc.Spec.Channel = bom.ChannelAlpha
 	bomPath := filepath.Join(root, "bom.yaml")
 	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
@@ -98,7 +97,7 @@ func TestRunnerRunOnceWithDistributionChannel(t *testing.T) {
 	var provenance hydrate.RenderProvenance
 	runner := Runner{
 		Materialize: func(got *bom.BOM, opts reconcile.Options) (*reconcile.Result, error) {
-			selectedChannel = got.Spec.Channel
+			selectedChannel = got.Channel()
 			provenance = opts.RenderProvenance
 			return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
 		},
@@ -160,7 +159,7 @@ func TestRunnerMarksDegradedAfterApplyFailure(t *testing.T) {
 			if _, err := state.PersistRenderedState(clusterName, state.BOMReference{
 				Name:     got.Metadata.Name,
 				Revision: got.Spec.Revision,
-				Channel:  got.Spec.Channel,
+				Channel:  got.Channel(),
 			}, "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "", ""); err != nil {
 				return nil, err
 			}
@@ -209,7 +208,7 @@ func TestRunnerLoopStopsOnContextCancellation(t *testing.T) {
 			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
 				Name:     doc.Metadata.Name,
 				Revision: doc.Spec.Revision,
-				Channel:  doc.Spec.Channel,
+				Channel:  doc.Channel(),
 			}, "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "", "")
 			if err != nil {
 				return nil, err
@@ -262,7 +261,7 @@ func TestRunnerLoopRetriesAfterApplyFailure(t *testing.T) {
 				if _, err := state.PersistRenderedState(opts.ClusterName, state.BOMReference{
 					Name:     doc.Metadata.Name,
 					Revision: doc.Spec.Revision,
-					Channel:  doc.Spec.Channel,
+					Channel:  doc.Channel(),
 				}, "sha256:1212121212121212121212121212121212121212121212121212121212121212", "", ""); err != nil {
 					return nil, err
 				}
@@ -271,7 +270,7 @@ func TestRunnerLoopRetriesAfterApplyFailure(t *testing.T) {
 			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
 				Name:     doc.Metadata.Name,
 				Revision: doc.Spec.Revision,
-				Channel:  doc.Spec.Channel,
+				Channel:  doc.Channel(),
 			}, "sha256:1313131313131313131313131313131313131313131313131313131313131313", "", "")
 			if err != nil {
 				return nil, err
@@ -352,7 +351,7 @@ func TestRunnerLoopStopsOnRolloutTerminalAction(t *testing.T) {
 					applied, err := state.PersistRenderedState(opts.ClusterName, state.BOMReference{
 						Name:     doc.Metadata.Name,
 						Revision: doc.Spec.Revision,
-						Channel:  doc.Spec.Channel,
+						Channel:  doc.Channel(),
 					}, "sha256:1414141414141414141414141414141414141414141414141414141414141414", "", "")
 					if err != nil {
 						return nil, err
@@ -411,7 +410,7 @@ func TestRunnerLoopReturnsLastResultWhenNextPassSeesCancellation(t *testing.T) {
 			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
 				Name:     doc.Metadata.Name,
 				Revision: doc.Spec.Revision,
-				Channel:  doc.Spec.Channel,
+				Channel:  doc.Channel(),
 			}, "sha256:1616161616161616161616161616161616161616161616161616161616161616", "", "")
 			if err != nil {
 				return nil, err
@@ -465,7 +464,7 @@ func TestRunnerForwardsRolloutStrategy(t *testing.T) {
 			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
 				Name:     doc.Metadata.Name,
 				Revision: doc.Spec.Revision,
-				Channel:  doc.Spec.Channel,
+				Channel:  doc.Channel(),
 			}, "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "", "")
 			if err != nil {
 				return nil, err
@@ -503,10 +502,10 @@ func TestRunnerMarksDegradedAfterPrepareFailure(t *testing.T) {
 	clusterName := "agent-prepare-degraded"
 	root := t.TempDir()
 	doc := agentBOM()
-	doc.Spec.Components = append(doc.Spec.Components, bom.Component{
-		Name:    "storage",
-		Kind:    "infra",
-		Version: "v0.1.0",
+	doc.Spec.Packages = append(doc.Spec.Packages, bom.Package{
+		Name:     "storage",
+		Category: "infra",
+		Version:  "v0.1.0",
 		Artifact: bom.ArtifactReference{
 			Name:   "storage-rootfs",
 			Image:  "registry.example.io/sealos/storage-rootfs:v0.1.0",
@@ -520,7 +519,7 @@ func TestRunnerMarksDegradedAfterPrepareFailure(t *testing.T) {
 	if _, err := state.PersistSuccessfulApply(clusterName, state.BOMReference{
 		Name:     doc.Metadata.Name,
 		Revision: doc.Spec.Revision,
-		Channel:  doc.Spec.Channel,
+		Channel:  doc.Channel(),
 	}, "sha256:1515151515151515151515151515151515151515151515151515151515151515", "", ""); err != nil {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
@@ -556,12 +555,12 @@ func withRuntimeRoot(t *testing.T) {
 }
 
 func agentBOM() *bom.BOM {
-	doc := bom.New("agent-runtime", "rev-agent-1", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc := bom.New("agent-runtime", "rev-agent-1", "")
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "runtime",
-			Kind:    "infra",
-			Version: "v0.1.0",
+			Name:     "runtime",
+			Category: "infra",
+			Version:  "v0.1.0",
 			Artifact: bom.ArtifactReference{
 				Name:   "runtime-rootfs",
 				Image:  "registry.example.io/sealos/runtime-rootfs:v0.1.0",

@@ -87,11 +87,11 @@ func renderBundleFixture(t *testing.T) string {
 	}
 
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",

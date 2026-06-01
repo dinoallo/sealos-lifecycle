@@ -98,10 +98,7 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 		return nil, err
 	}
 
-	componentIndex := make(map[string]bom.Component, len(doc.Spec.Components))
-	for _, component := range doc.Spec.Components {
-		componentIndex[component.Name] = component
-	}
+	componentIndex := doc.PackageIndex()
 
 	dependenciesByComponent, err := buildDependencySet(componentIndex, resolved)
 	if err != nil {
@@ -115,7 +112,7 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 	plan := &Plan{
 		BOMName:             doc.Metadata.Name,
 		Revision:            doc.Spec.Revision,
-		Channel:             doc.Spec.Channel,
+		Channel:             doc.Channel(),
 		BOMLocalPatchPolicy: doc.Spec.LocalPatchPolicy,
 	}
 
@@ -143,7 +140,7 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 	return plan, nil
 }
 
-func buildDependencySet(componentIndex map[string]bom.Component, resolved map[string]*packageformat.ComponentPackage) (map[string][]string, error) {
+func buildDependencySet(componentIndex map[string]bom.Package, resolved map[string]*packageformat.ComponentPackage) (map[string][]string, error) {
 	dependenciesByComponent := make(map[string][]string, len(componentIndex))
 	for name, component := range componentIndex {
 		pkg, ok := resolved[name]

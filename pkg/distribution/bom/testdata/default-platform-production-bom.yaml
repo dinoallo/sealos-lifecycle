@@ -7,16 +7,17 @@ metadata:
     distribution.sealos.io/example: "true"
 spec:
   revision: rev-20240424-prod
-  channel: beta
   baseArtifacts:
     - name: linux-base
       image: registry.example.io/sealos/platform-base:2024.04.24
       digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       platform: linux/amd64
-  components:
-    - name: kubernetes
-      kind: infra
+  packages:
+    - category: infra
+      name: kubernetes
       version: v1.30.3
+      source:
+        path: packages/infra/kubernetes/v1.30.3
       artifact:
         name: kubernetes-production-rootfs
         image: registry.example.io/sealos/kubernetes-production-rootfs:v1.30.3

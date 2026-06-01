@@ -42,6 +42,7 @@ const (
 
 type Options struct {
 	ClusterName        string
+	Channel            bom.ReleaseChannel
 	BOMRoot            string
 	RenderProvenance   hydrate.RenderProvenance
 	SourcePreflight    *hydrate.SourcePreflight
@@ -132,6 +133,7 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 		}()
 	}
 
+	doc.SetRuntimeChannel(opts.Channel)
 	resolved, err := doc.ResolveComponentPackages(opts.PackageLoader)
 	if err != nil {
 		return nil, err
@@ -173,7 +175,7 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	}
 	stagePromoted = true
 
-	ref, err := newBOMReference(doc)
+	ref, err := newBOMReference(doc, opts.Channel)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +421,7 @@ func digestPathName(d digest.Digest) string {
 	return strings.ReplaceAll(d.String(), ":", "-")
 }
 
-func newBOMReference(doc *bom.BOM) (state.BOMReference, error) {
+func newBOMReference(doc *bom.BOM, channel bom.ReleaseChannel) (state.BOMReference, error) {
 	if doc == nil {
 		return state.BOMReference{}, fmt.Errorf("bom cannot be nil")
 	}
@@ -434,7 +436,7 @@ func newBOMReference(doc *bom.BOM) (state.BOMReference, error) {
 	return state.BOMReference{
 		Name:     doc.Metadata.Name,
 		Revision: doc.Spec.Revision,
-		Channel:  doc.Spec.Channel,
+		Channel:  channel,
 		Digest:   digest.Canonical.FromBytes(data).String(),
 	}, nil
 }

@@ -118,7 +118,7 @@ func runSyncLocalRepoDoctor(opts syncLocalRepoDoctorOptions) syncLocalRepoDoctor
 	}
 	acc.out.BOMName = doc.Metadata.Name
 	acc.out.Revision = doc.Spec.Revision
-	acc.out.Summary.Components = len(doc.Spec.Components)
+	acc.out.Summary.Components = doc.PackageCount()
 
 	repoRoot, err := filepath.Abs(opts.LocalRepoPath)
 	if err != nil {
@@ -159,7 +159,7 @@ func resolveSyncLocalRepoBOMPackages(clusterName string, targetOpts syncTargetOp
 		return nil, nil, err
 	}
 	var fallbackLoader packageformat.Loader
-	if len(localRoots) < len(doc.Spec.Components) {
+	if len(localRoots) < doc.PackageCount() {
 		fallbackLoader, _, err = newSyncCachedArtifactResolver(clusterName)
 		if err != nil {
 			return nil, nil, err
@@ -412,7 +412,7 @@ func (a *syncLocalRepoDoctorAccumulator) checkSecretResourceMode(resource localr
 func (a *syncLocalRepoDoctorAccumulator) checkStaleComponentDirs(doc *bom.BOM, repoRoot string) {
 	expected := map[string]struct{}{}
 	if doc != nil {
-		for _, component := range doc.Spec.Components {
+		for _, component := range doc.Packages() {
 			expected[component.Name] = struct{}{}
 		}
 	}
@@ -719,7 +719,7 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 		DistributionChannelPath: strings.TrimSpace(target.DistributionChannelPath),
 		BOMName:                 doc.Metadata.Name,
 		Revision:                doc.Spec.Revision,
-		Components:              len(doc.Spec.Components),
+		Components:              doc.PackageCount(),
 	}
 	if err := writer.writeYAML("repo.yaml", syncLocalRepoMetadata(doc, opts.CreatedAt)); err != nil {
 		return syncLocalRepoInitOutput{}, err
@@ -775,7 +775,7 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 
 func collectSyncLocalRepoInitInputs(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage) []syncLocalRepoInitInput {
 	var inputs []syncLocalRepoInitInput
-	for _, component := range doc.Spec.Components {
+	for _, component := range doc.Packages() {
 		pkg, ok := resolved[component.Name]
 		if !ok || pkg == nil {
 			continue
@@ -899,7 +899,6 @@ func syncLocalRepoMetadata(doc *bom.BOM, createdAt time.Time) map[string]interfa
 		"spec": map[string]interface{}{
 			"bomName":   doc.Metadata.Name,
 			"revision":  doc.Spec.Revision,
-			"channel":   string(doc.Spec.Channel),
 			"createdAt": createdAt.Format(time.RFC3339),
 		},
 	}
@@ -913,7 +912,6 @@ func syncLocalRepoCurrentRevision(doc *bom.BOM, createdAt time.Time) map[string]
 			"bom": map[string]interface{}{
 				"name":     doc.Metadata.Name,
 				"revision": doc.Spec.Revision,
-				"channel":  string(doc.Spec.Channel),
 			},
 			"initializedAt": createdAt.Format(time.RFC3339),
 		},

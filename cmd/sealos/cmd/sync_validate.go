@@ -200,7 +200,7 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	if strings.TrimSpace(target.DistributionChannelPath) != "" {
 		acc.out.DistributionChannelPath = strings.TrimSpace(target.DistributionChannelPath)
 	}
-	acc.out.Summary.Components = len(doc.Spec.Components)
+	acc.out.Summary.Components = doc.PackageCount()
 
 	localRoots, localPackages, err := resolveSyncPackageSources(doc, opts.PackageSources)
 	if err != nil {
@@ -210,7 +210,7 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 
 	var fallbackLoader packageformat.Loader
 	var fallbackSources hydrate.SourceProvider
-	if len(localRoots) < len(doc.Spec.Components) {
+	if len(localRoots) < doc.PackageCount() {
 		fallbackLoader, fallbackSources, err = newSyncCachedArtifactResolver(acc.out.ClusterName)
 		if err != nil {
 			acc.error("packageResolutionFailed", "", "", err.Error())
@@ -254,7 +254,7 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 }
 
 func (a *syncValidateAccumulator) addPackageOutputs(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, localRoots map[string]string) {
-	for _, component := range doc.Spec.Components {
+	for _, component := range doc.Packages() {
 		pkg, ok := resolved[component.Name]
 		if !ok {
 			continue
@@ -270,7 +270,7 @@ func (a *syncValidateAccumulator) addPackageOutputs(doc *bom.BOM, resolved map[s
 }
 
 func (a *syncValidateAccumulator) validatePackages(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, localRoots map[string]string, repo *localrepo.Repo, topology *syncExecutionTopology) {
-	for _, component := range doc.Spec.Components {
+	for _, component := range doc.Packages() {
 		pkg, ok := resolved[component.Name]
 		if !ok {
 			continue
@@ -483,7 +483,7 @@ func syncValidatePatchCount(repo *localrepo.Repo, doc *bom.BOM) int {
 		return 0
 	}
 	total := 0
-	for _, component := range doc.Spec.Components {
+	for _, component := range doc.Packages() {
 		total += len(repo.PatchesFor(component.Name))
 	}
 	return total

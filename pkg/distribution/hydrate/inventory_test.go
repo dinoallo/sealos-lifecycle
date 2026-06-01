@@ -49,11 +49,11 @@ func TestRenderPlanCollectsTrackedK8sObjects(t *testing.T) {
 	}
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -61,9 +61,9 @@ func TestRenderPlanCollectsTrackedK8sObjects(t *testing.T) {
 			},
 		},
 		{
-			Name:    "cilium",
-			Kind:    "addon",
-			Version: "v1.15.0",
+			Name:     "cilium",
+			Category: "addon",
+			Version:  "v1.15.0",
 			Dependencies: []string{
 				"kubernetes",
 			},
@@ -162,11 +162,11 @@ func TestRenderPlanCollectsLocalInputTrackedHostPath(t *testing.T) {
 	}
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "containerd",
-			Kind:    "runtime",
-			Version: "v1.7.18",
+			Name:     "containerd",
+			Category: "runtime",
+			Version:  "v1.7.18",
 			Artifact: bom.ArtifactReference{
 				Name:   "containerd-runtime",
 				Image:  "registry.example.io/sealos/containerd-runtime:v1.7.18",
@@ -174,9 +174,9 @@ func TestRenderPlanCollectsLocalInputTrackedHostPath(t *testing.T) {
 			},
 		},
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Dependencies: []string{
 				"containerd",
 			},
@@ -262,11 +262,11 @@ func TestRenderPlanCollectsSingleFileRootfsTrackedHostPath(t *testing.T) {
 	}
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -306,11 +306,11 @@ func TestRenderPlanCollectsGeneratedHostPaths(t *testing.T) {
 	}
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "containerd",
-			Kind:    "runtime",
-			Version: "v1.7.18",
+			Name:     "containerd",
+			Category: "runtime",
+			Version:  "v1.7.18",
 			Artifact: bom.ArtifactReference{
 				Name:   "containerd-runtime",
 				Image:  "registry.example.io/sealos/containerd-runtime:v1.7.18",
@@ -318,9 +318,9 @@ func TestRenderPlanCollectsGeneratedHostPaths(t *testing.T) {
 			},
 		},
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Dependencies: []string{
 				"containerd",
 			},

@@ -99,6 +99,13 @@ type syncResolvedTarget struct {
 	DistributionChannelPath string
 }
 
+func (t *syncResolvedTarget) runtimeChannel() bom.ReleaseChannel {
+	if t == nil || t.DistributionChannel == nil {
+		return ""
+	}
+	return t.DistributionChannel.Spec.Channel
+}
+
 func addSyncTargetFlags(cmd *cobra.Command, bomPath, distributionChannelPath *string, bomUsage string) {
 	cmd.Flags().StringVarP(bomPath, "file", "f", "", bomUsage)
 	cmd.Flags().StringVar(distributionChannelPath, "distribution-channel", "", "path to a DistributionChannel file to resolve before loading the target BOM")
@@ -201,6 +208,7 @@ func newSyncPromoteCmd() *cobra.Command {
 	var flags struct {
 		distributionChannelFile string
 		targetBOMFile           string
+		sourceChannel           string
 		healthProofFile         string
 		reason                  string
 		approvedBy              string
@@ -226,6 +234,7 @@ func newSyncPromoteCmd() *cobra.Command {
 			result, err := bom.PromoteDistributionChannelFile(bom.PromoteDistributionChannelOptions{
 				ChannelPath:     flags.distributionChannelFile,
 				TargetBOMPath:   flags.targetBOMFile,
+				SourceChannel:   bom.ReleaseChannel(strings.TrimSpace(flags.sourceChannel)),
 				HealthProofPath: flags.healthProofFile,
 				Reason:          flags.reason,
 				ApprovedBy:      flags.approvedBy,
@@ -237,7 +246,7 @@ func newSyncPromoteCmd() *cobra.Command {
 			out := syncPromoteOutput{
 				DistributionChannelPath: result.ChannelPath,
 				BOMPath:                 result.BOMPath,
-				Line:                    result.Channel.Spec.Line,
+				Line:                    result.Channel.Distribution(),
 				Channel:                 string(result.Channel.Spec.Channel),
 				FromRevision:            result.FromRevision,
 				ToRevision:              result.ToRevision,
@@ -250,6 +259,7 @@ func newSyncPromoteCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&flags.distributionChannelFile, "distribution-channel", "", "path to the local DistributionChannel file to advance")
 	cmd.Flags().StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
+	cmd.Flags().StringVar(&flags.sourceChannel, "source-channel", "", "release channel that produced the target BOM; defaults to the target channel")
 	cmd.Flags().StringVar(&flags.healthProofFile, "health-proof", "", "DistributionHealthProof file that must pass when the target channel policy requires proof")
 	cmd.Flags().StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
 	cmd.Flags().StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
@@ -2799,7 +2809,7 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 
 	var fallbackLoader packageformat.Loader
 	var fallbackSources hydrate.SourceProvider
-	if len(localRootsByComponent) < len(doc.Spec.Components) {
+	if len(localRootsByComponent) < doc.PackageCount() {
 		fallbackLoader, fallbackSources, err = newSyncCachedArtifactResolver(clusterName)
 		if err != nil {
 			return reconcile.Options{}, err
@@ -2813,6 +2823,7 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 
 	return reconcile.Options{
 		ClusterName:        clusterName,
+		Channel:            target.runtimeChannel(),
 		BOMRoot:            syncBOMRoot(target),
 		RenderProvenance:   provenance,
 		LocalRepo:          repo,
@@ -2841,7 +2852,7 @@ func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo
 		LocalPatchRevision: strings.TrimSpace(localPatchRevision),
 	}
 	if target != nil && target.DistributionChannel != nil {
-		provenance.DistributionLine = strings.TrimSpace(target.DistributionChannel.Spec.Line)
+		provenance.DistributionLine = target.DistributionChannel.Distribution()
 	}
 	if target != nil && strings.TrimSpace(target.DistributionChannelPath) != "" {
 		absChannelPath, err := filepath.Abs(target.DistributionChannelPath)
@@ -2954,10 +2965,7 @@ func resolveSyncPackageSources(doc *bom.BOM, values []string) (map[string]string
 		return nil, nil, fmt.Errorf("bom cannot be nil")
 	}
 
-	componentIndex := make(map[string]bom.Component, len(doc.Spec.Components))
-	for _, component := range doc.Spec.Components {
-		componentIndex[component.Name] = component
-	}
+	componentIndex := doc.PackageIndex()
 
 	for _, value := range values {
 		componentName, root, ok := strings.Cut(value, "=")

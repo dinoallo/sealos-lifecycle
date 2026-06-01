@@ -50,7 +50,7 @@ func TestMaterializeFile(t *testing.T) {
 	result, err := MaterializeFile(bomPath, Options{
 		ClusterName:        "cluster-a",
 		LocalPatchRevision: "local-rev-1",
-		PackageLoader:      loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot),
+		PackageLoader:      loaderForDir(doc.Spec.Packages[0].Artifact.Reference(), sourceRoot),
 		Sources:            source,
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestMaterializeReplacesCurrentBundle(t *testing.T) {
 	sourceA := fixtureRoot()
 	first, err := MaterializeFile(bomPath, Options{
 		ClusterName:   "cluster-a",
-		PackageLoader: loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceA),
+		PackageLoader: loaderForDir(doc.Spec.Packages[0].Artifact.Reference(), sourceA),
 		Sources:       hydrate.SourceMap{"kubernetes": sourceA},
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestMaterializeReplacesCurrentBundle(t *testing.T) {
 
 	second, err := MaterializeFile(bomPath, Options{
 		ClusterName:   "cluster-a",
-		PackageLoader: loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceB),
+		PackageLoader: loaderForDir(doc.Spec.Packages[0].Artifact.Reference(), sourceB),
 		Sources:       hydrate.SourceMap{"kubernetes": sourceB},
 	})
 	if err != nil {
@@ -204,7 +204,7 @@ func TestMaterializeSnapshotsClusterInventoryTopology(t *testing.T) {
 	sourceRoot := fixtureRoot()
 	result, err := Materialize(doc, Options{
 		ClusterName:   clusterName,
-		PackageLoader: loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot),
+		PackageLoader: loaderForDir(doc.Spec.Packages[0].Artifact.Reference(), sourceRoot),
 		Sources:       hydrate.SourceMap{"kubernetes": sourceRoot},
 	})
 	if err != nil {
@@ -234,11 +234,11 @@ func TestMaterializeOverlaysLocalRepoInput(t *testing.T) {
 	})
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -246,9 +246,9 @@ func TestMaterializeOverlaysLocalRepoInput(t *testing.T) {
 			},
 		},
 		{
-			Name:    "cilium",
-			Kind:    "addon",
-			Version: "v1.15.0",
+			Name:     "cilium",
+			Category: "addon",
+			Version:  "v1.15.0",
 			Dependencies: []string{
 				"kubernetes",
 			},
@@ -278,9 +278,9 @@ func TestMaterializeOverlaysLocalRepoInput(t *testing.T) {
 		LocalRepo:   repo,
 		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
 			switch image {
-			case doc.Spec.Components[0].Artifact.Reference():
+			case doc.Spec.Packages[0].Artifact.Reference():
 				return packageformat.LoadDir(fixtureRoot())
-			case doc.Spec.Components[1].Artifact.Reference():
+			case doc.Spec.Packages[1].Artifact.Reference():
 				return packageformat.LoadDir(sourceRoot)
 			default:
 				return nil, fmt.Errorf("unexpected image %q", image)
@@ -376,11 +376,11 @@ func TestMaterializeUsesPackageLocalPatchPolicyWhenLocalRepoPolicyMissing(t *tes
 	})
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -388,9 +388,9 @@ func TestMaterializeUsesPackageLocalPatchPolicyWhenLocalRepoPolicyMissing(t *tes
 			},
 		},
 		{
-			Name:    "cilium",
-			Kind:    "addon",
-			Version: "v1.15.0",
+			Name:     "cilium",
+			Category: "addon",
+			Version:  "v1.15.0",
 			Dependencies: []string{
 				"kubernetes",
 			},
@@ -418,9 +418,9 @@ func TestMaterializeUsesPackageLocalPatchPolicyWhenLocalRepoPolicyMissing(t *tes
 		LocalRepo:   repo,
 		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
 			switch image {
-			case doc.Spec.Components[0].Artifact.Reference():
+			case doc.Spec.Packages[0].Artifact.Reference():
 				return packageformat.LoadDir(fixtureRoot())
-			case doc.Spec.Components[1].Artifact.Reference():
+			case doc.Spec.Packages[1].Artifact.Reference():
 				pkg, err := packageformat.LoadDir(ciliumSource)
 				if err != nil {
 					return nil, err
@@ -478,7 +478,7 @@ func TestMaterializeLocalRepoPolicyOverridesPackagePolicy(t *testing.T) {
 		ClusterName: "cluster-a",
 		LocalRepo:   repo,
 		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
-			pkg, err := loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot).Load(image)
+			pkg, err := loaderForDir(doc.Spec.Packages[0].Artifact.Reference(), sourceRoot).Load(image)
 			if err != nil {
 				return nil, err
 			}
@@ -516,7 +516,7 @@ func TestMaterializeUsesBOMLocalPatchPolicy(t *testing.T) {
 		ClusterName: "cluster-a",
 		BOMRoot:     bomRoot,
 		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
-			pkg, err := loaderForDir(doc.Spec.Components[0].Artifact.Reference(), sourceRoot).Load(image)
+			pkg, err := loaderForDir(doc.Spec.Packages[0].Artifact.Reference(), sourceRoot).Load(image)
 			if err != nil {
 				return nil, err
 			}
@@ -544,11 +544,11 @@ func TestMaterializeRejectsMultiplePackageLocalPatchPolicies(t *testing.T) {
 	})
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -556,9 +556,9 @@ func TestMaterializeRejectsMultiplePackageLocalPatchPolicies(t *testing.T) {
 			},
 		},
 		{
-			Name:    "other",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "other",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "other-rootfs",
 				Image:  "registry.example.io/sealos/other-rootfs:v1.30.3",
@@ -577,10 +577,10 @@ func TestMaterializeRejectsMultiplePackageLocalPatchPolicies(t *testing.T) {
 			var root string
 			componentName := ""
 			switch image {
-			case doc.Spec.Components[0].Artifact.Reference():
+			case doc.Spec.Packages[0].Artifact.Reference():
 				root = sourceA
 				componentName = "kubernetes"
-			case doc.Spec.Components[1].Artifact.Reference():
+			case doc.Spec.Packages[1].Artifact.Reference():
 				root = sourceB
 				componentName = "other"
 			default:
@@ -616,11 +616,11 @@ func TestMaterializeBOMPolicyOverridesMultiplePackagePolicies(t *testing.T) {
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
 	doc.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -628,9 +628,9 @@ func TestMaterializeBOMPolicyOverridesMultiplePackagePolicies(t *testing.T) {
 			},
 		},
 		{
-			Name:    "other",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "other",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "other-rootfs",
 				Image:  "registry.example.io/sealos/other-rootfs:v1.30.3",
@@ -652,10 +652,10 @@ func TestMaterializeBOMPolicyOverridesMultiplePackagePolicies(t *testing.T) {
 			var root string
 			componentName := ""
 			switch image {
-			case doc.Spec.Components[0].Artifact.Reference():
+			case doc.Spec.Packages[0].Artifact.Reference():
 				root = sourceA
 				componentName = "kubernetes"
-			case doc.Spec.Components[1].Artifact.Reference():
+			case doc.Spec.Packages[1].Artifact.Reference():
 				root = sourceB
 				componentName = "other"
 			default:
@@ -693,11 +693,11 @@ func TestMaterializeLocalRepoPolicyOverridesMultiplePackagePolicies(t *testing.T
 	})
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -705,9 +705,9 @@ func TestMaterializeLocalRepoPolicyOverridesMultiplePackagePolicies(t *testing.T
 			},
 		},
 		{
-			Name:    "other",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "other",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "other-rootfs",
 				Image:  "registry.example.io/sealos/other-rootfs:v1.30.3",
@@ -733,10 +733,10 @@ func TestMaterializeLocalRepoPolicyOverridesMultiplePackagePolicies(t *testing.T
 			var root string
 			componentName := ""
 			switch image {
-			case doc.Spec.Components[0].Artifact.Reference():
+			case doc.Spec.Packages[0].Artifact.Reference():
 				root = sourceA
 				componentName = "kubernetes"
-			case doc.Spec.Components[1].Artifact.Reference():
+			case doc.Spec.Packages[1].Artifact.Reference():
 				root = sourceB
 				componentName = "other"
 			default:
@@ -774,11 +774,11 @@ func TestMaterializeRejectsInvalidLocalRepoPatch(t *testing.T) {
 	})
 
 	doc := bom.New("minimal-single-node", "rev-poc-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -786,9 +786,9 @@ func TestMaterializeRejectsInvalidLocalRepoPatch(t *testing.T) {
 			},
 		},
 		{
-			Name:    "cilium",
-			Kind:    "addon",
-			Version: "v1.15.0",
+			Name:     "cilium",
+			Category: "addon",
+			Version:  "v1.15.0",
 			Dependencies: []string{
 				"kubernetes",
 			},
@@ -813,9 +813,9 @@ func TestMaterializeRejectsInvalidLocalRepoPatch(t *testing.T) {
 		LocalRepo:   repo,
 		PackageLoader: packageformat.LoaderFunc(func(image string) (*packageformat.ComponentPackage, error) {
 			switch image {
-			case doc.Spec.Components[0].Artifact.Reference():
+			case doc.Spec.Packages[0].Artifact.Reference():
 				return packageformat.LoadDir(fixtureRoot())
-			case doc.Spec.Components[1].Artifact.Reference():
+			case doc.Spec.Packages[1].Artifact.Reference():
 				return packageformat.LoadDir(sourceRoot)
 			default:
 				return nil, fmt.Errorf("unexpected image %q", image)
@@ -853,11 +853,11 @@ func (p *trackedSourceProvider) Close() error {
 
 func testBOM() *bom.BOM {
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",

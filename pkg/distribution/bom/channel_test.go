@@ -22,11 +22,18 @@ func TestDistributionChannelValidate(t *testing.T) {
 			name: "valid",
 		},
 		{
-			name: "missing line",
+			name: "metadata name channel",
 			mutate: func(c *DistributionChannel) {
-				c.Spec.Line = ""
+				c.Metadata.Name = string(ChannelBeta)
+				c.Spec.Channel = ""
 			},
-			wantErr: "spec.line",
+		},
+		{
+			name: "missing distribution",
+			mutate: func(c *DistributionChannel) {
+				c.Spec.Distribution = ""
+			},
+			wantErr: "spec.distribution",
 		},
 		{
 			name: "invalid channel",
@@ -359,7 +366,7 @@ func TestPromoteDistributionChannelFile(t *testing.T) {
 	if got, want := resolved.BOM.Spec.Revision, "rev-20240424"; got != want {
 		t.Fatalf("resolved BOM revision = %q, want %q", got, want)
 	}
-	if got, want := resolved.BOM.Spec.Channel, ChannelStable; got != want {
+	if got, want := resolved.BOM.Channel(), ChannelStable; got != want {
 		t.Fatalf("resolved BOM channel = %q, want %q", got, want)
 	}
 }
@@ -489,7 +496,6 @@ func TestPromoteDistributionChannelFileRejectsAlphaCandidateForStable(t *testing
 	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
 	targetBOM := validBOM()
 	targetBOM.Spec.Revision = "rev-20240424"
-	targetBOM.Spec.Channel = ChannelAlpha
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
@@ -506,6 +512,7 @@ func TestPromoteDistributionChannelFileRejectsAlphaCandidateForStable(t *testing
 	_, err := PromoteDistributionChannelFile(PromoteDistributionChannelOptions{
 		ChannelPath:     channelPath,
 		TargetBOMPath:   targetBOMPath,
+		SourceChannel:   ChannelAlpha,
 		HealthProofPath: healthProofPath,
 		Reason:          "passed canary",
 		ApprovedBy:      "release-team",

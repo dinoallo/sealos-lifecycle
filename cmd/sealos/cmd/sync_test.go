@@ -171,14 +171,14 @@ func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
 
 func TestSyncRenderCmdWithDistributionChannel(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
-	constants.DefaultRuntimeRootDir = t.TempDir()
+	runtimeRoot := t.TempDir()
+	constants.DefaultRuntimeRootDir = runtimeRoot
 	t.Cleanup(func() {
 		constants.DefaultRuntimeRootDir = previousRuntimeRoot
 	})
 
 	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
 	doc := testSyncBOM()
-	doc.Spec.Channel = bom.ChannelAlpha
 	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
@@ -196,6 +196,7 @@ func TestSyncRenderCmdWithDistributionChannel(t *testing.T) {
 		"render",
 		"--distribution-channel", channelPath,
 		"--cluster", "cluster-channel",
+		"--runtime-root", runtimeRoot,
 		"--package-source", "kubernetes=" + syncFixtureRoot(),
 	})
 
@@ -308,6 +309,7 @@ func TestSyncPromoteCmd(t *testing.T) {
 		"promote",
 		"--distribution-channel", channelPath,
 		"--target-bom", targetBOMPath,
+		"--source-channel", string(bom.ChannelBeta),
 		"--health-proof", healthProofPath,
 		"--reason", "beta cohort passed",
 		"--approved-by", "release-team",
@@ -501,7 +503,6 @@ func TestSyncPromoteCmdRejectsAlphaCandidateForStable(t *testing.T) {
 	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
 	targetBOM := testSyncBOM()
 	targetBOM.Spec.Revision = "rev-20240424"
-	targetBOM.Spec.Channel = bom.ChannelAlpha
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
@@ -520,6 +521,7 @@ func TestSyncPromoteCmdRejectsAlphaCandidateForStable(t *testing.T) {
 		"promote",
 		"--distribution-channel", channelPath,
 		"--target-bom", targetBOMPath,
+		"--source-channel", string(bom.ChannelAlpha),
 		"--health-proof", healthProofPath,
 		"--reason", "passed canary",
 		"--approved-by", "release-team",
@@ -3537,7 +3539,7 @@ func TestSyncRenderCmdWithOCIPackageArtifact(t *testing.T) {
 	}
 
 	doc := testSyncBOM()
-	artifactRef := doc.Spec.Components[0].Artifact.Reference()
+	artifactRef := doc.Spec.Packages[0].Artifact.Reference()
 
 	previousResolver := newSyncCachedArtifactResolver
 	var cacheRoot string
@@ -9732,11 +9734,11 @@ func TestPersistSyncObservedState(t *testing.T) {
 
 func testSyncBOM() *bom.BOM {
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -9892,10 +9894,10 @@ func syncFixtureRoot() string {
 
 func syncLifecycleBOM() *bom.BOM {
 	doc := bom.New("lifecycle-acceptance", "rev-1", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{{
-		Name:    "runtime",
-		Kind:    "infra",
-		Version: "v0.1.0",
+	doc.Spec.Packages = []bom.Package{{
+		Name:     "runtime",
+		Category: "infra",
+		Version:  "v0.1.0",
 		Artifact: bom.ArtifactReference{
 			Name:   "runtime-rootfs",
 			Image:  "registry.example.io/sealos/runtime-rootfs:v0.1.0",

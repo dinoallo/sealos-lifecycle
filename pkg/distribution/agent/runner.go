@@ -246,7 +246,7 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 
 	var fallbackLoader packageformat.Loader
 	var fallbackSources hydrate.SourceProvider
-	if len(localRoots) < len(target.bom.Spec.Components) {
+	if len(localRoots) < target.bom.PackageCount() {
 		if opts.Mounter == nil {
 			return reconcile.Options{}, fmt.Errorf("image mounter cannot be nil when BOM components are not fully backed by package sources")
 		}
@@ -266,6 +266,7 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 	}
 	return reconcile.Options{
 		ClusterName:        opts.ClusterName,
+		Channel:            target.runtimeChannel(),
 		RenderProvenance:   provenance,
 		LocalRepo:          repo,
 		LocalPatchRevision: strings.TrimSpace(opts.LocalPatchRevision),
@@ -278,6 +279,13 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 			fallback: fallbackSources,
 		},
 	}, nil
+}
+
+func (t *resolvedTarget) runtimeChannel() bom.ReleaseChannel {
+	if t == nil || t.distributionChannel == nil {
+		return ""
+	}
+	return t.distributionChannel.Spec.Channel
 }
 
 func cacheRoot(opts Options) string {
@@ -297,10 +305,7 @@ func resolvePackageSources(doc *bom.BOM, sources []PackageSource) (map[string]st
 		return nil, nil, fmt.Errorf("bom cannot be nil")
 	}
 
-	componentIndex := make(map[string]bom.Component, len(doc.Spec.Components))
-	for _, component := range doc.Spec.Components {
-		componentIndex[component.Name] = component
-	}
+	componentIndex := doc.PackageIndex()
 
 	for _, source := range sources {
 		componentName := strings.TrimSpace(source.Component)
@@ -335,7 +340,7 @@ func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localr
 		LocalPatchRevision: strings.TrimSpace(localPatchRevision),
 	}
 	if target != nil && target.distributionChannel != nil {
-		provenance.DistributionLine = strings.TrimSpace(target.distributionChannel.Spec.Line)
+		provenance.DistributionLine = target.distributionChannel.Distribution()
 	}
 	if target != nil && strings.TrimSpace(target.distributionChannelPath) != "" {
 		absChannelPath, err := filepath.Abs(target.distributionChannelPath)

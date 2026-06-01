@@ -19,10 +19,9 @@ metadata:
   name: default-platform
 spec:
   revision: rev-20240423
-  channel: beta
-  components:
-    - name: calico
-      kind: infra
+  packages:
+    - category: network
+      name: calico
       version: 3.28.0
       artifact:
         name: calico-artifact
@@ -57,8 +56,8 @@ func TestLoadFileProductionExample(t *testing.T) {
 	if got, want := doc.Spec.Revision, "rev-20240424-prod"; got != want {
 		t.Fatalf("spec.revision = %q, want %q", got, want)
 	}
-	if got, want := len(doc.Spec.Components), 1; got != want {
-		t.Fatalf("len(spec.components) = %d, want %d", got, want)
+	if got, want := doc.PackageCount(), 1; got != want {
+		t.Fatalf("len(spec.packages) = %d, want %d", got, want)
 	}
 
 	root := filepath.Join("..", "packageformat", "testdata", "kubernetes-production-rootfs")

@@ -31,7 +31,8 @@ import (
 )
 
 type DistributionChannelSpec struct {
-	Line             string                     `json:"line" yaml:"line"`
+	Distribution     string                     `json:"distribution" yaml:"distribution"`
+	Line             string                     `json:"line,omitempty" yaml:"line,omitempty"`
 	Channel          ReleaseChannel             `json:"channel" yaml:"channel"`
 	TargetRevision   string                     `json:"targetRevision" yaml:"targetRevision"`
 	BOMPath          string                     `json:"bomPath" yaml:"bomPath"`
@@ -66,6 +67,7 @@ type ResolvedDistributionChannel struct {
 type PromoteDistributionChannelOptions struct {
 	ChannelPath     string
 	TargetBOMPath   string
+	SourceChannel   ReleaseChannel
 	HealthProofPath string
 	Reason          string
 	ApprovedBy      string
@@ -73,16 +75,17 @@ type PromoteDistributionChannelOptions struct {
 }
 
 type PromoteDistributionChannelResult struct {
-	Channel      *DistributionChannel
-	BOM          *BOM
-	ChannelPath  string
-	BOMPath      string
-	FromRevision string
-	ToRevision   string
-	Changed      bool
-	Promotion    DistributionPromotionRef
-	HealthProof  *DistributionHealthProof
-	Decision     *promotionpolicy.Decision
+	Channel       *DistributionChannel
+	BOM           *BOM
+	ChannelPath   string
+	BOMPath       string
+	FromRevision  string
+	ToRevision    string
+	Changed       bool
+	Promotion     DistributionPromotionRef
+	HealthProof   *DistributionHealthProof
+	Decision      *promotionpolicy.Decision
+	SourceChannel ReleaseChannel
 }
 
 type DistributionHealthProofSpec struct {
@@ -125,12 +128,12 @@ func NewDistributionHealthProof(name, line, targetRevision string, passed bool) 
 func NewDistributionChannel(name, line string, channel ReleaseChannel, targetRevision, bomPath string) *DistributionChannel {
 	return &DistributionChannel{
 		APIVersion: distribution.APIVersion,
-		Kind:       distribution.KindDistributionChannel,
+		Kind:       distribution.KindReleaseChannel,
 		Metadata: Metadata{
 			Name: name,
 		},
 		Spec: DistributionChannelSpec{
-			Line:           line,
+			Distribution:   line,
 			Channel:        channel,
 			TargetRevision: targetRevision,
 			BOMPath:        bomPath,
@@ -147,16 +150,16 @@ func (c DistributionChannel) Validate() error {
 	if c.APIVersion != distribution.APIVersion {
 		return fmt.Errorf("unsupported apiVersion %q", c.APIVersion)
 	}
-	if c.Kind != distribution.KindDistributionChannel {
+	if c.Kind != distribution.KindDistributionChannel && c.Kind != distribution.KindReleaseChannel {
 		return fmt.Errorf("unsupported kind %q", c.Kind)
 	}
 	if c.Metadata.Name == "" {
 		return fmt.Errorf("metadata.name cannot be empty")
 	}
-	if strings.TrimSpace(c.Spec.Line) == "" {
-		return fmt.Errorf("spec.line cannot be empty")
+	if strings.TrimSpace(c.Distribution()) == "" {
+		return fmt.Errorf("spec.distribution cannot be empty")
 	}
-	if err := c.Spec.Channel.Validate(); err != nil {
+	if err := c.releaseChannel().ValidateRequired(); err != nil {
 		return fmt.Errorf("spec.channel: %w", err)
 	}
 	if strings.TrimSpace(c.Spec.TargetRevision) == "" {
@@ -171,6 +174,39 @@ func (c DistributionChannel) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c DistributionChannel) Distribution() string {
+	if strings.TrimSpace(c.Spec.Distribution) != "" {
+		return strings.TrimSpace(c.Spec.Distribution)
+	}
+	return strings.TrimSpace(c.Spec.Line)
+}
+
+func (c DistributionChannel) releaseChannel() ReleaseChannel {
+	if c.Spec.Channel != "" {
+		return c.Spec.Channel
+	}
+	return ReleaseChannel(strings.TrimSpace(c.Metadata.Name))
+}
+
+func (c *DistributionChannel) Normalize() {
+	if c == nil {
+		return
+	}
+	if strings.TrimSpace(c.Spec.Distribution) == "" {
+		c.Spec.Distribution = strings.TrimSpace(c.Spec.Line)
+	}
+	c.Spec.Line = ""
+	if c.Spec.Channel == "" {
+		c.Spec.Channel = c.releaseChannel()
+	}
+	if c.Kind == distribution.KindReleaseChannel {
+		return
+	}
+	if c.Kind == "" {
+		c.Kind = distribution.KindReleaseChannel
+	}
 }
 
 func (p DistributionPromotionRef) Validate() error {
@@ -236,6 +272,7 @@ func LoadDistributionChannelFile(path string) (*DistributionChannel, error) {
 	if err := yamlutil.UnmarshalFile(path, &doc); err != nil {
 		return nil, fmt.Errorf("unmarshal distribution channel %q: %w", path, err)
 	}
+	doc.Normalize()
 	if err := doc.Validate(); err != nil {
 		return nil, fmt.Errorf("validate distribution channel %q: %w", path, err)
 	}
@@ -275,13 +312,13 @@ func ResolveDistributionChannelFile(path string) (*ResolvedDistributionChannel, 
 	if err != nil {
 		return nil, err
 	}
-	if doc.Metadata.Name != channel.Spec.Line {
-		return nil, fmt.Errorf("distribution channel %q line %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Spec.Line, doc.Metadata.Name)
+	if doc.Metadata.Name != channel.Distribution() {
+		return nil, fmt.Errorf("distribution channel %q distribution %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), doc.Metadata.Name)
 	}
 	if doc.Spec.Revision != channel.Spec.TargetRevision {
 		return nil, fmt.Errorf("distribution channel %q targetRevision %q does not match BOM spec.revision %q", channel.Metadata.Name, channel.Spec.TargetRevision, doc.Spec.Revision)
 	}
-	doc.Spec.Channel = channel.Spec.Channel
+	doc.SetRuntimeChannel(channel.Spec.Channel)
 	return &ResolvedDistributionChannel{
 		Channel: channel,
 		BOM:     doc,
@@ -315,8 +352,8 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	if err != nil {
 		return nil, err
 	}
-	if targetBOM.Metadata.Name != channel.Spec.Line {
-		return nil, fmt.Errorf("distribution channel %q line %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Spec.Line, targetBOM.Metadata.Name)
+	if targetBOM.Metadata.Name != channel.Distribution() {
+		return nil, fmt.Errorf("distribution channel %q distribution %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), targetBOM.Metadata.Name)
 	}
 	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(opts.HealthProofPath, targetBOM)
 	if err != nil {
@@ -324,7 +361,11 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	}
 
 	fromRevision := channel.Spec.TargetRevision
-	decision, err := evaluateDistributionPromotion(channel, targetBOM, healthProof)
+	sourceChannel := opts.SourceChannel
+	if sourceChannel == "" {
+		sourceChannel = channel.Spec.Channel
+	}
+	decision, err := evaluateDistributionPromotion(channel, targetBOM, healthProof, sourceChannel)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +374,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
 	channel.Spec.BOMPath = targetBOMPathForChannel
+	channel.Normalize()
 
 	approvedAt := opts.ApprovedAt
 	if approvedAt.IsZero() {
@@ -362,32 +404,36 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	}
 
 	return &PromoteDistributionChannelResult{
-		Channel:      channel,
-		BOM:          targetBOM,
-		ChannelPath:  channelPath,
-		BOMPath:      targetBOMPath,
-		FromRevision: fromRevision,
-		ToRevision:   targetBOM.Spec.Revision,
-		Changed:      changed,
-		Promotion:    promotion,
-		HealthProof:  healthProof,
-		Decision:     decision,
+		Channel:       channel,
+		BOM:           targetBOM,
+		ChannelPath:   channelPath,
+		BOMPath:       targetBOMPath,
+		FromRevision:  fromRevision,
+		ToRevision:    targetBOM.Spec.Revision,
+		Changed:       changed,
+		Promotion:     promotion,
+		HealthProof:   healthProof,
+		Decision:      decision,
+		SourceChannel: sourceChannel,
 	}, nil
 }
 
-func evaluateDistributionPromotion(channel *DistributionChannel, targetBOM *BOM, healthProof *DistributionHealthProof) (*promotionpolicy.Decision, error) {
+func evaluateDistributionPromotion(channel *DistributionChannel, targetBOM *BOM, healthProof *DistributionHealthProof, sourceChannel ReleaseChannel) (*promotionpolicy.Decision, error) {
 	if channel == nil {
 		return nil, fmt.Errorf("distribution channel cannot be nil")
 	}
 	if targetBOM == nil {
 		return nil, fmt.Errorf("target BOM cannot be nil")
 	}
+	if err := sourceChannel.ValidateRequired(); err != nil {
+		return nil, fmt.Errorf("source channel: %w", err)
+	}
 	decision, err := promotionpolicy.EvaluateDefault(promotionpolicy.Request{
 		TargetChannel: promotionpolicy.Channel(channel.Spec.Channel),
 		Candidate: promotionpolicy.CandidateRevision{
 			Line:          targetBOM.Metadata.Name,
 			Revision:      targetBOM.Spec.Revision,
-			SourceChannel: promotionpolicy.Channel(targetBOM.Spec.Channel),
+			SourceChannel: promotionpolicy.Channel(sourceChannel),
 			Replacing:     channel.Spec.TargetRevision,
 		},
 		HealthProof: distributionPromotionHealthProofSummary(healthProof),

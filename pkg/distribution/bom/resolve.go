@@ -37,25 +37,26 @@ func (b BOM) ResolveComponentPackages(loader packageformat.Loader) (map[string]*
 		return nil, err
 	}
 
-	resolved := make(map[string]*packageformat.ComponentPackage, len(b.Spec.Components))
-	for i, component := range b.Spec.Components {
-		pkg, err := loader.Load(component.Artifact.Reference())
+	packages := b.Packages()
+	resolved := make(map[string]*packageformat.ComponentPackage, len(packages))
+	for i, bomPackage := range packages {
+		pkg, err := loader.Load(bomPackage.Artifact.Reference())
 		if err != nil {
-			return nil, fmt.Errorf("load component %q: %w", component.Name, err)
+			return nil, fmt.Errorf("load package %q: %w", bomPackage.Name, err)
 		}
-		if pkg.Spec.Component != component.Name {
+		if pkg.Spec.Component != bomPackage.Name {
 			return nil, fmt.Errorf(
-				"spec.components[%d]: package component mismatch, got %q want %q",
-				i, pkg.Spec.Component, component.Name,
+				"spec.packages[%d]: package component mismatch, got %q want %q",
+				i, pkg.Spec.Component, bomPackage.Name,
 			)
 		}
-		if pkg.Spec.Version != component.Version {
+		if pkg.Spec.Version != bomPackage.Version {
 			return nil, fmt.Errorf(
-				"spec.components[%d]: package version mismatch, got %q want %q",
-				i, pkg.Spec.Version, component.Version,
+				"spec.packages[%d]: package version mismatch, got %q want %q",
+				i, pkg.Spec.Version, bomPackage.Version,
 			)
 		}
-		resolved[component.Name] = pkg
+		resolved[bomPackage.Name] = pkg
 	}
 	return resolved, nil
 }

@@ -14,30 +14,23 @@ func TestBOMValidate(t *testing.T) {
 			name: "valid",
 		},
 		{
-			name: "invalid channel",
-			mutate: func(b *BOM) {
-				b.Spec.Channel = ReleaseChannel("ga")
-			},
-			wantErr: true,
-		},
-		{
 			name: "missing component digest",
 			mutate: func(b *BOM) {
-				b.Spec.Components[0].Artifact.Digest = ""
+				b.Spec.Packages[0].Artifact.Digest = ""
 			},
 			wantErr: true,
 		},
 		{
 			name: "unknown dependency",
 			mutate: func(b *BOM) {
-				b.Spec.Components[0].Dependencies = []string{"missing"}
+				b.Spec.Packages[0].Dependencies = []string{"missing"}
 			},
 			wantErr: true,
 		},
 		{
 			name: "duplicate component",
 			mutate: func(b *BOM) {
-				b.Spec.Components = append(b.Spec.Components, b.Spec.Components[0])
+				b.Spec.Packages = append(b.Spec.Packages, b.Spec.Packages[0])
 			},
 			wantErr: true,
 		},
@@ -84,11 +77,11 @@ func validBOM() *BOM {
 			Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
-	doc.Spec.Components = []Component{
+	doc.Spec.Packages = []Package{
 		{
-			Name:    "calico",
-			Kind:    "infra",
-			Version: "3.28.0",
+			Category: "network",
+			Name:     "calico",
+			Version:  "3.28.0",
 			Artifact: ArtifactReference{
 				Name:   "calico-artifact",
 				Image:  "registry.example.io/sealos/calico:3.28.0",
@@ -97,8 +90,8 @@ func validBOM() *BOM {
 			Required: true,
 		},
 		{
+			Category:     "network",
 			Name:         "ingress-nginx",
-			Kind:         "infra",
 			Version:      "1.10.1",
 			Dependencies: []string{"calico"},
 			Artifact: ArtifactReference{

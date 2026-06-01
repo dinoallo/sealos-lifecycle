@@ -486,11 +486,11 @@ func createSyncWorkflowFixture(t *testing.T, clusterName string) syncWorkflowFix
 	}
 
 	doc := bom.New("workflow-platform", "rev-workflow-001", bom.ChannelAlpha)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -498,9 +498,9 @@ func createSyncWorkflowFixture(t *testing.T, clusterName string) syncWorkflowFix
 			},
 		},
 		{
-			Name:    "grafana",
-			Kind:    "addon",
-			Version: "v10.4.0",
+			Name:     "grafana",
+			Category: "addon",
+			Version:  "v10.4.0",
 			Artifact: bom.ArtifactReference{
 				Name:   "grafana",
 				Image:  "registry.example.io/sealos/grafana:v10.4.0",
@@ -508,9 +508,9 @@ func createSyncWorkflowFixture(t *testing.T, clusterName string) syncWorkflowFix
 			},
 		},
 		{
-			Name:    "cilium",
-			Kind:    "addon",
-			Version: "v1.15.0",
+			Name:     "cilium",
+			Category: "addon",
+			Version:  "v1.15.0",
 			Artifact: bom.ArtifactReference{
 				Name:   "cilium-cni",
 				Image:  "registry.example.io/sealos/cilium-cni:v1.15.0",

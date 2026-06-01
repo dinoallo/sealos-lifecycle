@@ -36,11 +36,11 @@ func TestRenderPlan(t *testing.T) {
 	}
 
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -133,11 +133,11 @@ func TestRenderPlanWithMountedArtifactSourceProvider(t *testing.T) {
 	}
 
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
@@ -153,7 +153,7 @@ func TestRenderPlanWithMountedArtifactSourceProvider(t *testing.T) {
 		t.Fatalf("BuildPlanFromResolved() error = %v", err)
 	}
 
-	artifactRef := doc.Spec.Components[0].Artifact.Reference()
+	artifactRef := doc.Spec.Packages[0].Artifact.Reference()
 	fake := &fakeRenderMounter{
 		mounts: map[string]packageformat.MountedImage{
 			artifactRef: {
@@ -218,11 +218,11 @@ func TestRenderPlanUsesPackageLocalPatchPolicy(t *testing.T) {
 	pkg.Spec.LocalPatchPolicy = "policy/local-patch-policy.yaml"
 
 	doc := bom.New("default-platform", "rev-20240423", bom.ChannelBeta)
-	doc.Spec.Components = []bom.Component{
+	doc.Spec.Packages = []bom.Package{
 		{
-			Name:    "kubernetes",
-			Kind:    "infra",
-			Version: "v1.30.3",
+			Name:     "kubernetes",
+			Category: "infra",
+			Version:  "v1.30.3",
 			Artifact: bom.ArtifactReference{
 				Name:   "kubernetes-rootfs",
 				Image:  "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",

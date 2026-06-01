@@ -30,4 +30,5 @@ const (
 	KindDistributionHealthProof = "DistributionHealthProof"
 	KindHydratedBundle          = "HydratedBundle"
 	KindPackageAcceptanceReport = "PackageAcceptanceReport"
+	KindReleaseChannel          = "ReleaseChannel"
 )
