@@ -64,6 +64,7 @@ This directory contains the design, guides, references, examples, and project pr
 | --- | --- |
 | [Git-synced distribution config](./projects/git-synced-distribution-config/proposal.md) | Proposes a future Git repository model for distribution configuration. Chinese: [zh-CN](./projects/git-synced-distribution-config/proposal.zh-CN.md). |
 | [Git-synced cluster config](./projects/git-synced-distribution-config/cluster-config.md) | Proposes the companion cluster-local repository model. Chinese: [zh-CN](./projects/git-synced-distribution-config/cluster-config.zh-CN.md). |
+| [Distribution document kinds](./projects/git-synced-distribution-config/kinds.md) | Catalogs CRD, source, generated, evidence, and proposed document kinds. Chinese: [zh-CN](./projects/git-synced-distribution-config/kinds.zh-CN.md). |
 
 ## Recommended Reading Order
 

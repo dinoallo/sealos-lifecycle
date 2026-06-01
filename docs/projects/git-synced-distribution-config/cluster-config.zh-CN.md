@@ -12,6 +12,8 @@
 
 将两个仓库分离可以让所有权、访问控制和 promotion 更安全。平台团队可以在看不到集群私有值的情况下推进全局 release 内容；集群 owner 也可以在不编辑共享发行版定义的情况下修改本地输入。
 
+共享的 document kind 目录见 [document kind 规范](kinds.zh-CN.md)。
+
 ## 目标
 
 - 为每个集群提供一个稳定入口。

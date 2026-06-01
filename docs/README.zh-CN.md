@@ -64,6 +64,7 @@
 | --- | --- |
 | [Git-synced distribution config](./projects/git-synced-distribution-config/proposal.md) | 提出未来 distribution configuration 的 Git 仓库模型。中文：[zh-CN](./projects/git-synced-distribution-config/proposal.zh-CN.md)。 |
 | [Git-synced cluster config](./projects/git-synced-distribution-config/cluster-config.md) | 提出配套的 cluster-local repository model。中文：[zh-CN](./projects/git-synced-distribution-config/cluster-config.zh-CN.md)。 |
+| [Distribution document kinds](./projects/git-synced-distribution-config/kinds.md) | 汇总 CRD、source、generated、evidence 和 proposed document kinds。中文：[zh-CN](./projects/git-synced-distribution-config/kinds.zh-CN.md)。 |
 
 ## 推荐阅读顺序
 

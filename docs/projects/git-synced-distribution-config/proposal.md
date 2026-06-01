@@ -10,7 +10,7 @@ This document proposes a Git repository layout for synchronizing Sealos distribu
 
 The recommended model is to use Git as the source of truth for distribution configuration, release intent, and the source facts needed to materialize packages. Git stores small, reviewable YAML documents such as `package.yaml`, build classes, profiles, BOMs, and channel pointers. OCI remains the preferred transport and cache for prebuilt immutable package artifacts, but it is not the only way to materialize a package.
 
-The proposal intentionally defines repository conventions and resolution rules first. It does not require Sealos to introduce new API types before teams can adopt the layout; formal schemas such as `ReleaseChannel` and `ClusterTarget` can be added later without changing the path model.
+The proposal intentionally defines repository conventions and resolution rules first. It does not require Sealos to introduce new API types before teams can adopt the layout; formal schemas such as `ReleaseChannel` and `ClusterTarget` can be added later without changing the path model. The companion [document kind reference](kinds.md) tracks which kinds are Kubernetes CRDs, repository source documents, generated documents, evidence documents, or proposal-only schemas.
 
 ## Problem Statement
 

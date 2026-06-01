@@ -12,6 +12,8 @@ The [distribution configuration proposal](proposal.md) defines platform distribu
 
 Keeping these repositories separate makes ownership, access control, and promotion safer. Platform teams can promote global release content without seeing cluster-private values, while cluster owners can change local inputs without editing shared distribution definitions.
 
+For the shared catalog of document kinds, see the [document kind reference](kinds.md).
+
 ## Goals
 
 - Provide one stable entrypoint for each cluster.

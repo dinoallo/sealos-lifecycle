@@ -10,7 +10,7 @@
 
 推荐模型是：Git 作为发行版配置、发布意图，以及构建 package 所需源事实的事实源。Git 中只保存 `package.yaml`、build class、profile、BOM、channel 指针等小型、可审查的 YAML 文档。OCI Registry 仍然是预构建不可变 package artifact 的首选传输和缓存方式，但不是 materialize package 的唯一方式。
 
-本 proposal 优先定义仓库约定和解析规则，不要求 Sealos 在采用该布局前先引入新的 API 类型。`ReleaseChannel`、`ClusterTarget` 等正式 schema 可以后续补齐，而不改变这里定义的路径模型。
+本 proposal 优先定义仓库约定和解析规则，不要求 Sealos 在采用该布局前先引入新的 API 类型。`ReleaseChannel`、`ClusterTarget` 等正式 schema 可以后续补齐，而不改变这里定义的路径模型。配套的 [document kind 规范](kinds.zh-CN.md) 负责跟踪哪些 kind 是 Kubernetes CRD、repository source document、generated document、evidence document 或 proposal-only schema。
 
 ## 问题
 
