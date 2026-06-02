@@ -72,6 +72,36 @@ stronger `source` plus `build` requirements for local builds. Implementations
 that enforce source-first local builds must define when `artifact` may be
 omitted or generated.
 
+## Package Resolution
+
+A BOM package resolves to a `ComponentPackage` through one of two equivalent
+materialization paths:
+
+- Source-first local build mode loads `source.path/package.yaml`, validates it
+  as `ComponentPackage`, runs `build.class`, and produces a materialized package
+  root or artifact.
+- Non-local build mode loads the already materialized package artifact from
+  `artifact.image@artifact.digest`.
+
+Both paths must produce a loadable package root that contains `package.yaml`.
+That `package.yaml` must validate as `ComponentPackage`.
+
+Resolution must enforce:
+
+```text
+BOM package.name == ComponentPackage.spec.component
+BOM package.version == ComponentPackage.spec.version
+```
+
+`artifact.name` is a logical artifact name for readability, reporting,
+artifact indexes, and base artifact de-duplication. It is not the package
+identity and must not be used as the binding key between `BOM` and
+`ComponentPackage`.
+
+When both `source` and `artifact` are present, the artifact is a materialized
+result of the pinned source and build contract, not an independent source of
+truth.
+
 ## Package Identity
 
 Package identity should be resolved as:

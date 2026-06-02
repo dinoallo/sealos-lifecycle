@@ -81,6 +81,32 @@ The package build workflow resolves these values before invoking a build class:
 The build class must not read undeclared host paths, cluster configuration,
 runtime state, or secret contents.
 
+## Build Output
+
+A build class selected by `BOM.spec.packages[*].build.class` must produce a
+materialized package payload, not a new document kind. The payload may be stored
+as an OCI image, filesystem directory, OCI layout, or another supported
+transport, but its root must be loadable as a package root.
+
+The materialized package root must contain:
+
+- `package.yaml`
+- every content path referenced by `package.yaml`
+- every hook path referenced by `package.yaml`
+- optional local patch policy files referenced by `package.yaml`
+
+The `package.yaml` in the output must validate as `ComponentPackage`. The build
+may normalize paths or add build provenance, but it must preserve the component
+and version selected by the BOM:
+
+```text
+BOM package.name == output ComponentPackage.spec.component
+BOM package.version == output ComponentPackage.spec.version
+```
+
+This requirement lets source-first local builds and non-local artifact
+consumption share the same downstream loader and hydration workflow.
+
 ## Local And Non-local Coexistence
 
 `BuildClass` is the shared abstraction that keeps the two build modes

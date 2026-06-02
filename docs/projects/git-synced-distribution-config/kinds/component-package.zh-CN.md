@@ -35,6 +35,24 @@ spec: {}
 
 `metadata.name` 是仓库内的包名。包重名问题不只靠这个字段解决，而是在 `BOM` 里结合 `category`、`name`、`version` 和 source provenance 一起形成包身份。
 
+## Source 与 Materialized 形态
+
+`ComponentPackage` 会以两种形态出现：
+
+- Source form：存储在 distribution 源仓库下的 `package.yaml`。
+- Materialized form：存储在构建后 package payload 或 artifact root 下的 `package.yaml`。
+
+两种形态使用同一个 kind，并且必须通过同一个 schema 校验。Source form 声明 package source contract。Materialized form 声明 downstream loader、hydration 和 apply workflow 消费的 payload。
+
+Build workflow 不能输出另一个最终 document kind。它必须生成一个 package root，其中包含有效的 `ComponentPackage` manifest，以及该 manifest 引用的文件。
+
+当 package 被 `BOM` 选择时，必须满足：
+
+```text
+BOM package.name == ComponentPackage.spec.component
+BOM package.version == ComponentPackage.spec.version
+```
+
 ## Spec 契约
 
 | 字段 | 必需 | 说明 |

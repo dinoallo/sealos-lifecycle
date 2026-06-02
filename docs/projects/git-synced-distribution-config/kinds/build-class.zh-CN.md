@@ -69,6 +69,26 @@ spec: {}
 
 Build class 不能读取未声明的 host path、cluster 配置、运行时状态或 secret 内容。
 
+## 构建输出
+
+被 `BOM.spec.packages[*].build.class` 选中的 build class 必须生成 materialized package payload，而不是新的 document kind。Payload 可以存储为 OCI image、filesystem directory、OCI layout 或其他支持的 transport，但它的 root 必须能作为 package root 加载。
+
+Materialized package root 必须包含：
+
+- `package.yaml`
+- `package.yaml` 引用的每个 content path
+- `package.yaml` 引用的每个 hook path
+- `package.yaml` 引用的可选 local patch policy files
+
+输出中的 `package.yaml` 必须能通过 `ComponentPackage` 校验。Build 可以规范化路径或补充 build provenance，但必须保留 BOM 选择的 component 和 version：
+
+```text
+BOM package.name == output ComponentPackage.spec.component
+BOM package.version == output ComponentPackage.spec.version
+```
+
+这个要求让源优先本地构建和非本地 artifact 消费可以共享同一套 downstream loader 和 hydration workflow。
+
 ## 本地与非本地模式共存
 
 `BuildClass` 是让两种构建模式更容易维护的共享抽象：

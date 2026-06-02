@@ -42,6 +42,29 @@ spec: {}
 handled by the package identity in `BOM` entries, where `category`, `name`,
 `version`, and source provenance are resolved together.
 
+## Source And Materialized Forms
+
+`ComponentPackage` appears in two forms:
+
+- Source form: `package.yaml` stored under the distribution source repository.
+- Materialized form: `package.yaml` stored at the root of a built package
+  payload or artifact.
+
+Both forms use the same kind and must validate with the same schema. The source
+form declares the package source contract. The materialized form declares the
+payload that downstream loaders, hydration, and apply workflows consume.
+
+Build workflows must not emit a different final document kind. They must produce
+a package root that contains a valid `ComponentPackage` manifest and the files
+referenced by that manifest.
+
+When selected by a `BOM`, the package must satisfy:
+
+```text
+BOM package.name == ComponentPackage.spec.component
+BOM package.version == ComponentPackage.spec.version
+```
+
 ## Spec Contract
 
 | Field | Required | Description |

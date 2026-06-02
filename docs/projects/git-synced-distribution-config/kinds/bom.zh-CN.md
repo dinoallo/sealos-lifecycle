@@ -65,6 +65,26 @@ spec: {}
 
 当前实现会校验每个 package 都有 artifact metadata。源优先提案保留 `artifact` 作为非本地路径，同时为本地构建增加更强的 `source` 和 `build` 要求。实现源优先本地构建时，需要明确什么时候 `artifact` 可以省略或由构建流程生成。
 
+## Package 解析关系
+
+BOM package 会通过两条等价的 materialization 路径解析到一个 `ComponentPackage`：
+
+- 源优先本地构建模式加载 `source.path/package.yaml`，校验它是 `ComponentPackage`，执行 `build.class`，并生成 materialized package root 或 artifact。
+- 非本地构建模式从 `artifact.image@artifact.digest` 加载已经 materialized 的 package artifact。
+
+两条路径都必须产出一个可加载的 package root，并且其中必须包含 `package.yaml`。这个 `package.yaml` 必须能通过 `ComponentPackage` 校验。
+
+解析时必须强制：
+
+```text
+BOM package.name == ComponentPackage.spec.component
+BOM package.version == ComponentPackage.spec.version
+```
+
+`artifact.name` 是逻辑 artifact 名称，用于可读性、报告、artifact index 和 base artifact 去重。它不是 package identity，也不能作为 `BOM` 和 `ComponentPackage` 之间的绑定键。
+
+当 `source` 和 `artifact` 同时存在时，artifact 是 pinned source 和 build contract 的 materialized 结果，不是独立事实源。
+
 ## 包身份
 
 包身份应按以下维度解析：
