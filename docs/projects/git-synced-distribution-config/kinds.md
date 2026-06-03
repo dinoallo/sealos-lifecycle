@@ -62,7 +62,7 @@ links each kind to its detailed page.
 | Kind | Class | Owner | Normal Location | Status |
 | --- | --- | --- | --- | --- |
 | [`ComponentPackage`](./kinds/component-package.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`, materialized package roots | Implemented file schema |
-| [`BuildClass`](./kinds/build-class.md) | Repository source document | Platform team | `build-classes/<name>.yaml` | Proposed |
+| [`BuildClass`](./kinds/build-class.md) | Repository source document | Platform team | `classes/<name>/<version>.yaml` | Proposed |
 | [`BOM`](./kinds/bom.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | Implemented file schema |
 | [`ReleaseChannel`](./kinds/release-channel.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | Implemented preferred name, code accepts legacy alias |
 | [`DistributionChannel`](./kinds/distribution-channel.md) | Repository source document | Release manager | Existing local channel files | Implemented compatibility name |
@@ -97,6 +97,8 @@ Minimum contract:
 - declares package component, version, and package class
 - declares package contents such as rootfs, files, manifests, charts, or hooks
 - declares supported input surfaces
+- declares package-local build inputs, staging rules, or adapter scripts when
+  package-specific build facts are required
 - declares package dependencies when required
 - all referenced paths are relative to the package root
 
@@ -115,7 +117,7 @@ source facts into a materialized package payload.
 Normal location:
 
 ```text
-build-classes/<name>.yaml
+classes/<name>/<version>.yaml
 ```
 
 Minimum contract:
@@ -128,6 +130,8 @@ Minimum contract:
 - builder implementation or command family
 - required deterministic non-secret build options
 - required provenance fields
+- no package-specific asset list or staging rule that belongs in
+  `ComponentPackage.spec.build`
 
 Rules:
 
@@ -152,13 +156,15 @@ Minimum contract:
 - `spec.revision`
 - selected packages by full identity: `category`, `name`, and `version`
 - source facts and source digest for buildable packages
-- build class and build contract for buildable packages
+- selected build class and release-level build profile or options for
+  buildable packages
 - artifact image and digest when a prebuilt artifact is required or available
 - dependency references when a package depends on another package
 
 Must not contain:
 
 - channel membership
+- package-specific build recipes already declared in `ComponentPackage`
 - cluster-local inputs
 - cluster-local patches
 - secret values

@@ -78,8 +78,9 @@ A BOM package resolves to a `ComponentPackage` through one of two equivalent
 materialization paths:
 
 - Source-first local build mode loads `source.path/package.yaml`, validates it
-  as `ComponentPackage`, runs `build.class`, and produces a materialized package
-  root or artifact.
+  as `ComponentPackage`, loads any package-local build contract from
+  `ComponentPackage.spec.build`, runs `build.class`, and produces a
+  materialized package root or artifact.
 - Non-local build mode loads the already materialized package artifact from
   `artifact.image@artifact.digest`.
 
@@ -101,6 +102,12 @@ identity and must not be used as the binding key between `BOM` and
 When both `source` and `artifact` are present, the artifact is a materialized
 result of the pinned source and build contract, not an independent source of
 truth.
+
+The BOM must not duplicate package-specific build recipes. It pins the release
+selection: package identity, source path and digest, selected build class,
+profile or platform options, and optional artifact digest. Package-specific
+asset declarations, staging rules, and adapter scripts remain in
+`ComponentPackage.spec.build` under `source.path`.
 
 ## Package Identity
 
@@ -161,7 +168,7 @@ spec:
         path: packages/core/kubernetes/v1.31.1
         digest: sha256:...
       build:
-        class: rootfs-image
+        class: rootfs/v1
         profile: release
         platform: linux/amd64
       artifact:

@@ -2,7 +2,8 @@
 
 ## Status
 
-Implemented file schema.
+Implemented file schema, with proposed package-local build extensions for
+source-first materialization.
 
 ## Class
 
@@ -74,10 +75,36 @@ BOM package.version == ComponentPackage.spec.version
 | `class` | Yes | Package class. Current values are `rootfs`, `patch`, and `application`. |
 | `dependencies` | No | Package names that must be available before this package is installed or rendered. |
 | `compatibility` | No | Compatibility rules for supported Kubernetes, OS, architecture, or distribution lines. |
+| `build` | No | Package-local build contract for source-first materialization. |
 | `inputs` | No | Declared non-secret inputs accepted by the package. |
 | `contents` | Yes | Package content entries, such as rootfs files, manifests, charts, values, patches, or hooks. |
 | `hooks` | No | Lifecycle hooks run by the package workflow. |
 | `localPatchPolicy` | No | Relative path to the local patch ownership policy for this package. |
+
+## Build
+
+`spec.build` describes package-specific build requirements that belong next to
+the package source. It is optional for packages that can be materialized by the
+selected `BuildClass` defaults.
+
+Supported fields are:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `class` | No | Expected default build class for this package source. |
+| `inputs` | No | Non-secret build assets required before materialization. |
+| `staging` | No | Mapping from build inputs to paths in the materialized package root. |
+| `script.path` | No | Package-local adapter script, usually under `build/`. |
+
+Build inputs are package build assets, not cluster-specific inputs. They may
+reference local mirror entries, artifact cache entries, upstream asset
+references, or small files already stored in the package source. Any external
+asset that can change package bytes must be digest-pinned.
+
+`staging.path` values must be relative to the materialized package root and must
+not escape it. `script.path` must be relative to the package source directory.
+Repository-level scripts may invoke this contract, but package-specific staging
+rules should not live only in repository-level scripts.
 
 ## Contents
 
@@ -131,6 +158,10 @@ not read undeclared host files or secrets.
 - `apiVersion`, `kind`, and `metadata.name` must be set.
 - `spec.component` and `spec.version` must be set.
 - `spec.class` must be one of the supported package classes.
+- `spec.build.class`, when set, must be compatible with the BOM-selected build class.
+- `spec.build.inputs` must be non-secret and digest-pinned when they resolve outside the package source.
+- `spec.build.staging` entries must reference declared build inputs and use relative paths.
+- `spec.build.script.path`, when set, must point inside the package source directory.
 - At least one content entry is required.
 - Content names must be unique within the package.
 - Input names must be unique within the package.
@@ -164,6 +195,20 @@ spec:
   component: kubernetes
   version: v1.31.1
   class: rootfs
+  build:
+    class: rootfs/v1
+    inputs:
+      - name: kubeadm
+        type: file
+        sourceRef: kubernetes-release:v1.31.1/bin/linux/amd64/kubeadm
+        digest: sha256:...
+        required: true
+    staging:
+      - input: kubeadm
+        path: rootfs/usr/bin/kubeadm
+        mode: "0755"
+    script:
+      path: build/package-build.sh
   inputs:
     - name: cluster-network
       type: valuesFile

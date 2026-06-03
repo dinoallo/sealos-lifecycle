@@ -14,8 +14,8 @@ distribution 平台 owner 维护 build class。包 owner 可以选择 build clas
 
 ## 常见位置
 
-- `build-classes/<name>.yaml`
-- `build/classes/<name>.yaml`
+- `classes/<name>/<version>.yaml`
+- `build/classes/<name>/<version>.yaml`
 
 ## 用途
 
@@ -26,21 +26,36 @@ distribution 平台 owner 维护 build class。包 owner 可以选择 build clas
 
 Class 是包元数据和构建执行之间的边界。包声明自己包含什么，build class 声明这种 source shape 如何构建。
 
+Package-specific build details 仍然属于 `ComponentPackage.spec.build`。例如，需要 stage
+到 `rootfs/usr/bin/` 的 Kubernetes binaries 清单是 package source metadata，不是可复用的
+class 语义。
+
 ## 必需信封
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
 kind: BuildClass
 metadata:
-  name: rootfs-image
-spec: {}
+  name: rootfs
+spec:
+  version: v1
 ```
+
+Canonical build class identity 是：
+
+```text
+<metadata.name>/<spec.version>
+```
+
+例如，上面的文档在 `ComponentPackage.spec.build.class` 或
+`BOM.spec.packages[*].build.class` 中被引用为 `rootfs/v1`。
 
 ## Spec 契约
 
 | 字段 | 必需 | 说明 |
 | --- | --- | --- |
-| `driver` | 是 | 逻辑构建 driver，例如 `containerfile`、`script`、`helm` 或 `copy-rootfs`。 |
+| `version` | 是 | Build class contract version，例如 `v1`。 |
+| `driver` | 是 | 逻辑构建 driver，例如 `copy-rootfs`、`copy-manifest`、`helm` 或 `patch`。 |
 | `output` | 是 | 构建产物类型，例如 `ociImage`、`filesystem`、`chart` 或 `manifestBundle`。 |
 | `packageClasses` | 是 | 该 build class 接受的 `ComponentPackage.spec.class` 值。 |
 | `platforms` | 否 | 支持的目标平台。为空表示平台无关。 |
@@ -50,7 +65,8 @@ spec: {}
 
 ## 校验规则
 
-- `metadata.name` 在 distribution 源仓库内必须全局唯一。
+- Class identity `metadata.name/spec.version` 在 distribution 源仓库内必须全局唯一。
+- 必须设置 `metadata.name` 和 `spec.version`。
 - 必须设置 `driver` 和 `output`。
 - `packageClasses` 中的每个值都必须是支持的 `ComponentPackage` class。
 - `parameters` 必须是非 secret。Secret 只能由运行时或 CI 环境提供，并且只能通过名称引用。
@@ -66,8 +82,12 @@ spec: {}
 - 目标平台
 - build profile
 - 已声明的 build options
+- 来自 `ComponentPackage.spec.build` 的 package-local build inputs 和 staging rules
 
 Build class 不能读取未声明的 host path、cluster 配置、运行时状态或 secret 内容。
+
+在调用 class 前，构建流程应从被选择的 `ComponentPackage` 加载 package-local contract。
+Class 提供 driver 语义；package-local contract 提供 per-package build facts。
 
 ## 构建输出
 
@@ -98,15 +118,20 @@ BOM package.version == output ComponentPackage.spec.version
 
 这样可以避免为本地和非本地 delivery 维护两套 package schema。
 
+仓库级 `scripts/` 可以为了 operator 便利包装 build class，但它们应保持为通用 dispatcher。
+只有当 package-specific script 被 package-local build contract 引用，并且位于 package source
+目录内时，才应使用它。
+
 ## 示例
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
 kind: BuildClass
 metadata:
-  name: rootfs-image
+  name: rootfs
 spec:
-  driver: containerfile
+  version: v1
+  driver: copy-rootfs
   output: ociImage
   packageClasses:
     - rootfs
@@ -115,30 +140,154 @@ spec:
     - linux/arm64
   source:
     include:
+      - package.yaml
       - rootfs/**
-      - Containerfile
+      - files/**
       - hooks/**
     exclude:
       - "**/.git/**"
       - "**/*.tmp"
+  provenance:
+    required:
+      - sourceDigest
+      - buildClass
+      - platform
+```
+
+## 初始 Build Classes
+
+初始 class 集合应保持小。只有当 source shape 或 output semantics 差异足够大，需要独立
+validation 和 provenance contract 时，才新增 class。
+
+| Class | Driver | Output | Package classes | 适用场景 |
+| --- | --- | --- | --- | --- |
+| `rootfs/v1` | `copy-rootfs` | `ociImage` | `rootfs` | 将文件 materialize 到 `rootfs/` 下的 package，可先 stage 已声明 build inputs。Kubernetes 和 containerd rootfs package 属于这一类。 |
+| `manifest-bundle/v1` | `copy-manifest` | `ociImage` | `application`、`policy` | 直接把已提交的 manifests、values 和 hooks 复制进 package artifact，不渲染 chart。当前 Cilium package 形态属于这一类。 |
+| `helm-render/v1` | `helm` | `ociImage` | `application` | Source 包含 Helm chart 或 chart reference 以及 values，build output 是渲染后的 manifest bundle。 |
+| `patch-overlay/v1` | `patch` | `ociImage` | `patch` | 对 upstream package 或 manifest bundle 应用声明式 overlays/patches，并发布结果 package payload。 |
+
+初始默认集合里不建议放通用 `script/v1` class。Package-local scripts 可以作为
+`ComponentPackage.spec.build` 中声明的 adapter 使用，但 catch-all script class 会让 build
+behavior 更难校验和复现。
+
+### `rootfs/v1`
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: BuildClass
+metadata:
+  name: rootfs
+spec:
+  version: v1
+  driver: copy-rootfs
+  output: ociImage
+  packageClasses:
+    - rootfs
+  source:
+    include:
+      - package.yaml
+      - rootfs/**
+      - files/**
+      - manifests/**
+      - hooks/**
+      - build/**
+    exclude:
+      - "**/.git/**"
+      - "**/tmp/**"
+  provenance:
+    required:
+      - sourceDigest
+      - buildClass
+      - platform
+```
+
+### `manifest-bundle/v1`
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: BuildClass
+metadata:
+  name: manifest-bundle
+spec:
+  version: v1
+  driver: copy-manifest
+  output: ociImage
+  packageClasses:
+    - application
+    - policy
+  source:
+    include:
+      - package.yaml
+      - manifests/**
+      - files/**
+      - hooks/**
+    exclude:
+      - "**/.git/**"
+      - "**/tmp/**"
+  provenance:
+    required:
+      - sourceDigest
+      - buildClass
+```
+
+### `helm-render/v1`
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: BuildClass
+metadata:
+  name: helm-render
+spec:
+  version: v1
+  driver: helm
+  output: ociImage
+  packageClasses:
+    - application
   parameters:
-    - name: baseImage
+    - name: chart
       required: true
       secret: false
-    - name: compression
-      default: zstd
+    - name: values
+      required: false
       secret: false
   provenance:
     required:
       - sourceDigest
       - buildClass
-      - buildProfile
-      - platform
+      - chartDigest
+```
+
+### `patch-overlay/v1`
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: BuildClass
+metadata:
+  name: patch-overlay
+spec:
+  version: v1
+  driver: patch
+  output: ociImage
+  packageClasses:
+    - patch
+  source:
+    include:
+      - package.yaml
+      - patches/**
+      - files/**
+      - hooks/**
+  provenance:
+    required:
+      - sourceDigest
+      - buildClass
+      - baseArtifactDigest
 ```
 
 ## Kubernetes 包示例
 
-Kubernetes 的 `ComponentPackage` 通常会选择 rootfs 类型的 build class：
+Kubernetes 的 `ComponentPackage` 通常会选择 rootfs 类型的 build class。Package-specific
+binary inputs 和 staging rules 属于 `ComponentPackage.spec.build`；BOM 只为一个 release pin
+class 和 artifact：
 
 ```yaml
 packages:
@@ -149,7 +298,7 @@ packages:
       path: packages/core/kubernetes/v1.31.1
       digest: sha256:...
     build:
-      class: rootfs-image
+      class: rootfs/v1
       profile: release
       platform: linux/amd64
     artifact:
@@ -162,6 +311,8 @@ packages:
 
 - `BuildClass` 不选择包版本。
 - `BuildClass` 不定义集群特定 inputs。
+- `BuildClass` 不列出 package-specific external assets。
+- `BuildClass` 不把 package-specific staging rules 隐藏在仓库级 scripts 中。
 - `BuildClass` 不批准本地 patches。
 - `BuildClass` 不表示已应用的运行时状态。
 

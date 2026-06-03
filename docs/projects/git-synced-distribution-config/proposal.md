@@ -78,7 +78,13 @@ distribution-config/
         v1.0.0/
           package.yaml
   classes/
-    rootfs-image/
+    rootfs/
+      v1.yaml
+    manifest-bundle/
+      v1.yaml
+    helm-render/
+      v1.yaml
+    patch-overlay/
       v1.yaml
   profiles/
     default-platform/
@@ -111,7 +117,8 @@ Cluster-local configuration is intentionally outside this repository model. Use 
 | --- | --- |
 | `packages/<category>/<name>/<version>/` | Source configuration for one package revision. |
 | `packages/<category>/<name>/<version>/package.yaml` | The package manifest that will be copied into the materialized package root. |
-| `classes/<class>/<version>.yaml` | Reusable build or render class definitions used by packages. |
+| `packages/<category>/<name>/<version>/build/` | Optional package-local build adapters or helpers referenced by `package.yaml`. |
+| `classes/<name>/<version>.yaml` | Reusable build or render class definitions used by packages. |
 | `profiles/<distribution>/<profile>/` | Distribution-level defaults, feature masks, package masks, and support matrix rules. |
 | `releases/<distribution>/<revision>/bom.yaml` | A release BOM that pins source facts, build contracts, and optional package artifacts by digest. |
 | `channels/<distribution>/<channel>.yaml` | A small pointer from a channel name to an approved BOM revision. |
@@ -123,6 +130,7 @@ Git should store files that are small, intentional, and useful for review:
 
 - package manifests
 - package source files referenced by `package.yaml`
+- package-local build recipes, adapters, and declared build input metadata
 - build and render class definitions
 - distribution profile defaults, masks, and support matrix rules
 - release BOM files
@@ -193,9 +201,88 @@ packages/infra/kubernetes/v1.30.3/
     preflight.sh
     bootstrap.sh
     healthcheck.sh
+  build/
+    package-build.sh
 ```
 
 The directory is the source for materializing the package. In prebuilt artifact mode, CI builds from this directory, pushes the package to a registry, and records the artifact digest in the release BOM. In source-first local build mode, an agent can build from the same source facts without relying on a remote OCI artifact.
+
+Package-specific build knowledge should stay with the package source. If a
+package needs to stage binaries, unpack archives, select generated files, or
+run an imperative adapter, that contract should be declared in `package.yaml`
+and any package-specific helper should live under the package's `build/`
+directory. Repository-level `scripts/` may provide generic entrypoints such as
+`build-package --package infra/kubernetes/v1.30.3`, but they must not be the
+only place that records Kubernetes-specific staging rules or asset names.
+
+## Package-local Build Contract
+
+`BuildClass` is the reusable build mechanism; the package-local build contract
+is the package owner's declaration of what that mechanism should do for one
+package source directory.
+
+For packages that can be built by simply copying declared content, the package
+may rely on the selected `BuildClass` defaults. For packages that need external
+assets or custom staging, the source `ComponentPackage` should declare
+`spec.build`:
+
+```yaml
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ComponentPackage
+metadata:
+  name: kubernetes-rootfs
+spec:
+  component: kubernetes
+  version: v1.30.3
+  class: rootfs
+  build:
+    class: rootfs/v1
+    inputs:
+      - name: kubeadm
+        type: file
+        required: true
+        sourceRef: kubernetes-release:v1.30.3/bin/linux/amd64/kubeadm
+        digest: sha256:...
+      - name: kubelet
+        type: file
+        required: true
+        sourceRef: kubernetes-release:v1.30.3/bin/linux/amd64/kubelet
+        digest: sha256:...
+      - name: kubectl
+        type: file
+        required: true
+        sourceRef: kubernetes-release:v1.30.3/bin/linux/amd64/kubectl
+        digest: sha256:...
+    staging:
+      - input: kubeadm
+        path: rootfs/usr/bin/kubeadm
+        mode: "0755"
+      - input: kubelet
+        path: rootfs/usr/bin/kubelet
+        mode: "0755"
+      - input: kubectl
+        path: rootfs/usr/bin/kubectl
+        mode: "0755"
+    script:
+      path: build/package-build.sh
+```
+
+`spec.build.class` is the package's expected default class. The BOM still pins
+the class used by a release, and validation should fail if `BOM.build.class`
+conflicts with `ComponentPackage.spec.build.class` unless an explicit policy
+allows the override.
+
+Build inputs are non-secret package build assets, not cluster inputs. They may
+be stored directly in the package source when small enough for Git, or resolved
+from a local mirror, artifact cache, or upstream artifact store by `sourceRef`
+and digest. Source-first local build mode must have those assets available
+locally before build execution; it must not rely on an undeclared network fetch.
+
+`staging` maps declared inputs into paths in the materialized package root. A
+path must be relative, must not escape the package root, and must not overwrite
+an undeclared content path. `script.path`, when present, must point inside the
+package source directory, normally under `build/`; it is an adapter for the
+declared contract, not an alternative source of truth.
 
 ## BOM Layout
 
@@ -222,7 +309,7 @@ spec:
         path: packages/infra/kubernetes/v1.30.3
         digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
       build:
-        class: rootfs-image/v1
+        class: rootfs/v1
         profile: prod-amd64
       artifact:
         name: kubernetes-production-rootfs
@@ -300,7 +387,7 @@ source:
   path: packages/infra/kubernetes/v1.30.3
   digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
 build:
-  class: rootfs-image/v1
+  class: rootfs/v1
   profile: prod-amd64
 artifact:
   image: registry.example.io/sealos/kubernetes-production-rootfs:v1.30.3
@@ -337,26 +424,36 @@ The build workflow inputs are:
 | `build.platform` | when platform-specific | Target platform such as `linux/amd64`. |
 | `build.profile` | when the class uses it | Distribution profile or build profile data that affects the package payload. |
 | `build.options` | optional | Deterministic non-secret options explicitly recorded in the BOM. |
+| `ComponentPackage.spec.build` | when package-specific build facts exist | Package-local build inputs, staging rules, and optional adapter script. |
 
 The build workflow should run in this order:
 
 1. Resolve the BOM package entry by full package identity.
-2. Resolve `source.path` and the referenced `build.class`.
-3. Resolve any build profile or platform fields named by the build contract.
-4. Normalize the source facts used by the build. This includes `package.yaml`
-   and declared package source files, and excludes generated output, local
-   caches, downloaded artifacts, and ignored workspace state.
-5. Compute `source.digest` from the normalized source facts and compare it with
+2. Resolve `source.path`, load `source.path/package.yaml`, and validate it as
+   a source-form `ComponentPackage`.
+3. Resolve the referenced `build.class` and compare it with
+   `ComponentPackage.spec.build.class` when that field is set.
+4. Resolve any build profile or platform fields named by the build contract.
+5. Resolve declared package-local build inputs from the package source, local
+   mirror, artifact cache, or digest-pinned asset store.
+6. Normalize the source facts used by the build. This includes `package.yaml`,
+   `ComponentPackage.spec.build`, package-local `build/` adapters when
+   referenced, declared package source files, and digest-pinned build input
+   metadata. It excludes generated output, local caches, downloaded artifacts,
+   and ignored workspace state.
+7. Compute `source.digest` from the normalized source facts and compare it with
    the BOM.
-6. Validate `package.yaml`, package paths, package class, and dependency
-   declarations before running the builder.
-7. Execute the build class in a clean workspace to produce a materialized
-   package root or OCI-compatible package artifact.
-8. Validate the materialized package root: it must contain `package.yaml`, its
+8. Validate `package.yaml`, package paths, package class, declared build
+   inputs, staging rules, and dependency declarations before running the
+   builder.
+9. Execute the build class in a clean workspace, applying package-local staging
+   rules or package-local adapter scripts only when they are declared in
+   `ComponentPackage.spec.build`.
+10. Validate the materialized package root: it must contain `package.yaml`, its
    manifest identity must match the BOM entry, all paths must stay inside the
    package root, and no cluster-local secret values may be included.
-9. Compute the materialized package digest and record build provenance.
-10. Store or expose the output according to the selected fulfillment mode.
+11. Compute the materialized package digest and record build provenance.
+12. Store or expose the output according to the selected fulfillment mode.
 
 The build class is the reusable contract that keeps this workflow
 implementation-independent. A build class version should declare:
@@ -368,6 +465,24 @@ implementation-independent. A build class version should declare:
 - source include and exclude rules that affect `source.digest`
 - required non-secret build options
 - provenance fields that must be written into the output metadata
+
+Package-specific asset names, binary staging maps, and imperative helper paths
+belong in `ComponentPackage.spec.build`, not in the reusable build class. This
+keeps a class like `rootfs/v1` reusable across Kubernetes, containerd,
+and other rootfs packages without encoding every package's asset layout.
+
+Recommended initial build classes:
+
+| Class | Purpose |
+| --- | --- |
+| `rootfs/v1` | Copy or assemble rootfs package payloads, including declared binary staging. |
+| `manifest-bundle/v1` | Copy checked-in manifests, values, and hooks into a package artifact. |
+| `helm-render/v1` | Render a declared Helm chart and values into a manifest bundle package. |
+| `patch-overlay/v1` | Apply declared overlays or patches to a base package or manifest bundle. |
+
+Avoid making `script/v1` a default class. Package-local scripts may exist as
+declared adapters, but the class taxonomy should describe reproducible source
+shapes, not arbitrary shell entrypoints.
 
 Build class versions should be treated as immutable. If a class changes in a
 way that can change package bytes, source selection, or output metadata, it
@@ -387,7 +502,7 @@ provenance:
     path: packages/infra/kubernetes/v1.30.3
     digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
   build:
-    class: rootfs-image/v1
+    class: rootfs/v1
     profile: prod-amd64
     platform: linux/amd64
   output:
@@ -476,8 +591,11 @@ CI for the distribution configuration repository should validate:
 - every buildable BOM package points to a source path and source digest
 - every buildable BOM package names a supported build class
 - every build class version declares an output kind, supported package classes, supported platforms, and required provenance fields
+- every package-local build input is non-secret and digest-pinned when it resolves outside the package source
+- every package-local staging path is relative to the materialized package root and references a declared build input
 - every source digest can be recomputed from the normalized source facts
-- every build contract uses only deterministic, non-secret options recorded in the BOM
+- every release-level build option recorded in the BOM is deterministic and non-secret
+- every package-local build adapter is referenced by `ComponentPackage.spec.build` and stays inside the package source
 - every buildable package can be built in a clean workspace without reading `cluster-config`, live cluster state, undeclared host files, or secret values
 - every `artifact` mode package points to an image and digest
 - every digest is well-formed and no mutable tag is accepted without a digest pin

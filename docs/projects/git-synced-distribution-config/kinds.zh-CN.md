@@ -57,7 +57,7 @@ status: {}
 | Kind | 分类 | Owner | 常见位置 | 状态 |
 | --- | --- | --- | --- | --- |
 | [`ComponentPackage`](./kinds/component-package.zh-CN.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`、materialized package root | 已实现文件 schema |
-| [`BuildClass`](./kinds/build-class.zh-CN.md) | Repository source document | Platform team | `build-classes/<name>.yaml` | Proposed |
+| [`BuildClass`](./kinds/build-class.zh-CN.md) | Repository source document | Platform team | `classes/<name>/<version>.yaml` | Proposed |
 | [`BOM`](./kinds/bom.zh-CN.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | 已实现文件 schema |
 | [`ReleaseChannel`](./kinds/release-channel.zh-CN.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | 已实现推荐名称，代码接受旧别名 |
 | [`DistributionChannel`](./kinds/distribution-channel.zh-CN.md) | Repository source document | Release manager | 现有本地 channel 文件 | 已实现兼容名称 |
@@ -92,6 +92,8 @@ packages/<category>/<name>/<version>/package.yaml
 - 声明 package component、version 和 package class
 - 声明 rootfs、files、manifests、charts 或 hooks 等 package contents
 - 声明支持的 input surface
+- 在需要 package-specific build facts 时，声明 package-local build inputs、staging
+  rules 或 adapter scripts
 - 必要时声明 package dependencies
 - 所有引用路径都相对 package root
 
@@ -110,7 +112,7 @@ materialized package payload。
 常见位置：
 
 ```text
-build-classes/<name>.yaml
+classes/<name>/<version>.yaml
 ```
 
 最小契约：
@@ -122,6 +124,8 @@ build-classes/<name>.yaml
 - builder implementation 或 command family
 - 必需的确定性、非 secret build options
 - 必需 provenance fields
+- 不包含属于 `ComponentPackage.spec.build` 的 package-specific asset list 或
+  staging rule
 
 规则：
 
@@ -144,13 +148,14 @@ releases/<distribution>/<revision>/bom.yaml
 - `spec.revision`
 - 通过完整 identity 选择 package：`category`、`name`、`version`
 - 对可构建 package 锁定 source facts 和 source digest
-- 对可构建 package 声明 build class 和 build contract
+- 对可构建 package 选择 build class 和 release-level build profile 或 options
 - 当预构建 artifact 必需或可用时，锁定 artifact image 和 digest
 - package 依赖其他 package 时声明 dependency reference
 
 不能包含：
 
 - channel membership
+- 已在 `ComponentPackage` 声明的 package-specific build recipes
 - cluster-local inputs
 - cluster-local patches
 - secret 值

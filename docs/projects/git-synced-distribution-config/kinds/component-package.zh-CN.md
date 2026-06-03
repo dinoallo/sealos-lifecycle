@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现的文件 schema。
+已实现的文件 schema，并包含用于源优先 materialization 的 package-local build 扩展规划。
 
 ## 类别
 
@@ -62,10 +62,33 @@ BOM package.version == ComponentPackage.spec.version
 | `class` | 是 | 包类别，当前值为 `rootfs`、`patch`、`application`。 |
 | `dependencies` | 否 | 在安装或渲染前必须可用的包名。 |
 | `compatibility` | 否 | Kubernetes、OS、架构或发行线兼容性规则。 |
+| `build` | 否 | 用于源优先 materialization 的 package-local build contract。 |
 | `inputs` | 否 | 包声明接受的非 secret 输入。 |
 | `contents` | 是 | 包内容，例如 rootfs、manifest、chart、values、patch 或 hook。 |
 | `hooks` | 否 | 包生命周期 hook。 |
 | `localPatchPolicy` | 否 | 指向该包本地 patch 归属策略的相对路径。 |
+
+## Build
+
+`spec.build` 描述应放在 package source 附近的 package-specific build
+requirements。对于可以直接通过所选 `BuildClass` 默认行为 materialize 的 package，该字段可省略。
+
+支持字段：
+
+| 字段 | 必需 | 说明 |
+| --- | --- | --- |
+| `class` | 否 | 该 package source 期望的默认 build class。 |
+| `inputs` | 否 | materialization 前需要准备好的非 secret build assets。 |
+| `staging` | 否 | 从 build inputs 到 materialized package root 路径的映射。 |
+| `script.path` | 否 | package-local adapter script，通常位于 `build/` 下。 |
+
+Build inputs 是 package build assets，不是集群特定 inputs。它们可以引用 local mirror
+entry、artifact cache entry、upstream asset reference，或已经存放在 package source
+里的小文件。任何会影响 package bytes 的外部 asset 都必须按 digest pin。
+
+`staging.path` 必须相对于 materialized package root，且不能逃逸该 root。`script.path`
+必须相对于 package source 目录。仓库级 scripts 可以调用这个契约，但 package-specific
+staging 规则不应只存在于仓库级 scripts 中。
 
 ## Contents
 
@@ -115,6 +138,10 @@ Hook 必须只依赖已声明输入和包内文件，不能读取未声明的 ho
 - 必须设置 `apiVersion`、`kind` 和 `metadata.name`。
 - 必须设置 `spec.component` 和 `spec.version`。
 - `spec.class` 必须属于支持的包类别。
+- `spec.build.class` 如果存在，必须与 BOM 选择的 build class 兼容。
+- `spec.build.inputs` 必须是非 secret；如果解析到 package source 之外，必须按 digest pin。
+- `spec.build.staging` entry 必须引用已声明的 build input，并使用相对路径。
+- `spec.build.script.path` 如果存在，必须指向 package source 目录内的文件。
 - 至少需要一个 content entry。
 - 同一个包内 content 名称必须唯一。
 - 同一个包内 input 名称必须唯一。
@@ -147,6 +174,20 @@ spec:
   component: kubernetes
   version: v1.31.1
   class: rootfs
+  build:
+    class: rootfs/v1
+    inputs:
+      - name: kubeadm
+        type: file
+        sourceRef: kubernetes-release:v1.31.1/bin/linux/amd64/kubeadm
+        digest: sha256:...
+        required: true
+    staging:
+      - input: kubeadm
+        path: rootfs/usr/bin/kubeadm
+        mode: "0755"
+    script:
+      path: build/package-build.sh
   inputs:
     - name: cluster-network
       type: valuesFile
