@@ -261,8 +261,8 @@ func TestDistributionControllerInstallGuideDocumentsUpgrade(t *testing.T) {
 	t.Parallel()
 
 	for _, relPath := range []string{
-		filepath.Join("..", "..", "docs", "sealos-distribution-controller-install.md"),
-		filepath.Join("..", "..", "docs", "sealos-distribution-controller-install.zh-CN.md"),
+		filepath.Join("..", "..", "docs", "guides", "controller-install.md"),
+		filepath.Join("..", "..", "docs", "guides", "controller-install.zh-CN.md"),
 	} {
 		data, err := os.ReadFile(relPath)
 		if err != nil {

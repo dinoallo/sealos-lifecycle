@@ -46,7 +46,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    if: ${{ (github.event_name == 'push') || (inputs.push_mage == true) }}
+    if: ${{ github.repository_owner == 'labring' && ((github.event_name == 'push') || (inputs.push_mage == true)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
           -f Dockerfile.main \
           .
   build-on-cluster-patch-image:
-    if: ${{ (github.event_name == 'push') || (inputs.push_mage == true) }}
+    if: ${{ github.repository_owner == 'labring' && ((github.event_name == 'push') || (inputs.push_mage == true)) }}
     needs:
       - call_ci_workflow
     runs-on: ubuntu-24.04

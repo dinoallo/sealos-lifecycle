@@ -13,6 +13,8 @@ dist
 scripts/release/Note.md
 .ossutil_checkpoint
 bin
+!docs/examples/sync-drift-minimal/bundle/components/kubernetes/files/rootfs/usr/bin/
+!docs/examples/sync-drift-minimal/bundle/components/kubernetes/files/rootfs/usr/bin/kubelet
 .run
 coverage.out
 tools/*

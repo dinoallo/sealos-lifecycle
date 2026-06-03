@@ -189,7 +189,7 @@ render-distribution-controller-bundle:
 ## verify-distribution-controller-manifests: Validate controller manifests and controller wiring.
 .PHONY: verify-distribution-controller-manifests
 verify-distribution-controller-manifests:
-	TMPDIR=/tmp GOCACHE=$(TMP_DIR)/go-build go test ./deploy/distribution-controller ./pkg/distribution/controller ./cmd/sealos-agent/cmd -count=1
+	TMPDIR=/tmp GOCACHE=$(TMP_DIR)/go-build go test -tags "$(GO_TAGS)" ./deploy/distribution-controller ./pkg/distribution/controller ./cmd/sealos-agent/cmd -count=1
 	kubectl kustomize deploy/distribution-controller/base >/dev/null
 
 ## verify-distribution-controller-real-cluster: Run the mutating controller install smoke against a real cluster.
@@ -212,7 +212,7 @@ verify-distribution-controller-real-cluster:
 ## verify-local-patch-policy: Validate LocalPatchPolicy parsing, provenance, and materialization guards.
 .PHONY: verify-local-patch-policy
 verify-local-patch-policy:
-	go test ./pkg/distribution/ownership ./pkg/distribution/hydrate ./pkg/distribution/localrepo ./pkg/distribution/policyreport ./pkg/distribution/reconcile ./pkg/distribution/compare ./pkg/distribution/commit -count=1
+	go test -tags "$(GO_TAGS)" ./pkg/distribution/ownership ./pkg/distribution/hydrate ./pkg/distribution/localrepo ./pkg/distribution/policyreport ./pkg/distribution/reconcile ./pkg/distribution/compare ./pkg/distribution/commit -count=1
 
 ## verify-local-patch-policy-gate: Evaluate a LocalPatchPolicy change with the same gate semantics used in CI.
 .PHONY: verify-local-patch-policy-gate
@@ -225,7 +225,7 @@ verify-local-patch-policy-gate:
 	if [ -n "$(APPROVAL_FILE)" ]; then set -- "$$@" --approval-file "$(APPROVAL_FILE)"; fi; \
 	if [ -n "$(APPROVAL_EXPIRY_WARNING_DAYS)" ]; then set -- "$$@" --approval-expiry-warning-days "$(APPROVAL_EXPIRY_WARNING_DAYS)"; fi; \
 	if [ -n "$(FAIL_WHEN_APPROVAL_EXPIRES_SOON)" ]; then set -- "$$@" --fail-when-approval-expires-soon; fi; \
-	go run ./cmd/sealos "$$@"
+	go run -tags "$(GO_TAGS)" ./cmd/sealos "$$@"
 
 ## verify-local-patch-policy-approvals: Scan LocalPatchPolicyGateApproval files for invalid, expired, or near-expiry exceptions.
 .PHONY: verify-local-patch-policy-approvals
@@ -235,7 +235,7 @@ verify-local-patch-policy-approvals:
 	set -- sync policy-approval-scan --root "$$root"; \
 	if [ -n "$(APPROVAL_EXPIRY_WARNING_DAYS)" ]; then set -- "$$@" --approval-expiry-warning-days "$(APPROVAL_EXPIRY_WARNING_DAYS)"; fi; \
 	if [ -n "$(FAIL_WHEN_APPROVAL_EXPIRES_SOON)" ]; then set -- "$$@" --fail-when-approval-expires-soon; fi; \
-	go run ./cmd/sealos "$$@"
+	go run -tags "$(GO_TAGS)" ./cmd/sealos "$$@"
 
 ## verify-license: Verify the license headers for all files.
 .PHONY: verify-license

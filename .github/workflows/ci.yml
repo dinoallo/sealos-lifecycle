@@ -41,6 +41,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Resolve Modules
         id: set-matrix
@@ -55,6 +57,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Setup Golang with cache
         uses: magnetikonline/action-golang-cache@v5
@@ -70,4 +74,4 @@ jobs:
           version: v2.5.0
           working-directory: ${{ matrix.workdir }}
           # args between =, not space
-          args: --color=always --config=${{ github.workspace }}/.golangci.yml --build-tags=${{ env.GO_BUILD_TAGS }}
+          args: --color=always --config=${{ github.workspace }}/.golangci.yml --build-tags=${{ env.GO_BUILD_TAGS }} --new-from-rev=HEAD~

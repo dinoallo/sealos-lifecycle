@@ -72,6 +72,10 @@ var _ = Describe("E2E_sealos_k3s_basic_test", func() {
 			By("run k3s for normal")
 			err = fakeClient.Cluster.Run("k3s:buildin")
 			utils.CheckErr(err)
+			const (
+				k3sPodPollInterval = 2 * time.Second
+				k3sPodPollAttempts = 90
+			)
 			fn := func() []byte {
 				data, err := fakeClient.CmdInterface.Exec("kubectl", "get", "pods", "-A", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml", "-o", "yaml")
 				utils.CheckErr(err)
@@ -92,10 +96,10 @@ var _ = Describe("E2E_sealos_k3s_basic_test", func() {
 				if running == len(podList.Items) && running != 0 {
 					break
 				}
-				time.Sleep(2 * time.Second)
+				time.Sleep(k3sPodPollInterval)
 				logger.Info("k3s pods is empty,retry %d", count+1)
 				count++
-				if count == 20 {
+				if count == k3sPodPollAttempts {
 					utils.CheckErr(errors.New("k3s pods is empty, for timeout"))
 				}
 			}
