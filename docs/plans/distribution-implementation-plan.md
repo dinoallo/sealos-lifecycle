@@ -269,7 +269,7 @@ Tasks:
 - Implement candidate revision metadata and history. Candidate source channel
   and transition metadata are represented in the local promotion policy
   decision; durable advancement history is recorded in
-  `DistributionChannel.spec.promotionHistory[]`.
+  `ReleaseChannel.spec.promotionHistory[]`.
 - Implement the upstream handoff path for `sealos sync commit --target=global`.
 - Prevent silent promotion of `Orphan` changes.
 - Record enough audit metadata to reconstruct why a promotion occurred. The

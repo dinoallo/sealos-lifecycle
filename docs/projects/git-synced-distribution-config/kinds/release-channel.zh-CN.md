@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现的文件 schema。`ReleaseChannel` 是新文档推荐使用的名称。Loader 仍接受旧的 `DistributionChannel` kind。
+已实现的文件 schema。`ReleaseChannel` 是 release 指针文档。
 
 ## 类别
 
@@ -41,8 +41,6 @@ spec: {}
 | `bomPath` | 是 | 指向目标 BOM 的仓库相对路径。 |
 | `promotionHistory` | 否 | 该 channel 的历史 promotion 记录。 |
 
-旧文档可能使用 `line` 代替 `distribution`。新文档应使用 `distribution`。
-
 ## Promotion History
 
 每条 promotion history 记录：
@@ -60,7 +58,7 @@ Promotion history 是 append-only evidence。当前 channel 状态始终以 `tar
 ## 校验规则
 
 - 必须设置 `apiVersion`、`kind` 和 `metadata.name`。
-- 必须设置 `spec.distribution` 或旧字段 `spec.line`。
+- 必须设置 `spec.distribution`。
 - 必须设置 `spec.channel`、`spec.targetRevision` 和 `spec.bomPath`。
 - `bomPath` 必须是仓库相对路径。
 - Promotion evidence 应引用一个 `DistributionHealthProof`。

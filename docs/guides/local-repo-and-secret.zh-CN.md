@@ -31,7 +31,7 @@
   [Package format](../architecture/package-format.md)
 - Grafana + 数据库示例：
   [Grafana with KubeBlocks](../guides/grafana-kubeblocks-example.md)
-- BOM 与 `DistributionChannel`：
+- BOM 与 `ReleaseChannel`：
   [BOM and channel](../guides/bom-and-channel.md)
 
 ## Local Repo 是什么
@@ -386,7 +386,7 @@ spec:
 
 正确的运维流程应该是：
 
-1. 先选定 BOM revision，或者 `distribution line + DistributionChannel`。
+1. 先选定 BOM revision，或者 `distribution line + ReleaseChannel`。
 2. 根据 BOM 和 package input contract 为这个集群初始化 local repo skeleton。
 3. 在 `inputs/` 下填非 Secret 的 input 值。
 4. 在 `resources/` 下创建需要的 Secret 资源或 Secret 引用。

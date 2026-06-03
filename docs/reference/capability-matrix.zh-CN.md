@@ -43,7 +43,7 @@
 | 在 render 前运行、强制执行并记录 source preflight | Ready now | [sync.go](../../cmd/sealos/cmd/sync.go) 里的 `sealos sync preflight --file ...` 和 `sealos sync render` 默认 source gate，[bundle.go](../../pkg/distribution/hydrate/bundle.go) 里的 bundle metadata，以及 [sync_test.go](../../cmd/sealos/cmd/sync_test.go) | source preflight 聚合 local-repo doctor 和 validate，然后 render 把脱敏摘要写进 `spec.sourcePreflight`。 |
 | 在 apply 前检查 rendered bundle freshness 和 runtime readiness | Ready now | [sync.go](../../cmd/sealos/cmd/sync.go) 里的 `sealos sync preflight --bundle-dir ...`，以及 [sync_runtime_preflight.go](../../cmd/sealos/cmd/sync_runtime_preflight.go) | rendered-bundle preflight 会检查 topology/render-input freshness，以及本机 host/runtime readiness，例如权限、systemd、swap、Kubernetes 现状、端口、已存在二进制、kubeconfig/client 可用性和受管 service 状态。runtime warning 只进入结构化输出；blocking runtime check 会 gate `sync apply`。 |
 | 在真正修改集群前预览 rendered bundle 的 apply 意图 | Ready now | [sync_plan.go](../../cmd/sealos/cmd/sync_plan.go) 里的 `sealos sync plan` | plan 是静态只读视图：它会解析 target 并汇总资源，但不会执行 SSH、kubectl 或动态 apply 探测。 |
-| 用策略要求的 health proof 把本地 `DistributionChannel` 推进到目标 BOM revision | Ready now | [sync.go](../../cmd/sealos/cmd/sync.go) 里的 `sealos sync promote`，[channel.go](../../pkg/distribution/bom/channel.go) 里的 `DistributionHealthProof` 和 promotion helper，以及 [pkg/distribution/promotion](../../pkg/distribution/promotion) 里的 policy rules | 它会更新一份本地 channel 文件，校验目标 BOM 属于同一条线，执行 source/target channel policy，对 beta/stable 目标 channel 要求一份针对同一 line/revision、通过且至少包含一个 signal 的本地 `DistributionHealthProof`，返回 `policyDecision`，并在存在 proof 时把 proof 元数据追加进 `spec.promotionHistory[]`。这不是 registry/API-backed release lookup，也不是 health-proof ingestion service。 |
+| 用策略要求的 health proof 把本地 `ReleaseChannel` 推进到目标 BOM revision | Ready now | [sync.go](../../cmd/sealos/cmd/sync.go) 里的 `sealos sync promote`，[channel.go](../../pkg/distribution/bom/channel.go) 里的 `DistributionHealthProof` 和 promotion helper，以及 [pkg/distribution/promotion](../../pkg/distribution/promotion) 里的 policy rules | 它会更新一份本地 channel 文件，校验目标 BOM 属于同一条线，执行 source/target channel policy，对 beta/stable 目标 channel 要求一份针对同一 line/revision、通过且至少包含一个 signal 的本地 `DistributionHealthProof`，返回 `policyDecision`，并在存在 proof 时把 proof 元数据追加进 `spec.promotionHistory[]`。这不是 registry/API-backed release lookup，也不是 health-proof ingestion service。 |
 | 从 package acceptance evidence 生成本地 promotion health proof | Ready now | [sync_health_proof.go](../../cmd/sealos/cmd/sync_health_proof.go) 里的 `sealos sync health-proof`，以及 [smoke.sh](../../scripts/poc/minimal-single-node/smoke.sh) 产出的 `acceptance-report.yaml` | 它会把 `PackageAcceptanceReport` 转成指向指定目标 BOM line/revision 的 `DistributionHealthProof`。生成逻辑是保守的：只跑 preflight 的 safe smoke report、report BOM file、已 render 的 BOM line/revision 或 BOM digest 和目标 BOM 不一致、缺少 rendered desired-state/local-repo revision digest、缺少预期 acceptance stage contract 或 mutating-stage marker、缺少 mutating apply evidence、或缺少 clean post-apply evidence 时都会得到 `spec.passed: false`，因此不会满足 beta/stable promotion gate。 |
 | 围绕 rendered desired state 做 diff/status/commit/revert | Ready now | [sync.go](../../cmd/sealos/cmd/sync.go), [pkg/distribution/compare](../../pkg/distribution/compare), [pkg/distribution/commit](../../pkg/distribution/commit) | 这是 CLI 驱动的当前 operator loop，不是 controller。 |
 | 运行安全的端到端 package lifecycle smoke 流程 | Ready now | `make verify-sync-package-smoke`，底层是 [smoke.sh](../../scripts/poc/minimal-single-node/smoke.sh) | 默认 smoke 会构建当前 CLI，使用临时状态，串起 package inspect、local-repo init/doctor、source preflight、render、runtime preflight、plan 和 sourcePreflight 校验。host mutation 和 OCI image build 通过 `SYNC_PACKAGE_SMOKE_ARGS` 显式打开。 |
@@ -59,8 +59,8 @@
 | --- | --- | --- | --- |
 | 在一条统一流程里把 package 内容同时部署到 Kubernetes 和 host | Ready with boundary | [apply.go](../../pkg/distribution/reconcile/apply.go) | 当前部署单元是 rendered bundle，不是“直接安装一个 package”。 |
 | 跨多个 cluster host 编排一个 rendered bundle | Ready with boundary | [topology.go](../../pkg/distribution/reconcile/topology.go), [apply.go](../../pkg/distribution/reconcile/apply.go), [kubeadm_bootstrap.go](../../pkg/distribution/reconcile/kubeadm_bootstrap.go) | CLI 驱动的 `sync apply` 路径会解析 `allNodes`、`firstMaster`、`cluster`，按 remote host staging bundle payload，生成 kubeadm join config，并在 cluster-scoped step 需要时从 remote first master 拉取 kubeconfig。package 自己的 hook/script 仍然需要具备 multi-node-safe 行为。 |
-| 解析本地文件形式的 `DistributionChannel` target | Ready with boundary | [channel.go](../../pkg/distribution/bom/channel.go), [sync.go](../../cmd/sealos/cmd/sync.go), [runner.go](../../pkg/distribution/agent/runner.go) | `--distribution-channel` 会加载一份本地 channel 文档，校验它的 `line` 和 `targetRevision` 是否匹配 `spec.bomPath` 指向的 BOM，然后 render 解析出来的 BOM。本地文件现在可以通过 `sealos sync promote` 推进；但还没有 registry/API 驱动的 `line + channel` lookup。 |
-| 运行进程级 distribution reconcile agent | Ready with boundary | [main.go](../../cmd/sealos-agent/main.go), [root.go](../../cmd/sealos-agent/cmd/root.go), [runner.go](../../pkg/distribution/agent/runner.go) | `sealos-agent` 可以围绕 BOM 或本地 `DistributionChannel` 跑一次或按 interval 循环；这仍然适合直接在 host 上执行和调试。 |
+| 解析本地文件形式的 `ReleaseChannel` target | Ready with boundary | [channel.go](../../pkg/distribution/bom/channel.go), [sync.go](../../cmd/sealos/cmd/sync.go), [runner.go](../../pkg/distribution/agent/runner.go) | `--release-channel` 会加载一份本地 channel 文档，校验它的 `distribution` 和 `targetRevision` 是否匹配 `spec.bomPath` 指向的 BOM，然后 render 解析出来的 BOM。本地文件现在可以通过 `sealos sync promote` 推进；但还没有 registry/API 驱动的 distribution line + channel lookup。 |
+| 运行进程级 distribution reconcile agent | Ready with boundary | [main.go](../../cmd/sealos-agent/main.go), [root.go](../../cmd/sealos-agent/cmd/root.go), [runner.go](../../pkg/distribution/agent/runner.go) | `sealos-agent` 可以围绕 BOM 或本地 `ReleaseChannel` 跑一次或按 interval 循环；这仍然适合直接在 host 上执行和调试。 |
 | 运行最小 Kubernetes controller reconcile loop | Ready with boundary | [pkg/distribution/controller](../../pkg/distribution/controller), [root.go](../../cmd/sealos-agent/cmd/root.go) 里的 `--controller`, [deploy/distribution-controller/base](../../deploy/distribution-controller/base), [Controller install zh-CN](../guides/controller-install.zh-CN.md) | `sealos-agent --controller` 会 watch `DistributionTarget` 和 `DistributionRolloutPolicy` 对象，并把每个 target reconcile 委托给现有 agent runner，同时写 status condition，也支持可选 leader election，并提供可安装 CRD/RBAC/deployment manifests。registry-backed channel lookup 和 health-gated promotion automation 仍然没有实现。 |
 | 对 host-targeted rendered-bundle rollout 做分批、canary、pause、health gate 和失败策略 | Ready with boundary | [sync.go](../../cmd/sealos/cmd/sync.go) 和 [root.go](../../cmd/sealos-agent/cmd/root.go) 里的 `--rollout-batch-size`、`--rollout-canary-size`、`--rollout-pause-after-canary`、`--rollout-health-gate`、`--rollout-failure-action`，[types.go](../../pkg/distribution/controller/types.go) 里的 `DistributionRolloutPolicy`，以及 [apply.go](../../pkg/distribution/reconcile/apply.go) 里的 rollout handling | 这些控制只作用于 rendered-bundle executor 里符合条件的 host-targeted all-node runtime-rootfs steps。开启 `healthGate` 时，每批 host 完成后会先运行 component 的 `healthcheck` hooks；post-canary pause 会把 target 标成非 degraded 的暂停状态，并等待显式更新 target 或 policy；`Rollback` 会重新 apply cluster bundle store 中保留的上一次成功 rendered revision，然后等待显式更新 target 或 policy。这仍然不是覆盖所有 multi-node workflow 的 package 级安全模型。 |
 | 从多节点中的指定 host commit 一个 local input 绑定出来的 host file | Ready with boundary | [sync.go](../../cmd/sealos/cmd/sync.go), [commit.go](../../pkg/distribution/commit/commit.go) | 当前 multi-node commit 支持面故意很窄：只覆盖 local-input regular file；如果选中 host 有 host-scoped input，就回写 scoped input；如果没有 scoped provenance 且多节点内容已经分叉，就拒绝把单个节点的值覆盖到默认 input。 |
@@ -78,7 +78,7 @@
 | --- | --- | --- |
 | 不经过 BOM/bundle，直接“安装这个 package” | Not implemented | 当前部署路径是 `package -> BOM -> render -> bundle -> apply`，不是 package-direct install。 |
 | 覆盖所有 multi-node workflow 的 package 级安全模型 | Not implemented | 持久 rollout policy 现在已经覆盖符合条件的 rendered-bundle host batches，支持 canary、pause、health gate、stop 和 rollback；但 bootstrap rootfs、manifest-only 以及 package-specific safety model 仍需要单独设计。 |
-| live `DistributionChannel` release lookup 和 health-gated promotion service | Not implemented | 本地文件形式的 `DistributionChannel` resolution 和 `sealos sync promote` advancement 已经有了，但还没有 registry/API 驱动的 `distribution line + channel` lookup，也没有 health-gated promotion service。 |
+| live `ReleaseChannel` release lookup 和 health-gated promotion service | Not implemented | 本地文件形式的 `ReleaseChannel` resolution 和 `sealos sync promote` advancement 已经有了，但还没有 registry/API 驱动的 `distribution line + channel` lookup，也没有 health-gated promotion service。 |
 | 完全泛化的 generated-output drift 管理 | Not implemented | 当前 MVP 只跟踪一组已知 generated target。 |
 | package、BOM、cluster-local 多层 policy merge | Not implemented | 当前模型刻意拒绝这层复杂度。 |
 
@@ -90,7 +90,7 @@
 - 解析：好了
 - 部署：好了，它是 BOM 驱动的当前 MVP
 - CLI 驱动的多节点 bundle 编排：好了，但边界很窄
-- 本地文件形式的 `DistributionChannel` 选择：好了，但边界很窄
+- 本地文件形式的 `ReleaseChannel` 选择：好了，但边界很窄
 - `sealos-agent` 进程级 reconcile：好了，但边界很窄
 - `sealos-agent --controller` 最小 watched reconcile 和安装 manifests：好了，但边界很窄
 - host rollout batching 和持久 batch policy：好了，但边界很窄
@@ -101,8 +101,8 @@
 - package 编写
 - OCI package build / push / pull
 - BOM 驱动的 render/apply
-- 本地 `DistributionChannel` target 选择
-- 带显式 promotion policy 和 history 的本地 `DistributionChannel` advancement
+- 本地 `ReleaseChannel` target 选择
+- 带显式 promotion policy 和 history 的本地 `ReleaseChannel` advancement
 - 进程级 agent reconcile
 - 带可安装 manifests 和 RBAC 的最小 `DistributionTarget` controller reconcile
 - rendered bundle 的分批 host apply waves
@@ -126,7 +126,7 @@
 - local repo 与部署闭环：
   [Local repo and secret](../guides/local-repo-and-secret.md),
   [Sync drift](../guides/sync-drift.md)
-- BOM 与 `DistributionChannel` 模型，包括当前本地文件边界：
+- BOM 与 `ReleaseChannel` 模型，包括当前本地文件边界：
   [BOM and channel](../guides/bom-and-channel.md)
 - Controller 安装指南：
   [Controller install zh-CN](../guides/controller-install.zh-CN.md)

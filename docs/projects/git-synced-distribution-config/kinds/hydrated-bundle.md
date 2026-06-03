@@ -60,7 +60,7 @@ spec: {}
 
 `renderProvenance` should include:
 
-- `distributionChannelPath` and digest, when a channel was used;
+- `releaseChannelPath` and digest, when a channel was used;
 - `distributionLine`;
 - `bomPath` and digest;
 - `localRepoPath` and local revision, when local mode was used;
@@ -106,8 +106,8 @@ spec:
   revision: v5.0.0
   channel: stable
   renderProvenance:
-    distributionChannelPath: channels/sealos/stable.yaml
-    distributionChannelDigest: sha256:...
+    releaseChannelPath: channels/sealos/stable.yaml
+    releaseChannelDigest: sha256:...
     bomPath: boms/sealos/v5.0.0/bom.yaml
     bomDigest: sha256:...
     localRepoPath: /var/lib/sealos/distribution/local-repo

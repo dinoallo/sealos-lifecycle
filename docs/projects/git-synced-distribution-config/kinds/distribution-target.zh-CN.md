@@ -31,8 +31,8 @@ Cluster operator 创建或更新该 CRD。Distribution controller 负责 reconci
 | 字段 | 必需 | 说明 |
 | --- | --- | --- |
 | `clusterName` | 否 | 逻辑集群名称。 |
-| `bomPath` | `bomPath` 或 `distributionChannelPath` 二选一 | 直接指向 BOM 的路径。 |
-| `distributionChannelPath` | `bomPath` 或 `distributionChannelPath` 二选一 | 指向 release channel 文档的路径。 |
+| `bomPath` | `bomPath` 或 `releaseChannelPath` 二选一 | 直接指向 BOM 的路径。 |
+| `releaseChannelPath` | `bomPath` 或 `releaseChannelPath` 二选一 | 指向 release channel 文档的路径。 |
 | `localRepoPath` | 否 | 本地 source 或 artifact 使用的 local repository path。 |
 | `localPatchRevision` | 否 | 要应用的 local patch revision。 |
 | `packageSources` | 否 | 按 component 显式声明的 package source paths 和 digests。 |
@@ -60,7 +60,7 @@ Status 记录：
 
 ## 校验规则
 
-- 必须且只能设置 `bomPath` 或 `distributionChannelPath` 其中之一。
+- 必须且只能设置 `bomPath` 或 `releaseChannelPath` 其中之一。
 - Paths 必须对 controller runtime 有意义。
 - Spec 中不能嵌入 secret 值。
 - Status 由 controller 拥有。
@@ -89,7 +89,7 @@ metadata:
   namespace: distribution-system
 spec:
   clusterName: prod-01
-  distributionChannelPath: channels/sealos/stable.yaml
+  releaseChannelPath: channels/sealos/stable.yaml
   localRepoPath: /var/lib/sealos/distribution/local-repo
   localPatchRevision: prod-01-2026-06-01
   cacheRoot: /var/cache/sealos/distribution

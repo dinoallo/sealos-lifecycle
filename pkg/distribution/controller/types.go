@@ -44,18 +44,18 @@ const (
 var GroupVersion = schema.GroupVersion{Group: distribution.GroupName, Version: distribution.Version}
 
 type DistributionTargetSpec struct {
-	ClusterName             string                      `json:"clusterName,omitempty"`
-	BOMPath                 string                      `json:"bomPath,omitempty"`
-	DistributionChannelPath string                      `json:"distributionChannelPath,omitempty"`
-	LocalRepoPath           string                      `json:"localRepoPath,omitempty"`
-	LocalPatchRevision      string                      `json:"localPatchRevision,omitempty"`
-	PackageSources          []DistributionPackageSource `json:"packageSources,omitempty"`
-	CacheRoot               string                      `json:"cacheRoot,omitempty"`
-	KubeconfigPath          string                      `json:"kubeconfigPath,omitempty"`
-	HostRoot                string                      `json:"hostRoot,omitempty"`
-	RolloutPolicyRef        *DistributionPolicyRef      `json:"rolloutPolicyRef,omitempty"`
-	RolloutBatchSize        int                         `json:"rolloutBatchSize,omitempty"`
-	RequeueAfter            *metav1.Duration            `json:"requeueAfter,omitempty"`
+	ClusterName        string                      `json:"clusterName,omitempty"`
+	BOMPath            string                      `json:"bomPath,omitempty"`
+	ReleaseChannelPath string                      `json:"releaseChannelPath,omitempty"`
+	LocalRepoPath      string                      `json:"localRepoPath,omitempty"`
+	LocalPatchRevision string                      `json:"localPatchRevision,omitempty"`
+	PackageSources     []DistributionPackageSource `json:"packageSources,omitempty"`
+	CacheRoot          string                      `json:"cacheRoot,omitempty"`
+	KubeconfigPath     string                      `json:"kubeconfigPath,omitempty"`
+	HostRoot           string                      `json:"hostRoot,omitempty"`
+	RolloutPolicyRef   *DistributionPolicyRef      `json:"rolloutPolicyRef,omitempty"`
+	RolloutBatchSize   int                         `json:"rolloutBatchSize,omitempty"`
+	RequeueAfter       *metav1.Duration            `json:"requeueAfter,omitempty"`
 }
 
 type DistributionPackageSource struct {
@@ -299,11 +299,11 @@ func (s *DistributionTargetStatus) DeepCopyInto(out *DistributionTargetStatus) {
 }
 
 func (s DistributionTargetSpec) Validate() error {
-	if strings.TrimSpace(s.BOMPath) == "" && strings.TrimSpace(s.DistributionChannelPath) == "" {
-		return fmt.Errorf("one of spec.bomPath or spec.distributionChannelPath is required")
+	if strings.TrimSpace(s.BOMPath) == "" && strings.TrimSpace(s.ReleaseChannelPath) == "" {
+		return fmt.Errorf("one of spec.bomPath or spec.releaseChannelPath is required")
 	}
-	if strings.TrimSpace(s.BOMPath) != "" && strings.TrimSpace(s.DistributionChannelPath) != "" {
-		return fmt.Errorf("use either spec.bomPath or spec.distributionChannelPath, not both")
+	if strings.TrimSpace(s.BOMPath) != "" && strings.TrimSpace(s.ReleaseChannelPath) != "" {
+		return fmt.Errorf("use either spec.bomPath or spec.releaseChannelPath, not both")
 	}
 	if s.RolloutBatchSize < 0 {
 		return fmt.Errorf("spec.rolloutBatchSize cannot be negative")
@@ -393,7 +393,7 @@ func (s DistributionTargetSpec) agentOptions(defaults Defaults, rollout reconcil
 
 	return agent.Options{
 		ClusterName:        clusterName,
-		Target:             agent.TargetOptions{BOMPath: strings.TrimSpace(s.BOMPath), DistributionChannelPath: strings.TrimSpace(s.DistributionChannelPath)},
+		Target:             agent.TargetOptions{BOMPath: strings.TrimSpace(s.BOMPath), ReleaseChannelPath: strings.TrimSpace(s.ReleaseChannelPath)},
 		LocalRepoPath:      strings.TrimSpace(s.LocalRepoPath),
 		LocalPatchRevision: strings.TrimSpace(s.LocalPatchRevision),
 		PackageSources:     packageSources,

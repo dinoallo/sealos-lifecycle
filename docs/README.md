@@ -29,7 +29,7 @@ This directory contains the design, guides, references, examples, and project pr
 | Document | Role |
 | --- | --- |
 | [Controller install](./guides/controller-install.md) | Installs or upgrades the `DistributionTarget` CRD, RBAC, and `sealos-agent --controller` deployment. Chinese: [zh-CN](./guides/controller-install.zh-CN.md). |
-| [BOM and channel](./guides/bom-and-channel.md) | Explains BOM revisions, distribution lines, and `DistributionChannel` objects. Chinese: [zh-CN](./guides/bom-and-channel.zh-CN.md). |
+| [BOM and channel](./guides/bom-and-channel.md) | Explains BOM revisions, distribution lines, and `ReleaseChannel` objects. Chinese: [zh-CN](./guides/bom-and-channel.zh-CN.md). |
 | [Local repo and secret](./guides/local-repo-and-secret.md) | Describes a cluster-local repo layout and secret initialization workflow. Chinese: [zh-CN](./guides/local-repo-and-secret.zh-CN.md). |
 | [Local patch policy authoring](./guides/local-patch-policy-authoring.md) | Describes authorship, review rules, and validation for local patch policy. Chinese: [zh-CN](./guides/local-patch-policy-authoring.zh-CN.md). |
 | [Sync drift](./guides/sync-drift.md) | Walks through the current `sync diff`, `sync status`, `sync commit`, and `sync revert` loop. Chinese: [zh-CN](./guides/sync-drift.zh-CN.md). |

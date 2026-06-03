@@ -81,8 +81,8 @@ func TestDistributionTargetSpecValidateRejectsAmbiguousTarget(t *testing.T) {
 	t.Parallel()
 
 	err := (DistributionTargetSpec{
-		BOMPath:                 "bom.yaml",
-		DistributionChannelPath: "channel.yaml",
+		BOMPath:            "bom.yaml",
+		ReleaseChannelPath: "channel.yaml",
 	}).Validate()
 	if err == nil {
 		t.Fatal("Validate() error = nil, want ambiguous target error")

@@ -66,7 +66,7 @@ spec: {}
 
 ## 生命周期
 
-1. Cluster owner 选择 distribution channel 和 delivery mode。
+1. Cluster owner 选择 release channel 和 delivery mode。
 2. Cluster owner pin local patch 和 input 引用。
 3. Controller 或 materializer 根据 distribution source documents 解析 target。
 4. 运行时 reconciliation 通过 `DistributionTarget` 创建或更新。

@@ -30,7 +30,7 @@ as the recommended direction for the MVP and beyond.
   [Package format](../architecture/package-format.md)
 - Grafana and database example:
   [Grafana with KubeBlocks](../guides/grafana-kubeblocks-example.md)
-- BOM and `DistributionChannel` guide:
+- BOM and `ReleaseChannel` guide:
   [BOM and channel](../guides/bom-and-channel.md)
 
 ## What The Local Repo Is
@@ -397,7 +397,7 @@ Use this when:
 
 The correct operator workflow should be:
 
-1. Choose the BOM revision or the `distribution line + DistributionChannel`.
+1. Choose the BOM revision or the `distribution line + ReleaseChannel`.
 2. Initialize the local repo skeleton for the cluster from the BOM and package
    input contracts.
 3. Fill in non-secret input values under `inputs/`.

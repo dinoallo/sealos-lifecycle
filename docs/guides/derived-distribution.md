@@ -30,7 +30,7 @@ productized one-command workflow.
   [Reconcile and ownership](../architecture/reconcile-and-ownership.md)
 - Release channels and promotion policy:
   [Release and promotion](../architecture/release-and-promotion.md)
-- BOM and `DistributionChannel` semantics:
+- BOM and `ReleaseChannel` semantics:
   [BOM and channel](../guides/bom-and-channel.md)
 - Component package contract:
   [Package format](../architecture/package-format.md)
@@ -202,7 +202,7 @@ Typical changes:
 - change `spec.revision`
 - in the current BOM schema, optionally change `spec.channel`
 - in the target release model, publish or update a separate
-  `DistributionChannel`
+  `ReleaseChannel`
 - keep the dependency graph explicit
 - keep unchanged components on their upstream artifact digests
 

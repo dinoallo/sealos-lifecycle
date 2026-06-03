@@ -178,28 +178,28 @@ func syncRenderInputStatusForBundle(bundle *hydrate.Bundle) syncRenderInputStatu
 	}
 
 	var changes []syncRenderInputChange
-	if strings.TrimSpace(provenance.DistributionChannelPath) != "" || strings.TrimSpace(provenance.DistributionChannelDigest) != "" {
+	if strings.TrimSpace(provenance.ReleaseChannelPath) != "" || strings.TrimSpace(provenance.ReleaseChannelDigest) != "" {
 		switch {
-		case strings.TrimSpace(provenance.DistributionChannelPath) == "" || strings.TrimSpace(provenance.DistributionChannelDigest) == "":
+		case strings.TrimSpace(provenance.ReleaseChannelPath) == "" || strings.TrimSpace(provenance.ReleaseChannelDigest) == "":
 			changes = append(changes, syncRenderInputChange{
-				Name:   "distributionChannel",
-				Path:   provenance.DistributionChannelPath,
-				Reason: "missing DistributionChannel provenance",
+				Name:   "releaseChannel",
+				Path:   provenance.ReleaseChannelPath,
+				Reason: "missing ReleaseChannel provenance",
 			})
 		default:
-			data, err := os.ReadFile(provenance.DistributionChannelPath)
+			data, err := os.ReadFile(provenance.ReleaseChannelPath)
 			if err != nil {
 				changes = append(changes, syncRenderInputChange{
-					Name:     "distributionChannel",
-					Path:     provenance.DistributionChannelPath,
-					Expected: provenance.DistributionChannelDigest,
+					Name:     "releaseChannel",
+					Path:     provenance.ReleaseChannelPath,
+					Expected: provenance.ReleaseChannelDigest,
 					Reason:   err.Error(),
 				})
-			} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.DistributionChannelDigest {
+			} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.ReleaseChannelDigest {
 				changes = append(changes, syncRenderInputChange{
-					Name:     "distributionChannel",
-					Path:     provenance.DistributionChannelPath,
-					Expected: provenance.DistributionChannelDigest,
+					Name:     "releaseChannel",
+					Path:     provenance.ReleaseChannelPath,
+					Expected: provenance.ReleaseChannelDigest,
 					Current:  current,
 					Reason:   "digest mismatch",
 				})
@@ -310,8 +310,8 @@ func syncTopologyRefreshCommand(clusterName string, provenance *hydrate.RenderPr
 		bomPath = provenance.BOMPath
 	}
 	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
-	if provenance != nil && strings.TrimSpace(provenance.DistributionChannelPath) != "" {
-		args = append(args, "--distribution-channel", provenance.DistributionChannelPath)
+	if provenance != nil && strings.TrimSpace(provenance.ReleaseChannelPath) != "" {
+		args = append(args, "--release-channel", provenance.ReleaseChannelPath)
 	} else {
 		args = append(args, "--file", bomPath)
 	}

@@ -31,7 +31,7 @@ kubeconfig；base deployment 里默认是 `/host/etc/kubernetes/admin.conf`。
   [`docker/sealos-agent/Dockerfile`](../../docker/sealos-agent/Dockerfile)。base deployment
   会把挂载的 host paths 放到 `PATH` 里，所以 `kubectl` 和 hook tools 可以放进派生镜像，
   也可以由 host 提供。
-- 选中的 BOM 或本地 `DistributionChannel` 文件已经放到运行 controller pod 的节点的
+- 选中的 BOM 或本地 `ReleaseChannel` 文件已经放到运行 controller pod 的节点的
   `/var/lib/sealos/distribution/...` 下。
 - 如果选中的 BOM 需要 local inputs、resources 或 patches，cluster-local repo 也要放到
   `/var/lib/sealos/distribution/...` 下。
@@ -187,13 +187,13 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-rollout-po
 kubectl apply -f deploy/distribution-controller/examples/distribution-target-bom.yaml
 ```
 
-如果集群要跟随一个本地 channel selection 文件，使用本地 `DistributionChannel` target：
+如果集群要跟随一个本地 channel selection 文件，使用本地 `ReleaseChannel` target：
 
 ```bash
 kubectl apply -f deploy/distribution-controller/examples/distribution-target-channel.yaml
 ```
 
-controller 要求 `spec.bomPath` 和 `spec.distributionChannelPath` 必须二选一，且不能同时设置。
+controller 要求 `spec.bomPath` 和 `spec.releaseChannelPath` 必须二选一，且不能同时设置。
 这两个路径都必须能在 controller pod 内读取。示例 `DistributionRolloutPolicy` 设置了
 `spec.strategy.batchSize: 1`、`spec.strategy.canary.batchSize: 1`、
 `spec.strategy.pause.afterCanary: true`、`spec.strategy.healthGate: true` 和
@@ -224,6 +224,6 @@ rendered-bundle executor 使用的 host rollout batch size、第一批 canary si
 post-canary pause、可选的逐批 health gate，以及 stop-or-rollback failure action。这些设置只作用于符合条件的
 all-node runtime-rootfs host batches。pause gate 和 rollback result 都是 operator action hold，
 不是按 host 保存的 rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
-它还没有加入 registry-backed `DistributionChannel` lookup、controller 驱动的 promotion
+它还没有加入 registry-backed `ReleaseChannel` lookup、controller 驱动的 promotion
 automation，也不是覆盖所有 multi-node workflow 的 package 级安全模型。本地 channel 文件可以另外通过
 `sealos sync promote` 推进；controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。

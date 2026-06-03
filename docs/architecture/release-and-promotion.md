@@ -18,7 +18,7 @@ and explicit promotion rules.
   [Reconcile and ownership](../architecture/reconcile-and-ownership.md).
 - For the OCI component artifact contract consumed by BOMs, see
   [Package format](../architecture/package-format.md).
-- For the concrete object model around BOM revisions and `DistributionChannel`,
+- For the concrete object model around BOM revisions and `ReleaseChannel`,
   see
   [BOM and channel](../guides/bom-and-channel.md).
 - For repo-scoped implementation sequencing, see
@@ -62,7 +62,7 @@ tags or ad-hoc cluster state.
 | --- | --- |
 | `Component revision` | One immutable OCI package revision referenced by digest. |
 | `BOM revision` | A digest-pinned set of component revisions that defines a releasable baseline. |
-| `DistributionChannel` | A mutable release object that declares which BOM revision is current for one release channel on one distribution line. |
+| `ReleaseChannel` | A mutable release object that declares which BOM revision is current for one release channel on one distribution line. |
 | `Candidate revision` | A BOM or component change under evaluation for broader rollout. |
 | `Health proof` | Auditable runtime evidence collected from clusters that exercised a candidate revision. |
 
@@ -72,7 +72,7 @@ evidence originates from individual component changes.
 In the top-level terminology, one `BOM revision` is one concrete
 `distribution snapshot`, while a named sequence of BOM revisions plus channel
 metadata forms a `distribution line`. Promotion therefore advances a
-distribution line by updating its `DistributionChannel` objects to point at
+distribution line by updating its `ReleaseChannel` objects to point at
 newer BOM revisions.
 
 ## Channel Model
@@ -91,7 +91,7 @@ approval expectations.
 The current code boundary models these expectations in
 `pkg/distribution/promotion`. The default local-file policy treats a BOM's
 transitional `spec.channel` as the candidate source channel and evaluates it
-against the mutable `DistributionChannel.spec.channel` target:
+against the mutable `ReleaseChannel.spec.channel` target:
 
 | Target channel | Allowed candidate source channels | Health proof |
 | --- | --- | --- |
@@ -179,7 +179,7 @@ These guardrails are what prevent local experimentation from becoming an
 untracked global fork.
 
 For the local-file implementation, `sealos sync promote` enforces the channel
-source and proof requirements before writing `DistributionChannel`. The command
+source and proof requirements before writing `ReleaseChannel`. The command
 returns the promotion policy decision in structured output so automation can
 inspect the selected rule, evaluated transition, and proof requirement.
 

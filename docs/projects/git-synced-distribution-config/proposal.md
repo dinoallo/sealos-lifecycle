@@ -353,7 +353,7 @@ Promotion from `alpha` to `beta` or `beta` to `stable` then becomes a small pull
 
 This document only defines the `distribution-config` repository. The companion [cluster configuration proposal](cluster-config.md) defines the `cluster-config` repository, including `ClusterTarget`, delivery policy, local inputs, patches, and secret references.
 
-The Sealos agent can clone or fetch both repositories, read cluster-local intent from `cluster-config`, then resolve distribution channels, BOMs, profiles, and package materialization data from `distribution-config`.
+The Sealos agent can clone or fetch both repositories, read cluster-local intent from `cluster-config`, then resolve release channels, BOMs, profiles, and package materialization data from `distribution-config`.
 
 This preserves the existing global/local ownership boundary:
 

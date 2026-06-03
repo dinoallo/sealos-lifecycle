@@ -36,8 +36,8 @@ CRD consumed by the controller.
 | Field | Required | Description |
 | --- | --- | --- |
 | `clusterName` | No | Logical cluster name. |
-| `bomPath` | One of `bomPath` or `distributionChannelPath` | Direct path to a BOM. |
-| `distributionChannelPath` | One of `bomPath` or `distributionChannelPath` | Path to a release channel document. |
+| `bomPath` | One of `bomPath` or `releaseChannelPath` | Direct path to a BOM. |
+| `releaseChannelPath` | One of `bomPath` or `releaseChannelPath` | Path to a release channel document. |
 | `localRepoPath` | No | Local repository path for local source or artifact use. |
 | `localPatchRevision` | No | Local patch revision to apply. |
 | `packageSources` | No | Explicit package source paths and digests by component. |
@@ -65,7 +65,7 @@ Status records:
 
 ## Validation Rules
 
-- Exactly one of `bomPath` or `distributionChannelPath` must be set.
+- Exactly one of `bomPath` or `releaseChannelPath` must be set.
 - Paths must be meaningful to the controller runtime.
 - Secret values must not be embedded in the spec.
 - Status is controller-owned.
@@ -94,7 +94,7 @@ metadata:
   namespace: distribution-system
 spec:
   clusterName: prod-01
-  distributionChannelPath: channels/sealos/stable.yaml
+  releaseChannelPath: channels/sealos/stable.yaml
   localRepoPath: /var/lib/sealos/distribution/local-repo
   localPatchRevision: prod-01-2026-06-01
   cacheRoot: /var/cache/sealos/distribution

@@ -117,7 +117,7 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 	for _, field := range []string{
 		"clusterName",
 		"bomPath",
-		"distributionChannelPath",
+		"releaseChannelPath",
 		"localRepoPath",
 		"localPatchRevision",
 		"packageSources",

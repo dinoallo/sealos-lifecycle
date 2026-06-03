@@ -26,7 +26,6 @@ const (
 	KindBOM                     = "BOM"
 	KindAppliedRevision         = "AppliedRevision"
 	KindComponentPackage        = "ComponentPackage"
-	KindDistributionChannel     = "DistributionChannel"
 	KindDistributionHealthProof = "DistributionHealthProof"
 	KindHydratedBundle          = "HydratedBundle"
 	KindPackageAcceptanceReport = "PackageAcceptanceReport"

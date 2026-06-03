@@ -55,18 +55,18 @@ type syncValidatePackageOutput struct {
 }
 
 type syncValidateOutput struct {
-	Passed                  bool                        `json:"passed" yaml:"passed"`
-	ClusterName             string                      `json:"clusterName" yaml:"clusterName"`
-	BOMPath                 string                      `json:"bomPath" yaml:"bomPath"`
-	DistributionChannelPath string                      `json:"distributionChannelPath,omitempty" yaml:"distributionChannelPath,omitempty"`
-	LocalRepo               string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	ExecutionTopology       hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
-	Summary                 syncValidateSummary         `json:"summary" yaml:"summary"`
-	Packages                []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
-	Issues                  []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
-	LocalPolicy             string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
-	LocalPolicySource       string                      `json:"localPolicySource,omitempty" yaml:"localPolicySource,omitempty"`
-	LocalRepoRev            string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
+	Passed             bool                        `json:"passed" yaml:"passed"`
+	ClusterName        string                      `json:"clusterName" yaml:"clusterName"`
+	BOMPath            string                      `json:"bomPath" yaml:"bomPath"`
+	ReleaseChannelPath string                      `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
+	LocalRepo          string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
+	ExecutionTopology  hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
+	Summary            syncValidateSummary         `json:"summary" yaml:"summary"`
+	Packages           []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
+	Issues             []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
+	LocalPolicy        string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
+	LocalPolicySource  string                      `json:"localPolicySource,omitempty" yaml:"localPolicySource,omitempty"`
+	LocalRepoRev       string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
 }
 
 type syncValidateAccumulator struct {
@@ -120,12 +120,12 @@ func (a *syncValidateAccumulator) finalize() syncValidateOutput {
 
 func newSyncValidateCmd() *cobra.Command {
 	var flags struct {
-		clusterName             string
-		bomFile                 string
-		distributionChannelFile string
-		localRepo               string
-		packageSources          []string
-		output                  string
+		clusterName        string
+		bomFile            string
+		releaseChannelFile string
+		localRepo          string
+		packageSources     []string
+		output             string
 	}
 
 	cmd := &cobra.Command{
@@ -135,11 +135,11 @@ func newSyncValidateCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := runSyncValidate(syncValidateOptions{
-				ClusterName:             flags.clusterName,
-				BOMPath:                 flags.bomFile,
-				DistributionChannelPath: flags.distributionChannelFile,
-				LocalRepoPath:           flags.localRepo,
-				PackageSources:          flags.packageSources,
+				ClusterName:        flags.clusterName,
+				BOMPath:            flags.bomFile,
+				ReleaseChannelPath: flags.releaseChannelFile,
+				LocalRepoPath:      flags.localRepo,
+				PackageSources:     flags.packageSources,
 			})
 			if err := writeSyncOutput(cmd, out, flags.output, "validate result"); err != nil {
 				return err
@@ -151,7 +151,7 @@ func newSyncValidateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose inventory should be used for topology validation")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.distributionChannelFile, "path to the BOM file to validate")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file to validate")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "optional cluster-local repo root to validate against package inputs and local patch policy")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local validation")
 	addSyncOutputFlag(cmd, &flags.output)
@@ -159,11 +159,11 @@ func newSyncValidateCmd() *cobra.Command {
 }
 
 type syncValidateOptions struct {
-	ClusterName             string
-	BOMPath                 string
-	DistributionChannelPath string
-	LocalRepoPath           string
-	PackageSources          []string
+	ClusterName        string
+	BOMPath            string
+	ReleaseChannelPath string
+	LocalRepoPath      string
+	PackageSources     []string
 }
 
 func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
@@ -173,7 +173,7 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 		acc.out.ClusterName = "default"
 	}
 	acc.out.BOMPath = strings.TrimSpace(opts.BOMPath)
-	acc.out.DistributionChannelPath = strings.TrimSpace(opts.DistributionChannelPath)
+	acc.out.ReleaseChannelPath = strings.TrimSpace(opts.ReleaseChannelPath)
 	acc.out.LocalRepo = strings.TrimSpace(opts.LocalRepoPath)
 
 	topology, err := loadSyncExecutionTopology(acc.out.ClusterName)
@@ -185,8 +185,8 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 
 	target, err := resolveSyncTarget(syncTargetOptions{
-		BOMPath:                 opts.BOMPath,
-		DistributionChannelPath: opts.DistributionChannelPath,
+		BOMPath:            opts.BOMPath,
+		ReleaseChannelPath: opts.ReleaseChannelPath,
 	})
 	if err != nil {
 		acc.error("bomInvalid", "", strings.TrimSpace(opts.BOMPath), err.Error())
@@ -197,8 +197,8 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	if strings.TrimSpace(target.BOMPath) != "" {
 		acc.localPolicyBOMRoot = filepath.Dir(target.BOMPath)
 	}
-	if strings.TrimSpace(target.DistributionChannelPath) != "" {
-		acc.out.DistributionChannelPath = strings.TrimSpace(target.DistributionChannelPath)
+	if strings.TrimSpace(target.ReleaseChannelPath) != "" {
+		acc.out.ReleaseChannelPath = strings.TrimSpace(target.ReleaseChannelPath)
 	}
 	acc.out.Summary.Components = doc.PackageCount()
 

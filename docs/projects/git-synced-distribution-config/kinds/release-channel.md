@@ -2,8 +2,7 @@
 
 ## Status
 
-Implemented file schema. `ReleaseChannel` is the preferred name for new
-documents. The loader still accepts the legacy `DistributionChannel` kind.
+Implemented file schema. `ReleaseChannel` is the release pointer document.
 
 ## Class
 
@@ -44,9 +43,6 @@ spec: {}
 | `bomPath` | Yes | Repository-relative path to the target BOM. |
 | `promotionHistory` | No | Historical promotions into this channel. |
 
-Legacy documents may use `line` instead of `distribution`. New documents should
-use `distribution`.
-
 ## Promotion History
 
 Each promotion history entry records:
@@ -65,7 +61,7 @@ the `targetRevision` and `bomPath` pair.
 ## Validation Rules
 
 - `apiVersion`, `kind`, and `metadata.name` must be set.
-- `spec.distribution` or legacy `spec.line` must be set.
+- `spec.distribution` must be set.
 - `spec.channel`, `spec.targetRevision`, and `spec.bomPath` must be set.
 - `bomPath` must be repository-relative.
 - Promotion evidence should reference a `DistributionHealthProof`.

@@ -35,7 +35,7 @@ deployment that is `/host/etc/kubernetes/admin.conf`.
   [`docker/sealos-agent/Dockerfile`](../../docker/sealos-agent/Dockerfile). The
   base deployment puts mounted host paths on `PATH`, so `kubectl` and hook tools
   can either be baked into a derived image or supplied by the host.
-- The selected BOM or local `DistributionChannel` file staged under
+- The selected BOM or local `ReleaseChannel` file staged under
   `/var/lib/sealos/distribution/...` on the node running the controller pod.
 - A cluster-local repo staged under `/var/lib/sealos/distribution/...` when the
   selected BOM expects local inputs, resources, or patches.
@@ -205,7 +205,7 @@ Use a pinned BOM target when the cluster should apply one explicit BOM file:
 kubectl apply -f deploy/distribution-controller/examples/distribution-target-bom.yaml
 ```
 
-Use a local `DistributionChannel` target when the cluster should follow a local
+Use a local `ReleaseChannel` target when the cluster should follow a local
 channel selection file:
 
 ```bash
@@ -213,7 +213,7 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-cha
 ```
 
 The controller requires exactly one of `spec.bomPath` or
-`spec.distributionChannelPath`. Both paths must be readable inside the
+`spec.releaseChannelPath`. Both paths must be readable inside the
 controller pod. The sample `DistributionRolloutPolicy` sets
 `spec.strategy.batchSize: 1`, `spec.strategy.canary.batchSize: 1`,
 `spec.strategy.pause.afterCanary: true`, `spec.strategy.healthGate: true`, and
@@ -248,7 +248,7 @@ failure action used by the rendered-bundle executor. These settings only apply
 to eligible all-node runtime-rootfs host batches. The pause gate and rollback
 result are operator action holds, not per-host rollout cursors; continuing
 re-enters the eligible apply path with an updated target or policy. It does not
-add registry-backed `DistributionChannel` lookup, controller-driven promotion
+add registry-backed `ReleaseChannel` lookup, controller-driven promotion
 automation, or a package-level safety model for every multi-node workflow.
 Local channel files can be advanced separately with `sealos sync promote`; the
 controller still delegates to the existing BOM-driven render/apply agent path.

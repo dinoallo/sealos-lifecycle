@@ -65,8 +65,7 @@ links each kind to its detailed page.
 | [`ComponentPackage`](./kinds/component-package.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`, materialized package roots | Implemented file schema |
 | [`BuildClass`](./kinds/build-class.md) | Built-in contract | Platform team | Sealos built-in class registry; optional `classes/<name>/<version>.yaml` | Proposed |
 | [`BOM`](./kinds/bom.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | Implemented file schema |
-| [`ReleaseChannel`](./kinds/release-channel.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | Implemented preferred name, code accepts legacy alias |
-| [`DistributionChannel`](./kinds/distribution-channel.md) | Repository source document | Release manager | Existing local channel files | Implemented compatibility name |
+| [`ReleaseChannel`](./kinds/release-channel.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | Implemented file schema |
 | [`DistributionHealthProof`](./kinds/distribution-health-proof.md) | Evidence document | Release automation | CI artifacts or promotion evidence paths | Implemented file schema |
 | [`ClusterTarget`](./kinds/cluster-target.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/target.yaml` | Proposed |
 | [`ComponentInput`](./kinds/component-input.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/inputs/*.yaml` | Proposed |
@@ -202,17 +201,6 @@ Rules:
 - channel movement is release intent and should be a small reviewable change
 - the referenced BOM revision must match `spec.targetRevision`
 - new repository layouts should prefer `ReleaseChannel`
-
-### `DistributionChannel`
-
-Purpose: existing implemented channel document name used by current guides and
-commands.
-
-Rules:
-
-- treated as a compatibility name for channel pointer documents
-- new git-synced repository layouts should migrate toward `ReleaseChannel`
-- resolvers may accept both names during the transition
 
 ### `DistributionHealthProof`
 
@@ -421,7 +409,7 @@ deploy/distribution-controller/base/crd.yaml
 
 Minimum contract:
 
-- exactly one of `spec.bomPath` or `spec.distributionChannelPath`
+- exactly one of `spec.bomPath` or `spec.releaseChannelPath`
 - optional local repo path
 - optional package source overrides
 - optional cache, kubeconfig, and host-root paths visible to the controller pod
@@ -457,9 +445,7 @@ Rules:
 
 - Do not call every distribution document a CRD. Use "document kind" unless the
   kind has a Kubernetes `CustomResourceDefinition`.
-- Use `ReleaseChannel` for new git-synced channel pointer documents.
-- Keep accepting `DistributionChannel` while current commands and guides still
-  use it.
+- Use `ReleaseChannel` for git-synced channel pointer documents.
 - Keep `ClusterTarget` and `DistributionTarget` separate: `ClusterTarget` is
   cluster-owner Git intent; `DistributionTarget` is a Kubernetes runtime object.
 - Keep generated kinds such as `HydratedBundle`, `AppliedRevision`, and

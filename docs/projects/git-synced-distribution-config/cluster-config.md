@@ -160,7 +160,7 @@ An agent or operator should resolve a cluster in a deterministic order:
 
 1. Read the cluster's `target.yaml`.
 2. Resolve the configured `distribution-config` repository and Git ref.
-3. Resolve the selected distribution channel to one BOM.
+3. Resolve the selected release channel to one BOM.
 4. Resolve the selected distribution profile.
 5. Materialize packages according to the selected delivery mode.
 6. Merge package defaults, profile defaults, cluster inputs, and cluster patches in a documented order.

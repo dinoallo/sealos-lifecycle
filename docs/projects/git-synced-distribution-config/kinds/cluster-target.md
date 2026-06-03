@@ -77,7 +77,7 @@ execution policy, not the meaning of package identity.
 
 ## Lifecycle
 
-1. The cluster owner selects a distribution channel and delivery mode.
+1. The cluster owner selects a release channel and delivery mode.
 2. The cluster owner pins local patch and input references.
 3. A controller or materializer resolves the target against distribution source
    documents.

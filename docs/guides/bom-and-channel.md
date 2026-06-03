@@ -1,4 +1,4 @@
-# Guide: BOMs, Revisions, and DistributionChannel Semantics
+# Guide: BOMs, Revisions, and ReleaseChannel Semantics
 
 ## Status
 
@@ -11,13 +11,13 @@ This guide explains how Sealos should think about:
 - `ComponentPackage` revisions
 - `BOM` revisions
 - `distribution lines`
-- `DistributionChannel` objects
+- `ReleaseChannel` objects
 - Day 0 and Day 1 revision selection
 
 It exists because these concepts currently appear across several design
 documents, while the current PoC code still uses a simpler transition model in
 which `spec.channel` lives inside the BOM itself. The repository now also
-supports a narrow local-file `DistributionChannel` path for selecting a BOM
+supports a narrow local-file `ReleaseChannel` path for selecting a BOM
 before render.
 
 ## Related Documents
@@ -36,7 +36,7 @@ before render.
   [pkg/distribution/state/types.go](../../pkg/distribution/state/types.go)
 - Current materialization path:
   [pkg/distribution/reconcile/materialize.go](../../pkg/distribution/reconcile/materialize.go)
-- Current local `DistributionChannel` resolver:
+- Current local `ReleaseChannel` resolver:
   [pkg/distribution/bom/channel.go](../../pkg/distribution/bom/channel.go)
 
 ## Why This Guide Exists
@@ -47,7 +47,7 @@ The current design needs one place that answers these questions plainly:
 - What is a BOM revision?
 - What is the difference between a BOM and a distribution line?
 - What should a cluster choose at Day 0?
-- What is `DistributionChannel`, and why should it exist separately from the
+- What is `ReleaseChannel`, and why should it exist separately from the
   BOM?
 - What does the current repo already implement, and what is still design-only?
 
@@ -61,7 +61,7 @@ This guide gives one consistent answer to all of them.
 | `BOM component entry` | One component selection inside a BOM, including version, artifact reference, and dependency names. | Immutable as part of one BOM revision |
 | `BOM revision` | One digest-pinned set of component selections that defines one releasable baseline snapshot. | Immutable |
 | `Distribution line` | One named lineage of BOM revisions that operators treat as one release family over time. | Evolves by publishing new BOM revisions |
-| `DistributionChannel` | One mutable release object that says which BOM revision is currently recommended for one channel on one distribution line. | Mutable |
+| `ReleaseChannel` | One mutable release object that says which BOM revision is currently recommended for one channel on one distribution line. | Mutable |
 | `AppliedRevision` | Cluster-local state that records what the cluster last rendered or applied. | Mutable cluster state |
 
 The most important rule is:
@@ -69,7 +69,7 @@ The most important rule is:
 - packages are component building blocks
 - a BOM revision is one concrete release snapshot
 - a distribution line is the sequence of those snapshots over time
-- a `DistributionChannel` is the moving head that points clusters at the
+- a `ReleaseChannel` is the moving head that points clusters at the
   current snapshot for one rollout stage
 
 ## What A BOM Is
@@ -280,11 +280,11 @@ Neither is a good release model.
 So the design direction is:
 
 - keep BOM revisions immutable
-- move the mutable channel head into `DistributionChannel`
+- move the mutable channel head into `ReleaseChannel`
 
-## What `DistributionChannel` Should Mean
+## What `ReleaseChannel` Should Mean
 
-`DistributionChannel` is the release object that answers one question:
+`ReleaseChannel` is the release object that answers one question:
 
 For this distribution line and this channel, which BOM revision is current?
 
@@ -303,7 +303,7 @@ package digests.
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
-kind: DistributionChannel
+kind: ReleaseChannel
 metadata:
   name: default-platform-stable
 spec:
@@ -316,17 +316,17 @@ spec:
 That shape keeps responsibilities clean:
 
 - the BOM defines one immutable snapshot
-- the `DistributionChannel` tells clusters which snapshot to follow for one
+- the `ReleaseChannel` tells clusters which snapshot to follow for one
   rollout stage
 
 ## Current Implementation vs Target Model
 
 | Topic | Current Repo Behavior | Target Design Direction |
 | --- | --- | --- |
-| How a cluster chooses a target | Explicit BOM file path, or a local `DistributionChannel` file passed with `--distribution-channel` | Explicit BOM revision, or `distribution line + DistributionChannel` lookup |
-| Where channel metadata lives | `BOM.spec.channel`, plus local channel selection metadata in render provenance when a `DistributionChannel` file is used | `DistributionChannel` object |
-| What `sync render` resolves today | A BOM document passed directly, or a local `DistributionChannel` whose `spec.bomPath` points at the BOM to load | One resolved BOM revision after optional channel lookup |
-| What applied state records | BOM name, revision, and channel; rendered bundles also record BOM and local `DistributionChannel` provenance | BOM name, revision, and the channel or explicit target that led to that revision |
+| How a cluster chooses a target | Explicit BOM file path, or a local `ReleaseChannel` file passed with `--release-channel` | Explicit BOM revision, or `distribution line + ReleaseChannel` lookup |
+| Where channel metadata lives | `BOM.spec.channel`, plus local channel selection metadata in render provenance when a `ReleaseChannel` file is used | `ReleaseChannel` object |
+| What `sync render` resolves today | A BOM document passed directly, or a local `ReleaseChannel` whose `spec.bomPath` points at the BOM to load | One resolved BOM revision after optional channel lookup |
+| What applied state records | BOM name, revision, and channel; rendered bundles also record BOM and local `ReleaseChannel` provenance | BOM name, revision, and the channel or explicit target that led to that revision |
 
 This distinction is important because the current code path in
 [pkg/distribution/bom/channel.go](../../pkg/distribution/bom/channel.go)
@@ -336,7 +336,7 @@ matches the target BOM `metadata.name`, that `targetRevision` matches the BOM
 lookup for "latest stable on this distribution line" yet.
 
 The same local-file boundary also has a small promotion primitive:
-`sealos sync promote`. It advances one local `DistributionChannel` file to a
+`sealos sync promote`. It advances one local `ReleaseChannel` file to a
 target BOM file after checking target-channel policy, requiring local health
 proof for beta/stable targets, and recording an approver, reason, timestamp,
 and promotion history entry. That gives
@@ -374,29 +374,29 @@ live state. It should be assigned one of these two target shapes:
 Today, the current repo implements two local document paths:
 
 - choose a specific BOM file and pass it to `sealos sync render --file`
-- choose a local `DistributionChannel` file and pass it to
-  `sealos sync render --distribution-channel`
+- choose a local `ReleaseChannel` file and pass it to
+  `sealos sync render --release-channel`
 
-The local `DistributionChannel` must name the distribution line, channel,
+The local `ReleaseChannel` must name the distribution line, channel,
 target revision, and `spec.bomPath` for the target BOM. The CLI resolves the
 channel to that local BOM before materialization.
 
 It does not yet implement:
 
-- registry/API-backed `DistributionChannel` lookup
+- registry/API-backed `ReleaseChannel` lookup
 - "follow the latest stable revision on this line" resolution
 
 ## Local Channel Promotion
 
 For the current local-file model, promotion means updating one
-`DistributionChannel` document so that `spec.targetRevision` and `spec.bomPath`
+`ReleaseChannel` document so that `spec.targetRevision` and `spec.bomPath`
 point at a different BOM revision on the same distribution line.
 
 Use:
 
 ```bash
 sealos sync promote \
-  --distribution-channel channels/default-platform-stable.yaml \
+  --release-channel channels/default-platform-stable.yaml \
   --target-bom boms/default-platform/rev-008.yaml \
   --health-proof proofs/default-platform-rev-008-health.yaml \
   --reason "beta cohort passed source preflight and rollout validation" \
@@ -405,9 +405,9 @@ sealos sync promote \
 
 The command validates that:
 
-- the channel document is a valid `DistributionChannel`
+- the channel document is a valid `ReleaseChannel`
 - the target BOM is a valid BOM
-- `DistributionChannel.spec.line` matches `BOM.metadata.name`
+- `ReleaseChannel.spec.distribution` matches `BOM.metadata.name`
 - the default promotion policy allows the target channel to advance to the
   candidate BOM's source channel
 - if the target channel requires proof, `--health-proof` points to a valid
@@ -489,7 +489,7 @@ spec:
 When `sealos sync promote` accepts the proof, the promoted channel writes the
 target BOM path relative to the channel file when possible. Existing render,
 validate, agent, and controller paths continue to consume the same channel file
-through `--distribution-channel` or `distributionChannelPath`.
+through `--release-channel` or `releaseChannelPath`.
 
 `sealos sync promote` also returns a `policyDecision` object in its structured
 output. The decision records the evaluated transition, target channel rule,
@@ -510,13 +510,13 @@ If a cluster is pinned to one BOM revision:
 
 ### Channel-Following Cluster
 
-If a cluster follows a `DistributionChannel`:
+If a cluster follows a `ReleaseChannel`:
 
-- `sealos-agent` can re-resolve a local `DistributionChannel` file on each
+- `sealos-agent` can re-resolve a local `ReleaseChannel` file on each
   process-level reconcile pass
 - `sealos-agent --controller` can also re-resolve it from a watched
   `DistributionTarget` object
-- it moves only when the `DistributionChannel` target revision advances
+- it moves only when the `ReleaseChannel` target revision advances
 - it should still persist the exact resolved BOM revision it last applied
 
 This keeps operational intent and concrete state separate:
@@ -538,7 +538,7 @@ metadata:
   namespace: sealos-system
 spec:
   clusterName: default
-  distributionChannelPath: /var/lib/sealos/distribution/default-platform-stable.yaml
+  releaseChannelPath: /var/lib/sealos/distribution/default-platform-stable.yaml
   localRepoPath: /var/lib/sealos/distribution/local-repo
   kubeconfigPath: /host/etc/kubernetes/admin.conf
   hostRoot: /host
@@ -575,7 +575,7 @@ The current applied-state model records:
 - BOM channel
 
 Rendered bundles also record render provenance, including the local
-`DistributionChannel` path, digest, distribution line, BOM path, and BOM digest
+`ReleaseChannel` path, digest, distribution line, BOM path, and BOM digest
 when a channel file is used.
 
 See [pkg/distribution/state/types.go](../../pkg/distribution/state/types.go).
@@ -599,7 +599,7 @@ In BOM terms, that usually means:
 
 - publish a new BOM family name or release namespace
 - publish one or more new BOM revisions under that line
-- optionally create separate `DistributionChannel` objects for that line
+- optionally create separate `ReleaseChannel` objects for that line
 
 That is why a derived distribution is best understood as a new distribution
 line, not as "whatever the cluster currently drifted into."
@@ -607,7 +607,7 @@ line, not as "whatever the cluster currently drifted into."
 ## Practical Rules Of Thumb
 
 - If you want one exact reproducible baseline, point at one BOM revision.
-- If you want controlled rollout, follow a `DistributionChannel`.
+- If you want controlled rollout, follow a `ReleaseChannel`.
 - If you need long-lived divergence from the upstream baseline, fork the
   distribution line and publish new BOM revisions there.
 - Do not treat `spec.channel` inside today's BOM schema as the final release
@@ -616,7 +616,7 @@ line, not as "whatever the cluster currently drifted into."
 
 ## What Still Needs To Be Designed Or Implemented
 
-- The final API-backed `DistributionChannel` schema and storage contract
+- The final API-backed `ReleaseChannel` schema and storage contract
 - Resolution rules from `distribution line + channel` to one BOM revision
   without requiring a local `spec.bomPath`
 - API-backed channel advancement history and audit storage beyond the current

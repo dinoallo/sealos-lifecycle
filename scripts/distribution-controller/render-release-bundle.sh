@@ -156,7 +156,7 @@ kubectl apply -f install.yaml
 kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
 \`\`\`
 
-The controller still expects BOM or DistributionChannel files and any local repo
+The controller still expects BOM or ReleaseChannel files and any local repo
 inputs to be staged under paths visible from the controller pod.
 EOF
 

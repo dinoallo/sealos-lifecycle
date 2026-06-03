@@ -160,7 +160,7 @@ agent 或 operator 应按确定性顺序解析一个集群：
 
 1. 读取该集群的 `target.yaml`。
 2. 解析已配置的 `distribution-config` 仓库和 Git ref。
-3. 将选中的 distribution channel 解析到一个 BOM。
+3. 将选中的 release channel 解析到一个 BOM。
 4. 解析选中的 distribution profile。
 5. 按选中的 delivery mode materialize packages。
 6. 按文档化顺序合并 package defaults、profile defaults、cluster inputs 和 cluster patches。

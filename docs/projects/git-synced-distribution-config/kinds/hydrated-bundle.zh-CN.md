@@ -57,7 +57,7 @@ spec: {}
 
 `renderProvenance` 应包含：
 
-- 使用 channel 时的 `distributionChannelPath` 和 digest；
+- 使用 channel 时的 `releaseChannelPath` 和 digest；
 - `distributionLine`；
 - `bomPath` 和 digest；
 - 使用本地模式时的 `localRepoPath` 和 local revision；
@@ -102,8 +102,8 @@ spec:
   revision: v5.0.0
   channel: stable
   renderProvenance:
-    distributionChannelPath: channels/sealos/stable.yaml
-    distributionChannelDigest: sha256:...
+    releaseChannelPath: channels/sealos/stable.yaml
+    releaseChannelDigest: sha256:...
     bomPath: boms/sealos/v5.0.0/bom.yaml
     bomDigest: sha256:...
     localRepoPath: /var/lib/sealos/distribution/local-repo

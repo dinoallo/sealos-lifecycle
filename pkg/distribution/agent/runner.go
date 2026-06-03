@@ -37,8 +37,8 @@ import (
 )
 
 type TargetOptions struct {
-	BOMPath                 string
-	DistributionChannelPath string
+	BOMPath            string
+	ReleaseChannelPath string
 }
 
 type PackageSource struct {
@@ -77,10 +77,10 @@ type Runner struct {
 }
 
 type resolvedTarget struct {
-	bom                     *bom.BOM
-	bomPath                 string
-	distributionChannel     *bom.DistributionChannel
-	distributionChannelPath string
+	bom                *bom.BOM
+	bomPath            string
+	releaseChannel     *bom.ReleaseChannelDocument
+	releaseChannelPath string
 }
 
 type packageLoader struct {
@@ -199,22 +199,22 @@ func normalizeOptions(opts Options) Options {
 
 func resolveTarget(opts TargetOptions) (*resolvedTarget, error) {
 	bomPath := strings.TrimSpace(opts.BOMPath)
-	channelPath := strings.TrimSpace(opts.DistributionChannelPath)
+	channelPath := strings.TrimSpace(opts.ReleaseChannelPath)
 	switch {
 	case bomPath == "" && channelPath == "":
-		return nil, fmt.Errorf("one of BOMPath or DistributionChannelPath is required")
+		return nil, fmt.Errorf("one of BOMPath or ReleaseChannelPath is required")
 	case bomPath != "" && channelPath != "":
-		return nil, fmt.Errorf("use either BOMPath or DistributionChannelPath, not both")
+		return nil, fmt.Errorf("use either BOMPath or ReleaseChannelPath, not both")
 	case channelPath != "":
-		resolved, err := bom.ResolveDistributionChannelFile(channelPath)
+		resolved, err := bom.ResolveReleaseChannelFile(channelPath)
 		if err != nil {
 			return nil, err
 		}
 		return &resolvedTarget{
-			bom:                     resolved.BOM,
-			bomPath:                 resolved.BOMPath,
-			distributionChannel:     resolved.Channel,
-			distributionChannelPath: channelPath,
+			bom:                resolved.BOM,
+			bomPath:            resolved.BOMPath,
+			releaseChannel:     resolved.Channel,
+			releaseChannelPath: channelPath,
 		}, nil
 	default:
 		doc, err := bom.LoadFile(bomPath)
@@ -282,10 +282,10 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 }
 
 func (t *resolvedTarget) runtimeChannel() bom.ReleaseChannel {
-	if t == nil || t.distributionChannel == nil {
+	if t == nil || t.releaseChannel == nil {
 		return ""
 	}
-	return t.distributionChannel.Spec.Channel
+	return t.releaseChannel.Spec.Channel
 }
 
 func cacheRoot(opts Options) string {
@@ -339,20 +339,20 @@ func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localr
 		LocalRepoPath:      strings.TrimSpace(localRepoPath),
 		LocalPatchRevision: strings.TrimSpace(localPatchRevision),
 	}
-	if target != nil && target.distributionChannel != nil {
-		provenance.DistributionLine = target.distributionChannel.Distribution()
+	if target != nil && target.releaseChannel != nil {
+		provenance.DistributionLine = target.releaseChannel.Distribution()
 	}
-	if target != nil && strings.TrimSpace(target.distributionChannelPath) != "" {
-		absChannelPath, err := filepath.Abs(target.distributionChannelPath)
+	if target != nil && strings.TrimSpace(target.releaseChannelPath) != "" {
+		absChannelPath, err := filepath.Abs(target.releaseChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve DistributionChannel path %q: %w", target.distributionChannelPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf("resolve ReleaseChannel path %q: %w", target.releaseChannelPath, err)
 		}
-		provenance.DistributionChannelPath = absChannelPath
+		provenance.ReleaseChannelPath = absChannelPath
 		data, err := os.ReadFile(absChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read DistributionChannel path %q: %w", absChannelPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf("read ReleaseChannel path %q: %w", absChannelPath, err)
 		}
-		provenance.DistributionChannelDigest = digest.Canonical.FromBytes(data).String()
+		provenance.ReleaseChannelDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if target != nil && strings.TrimSpace(target.bomPath) != "" {
 		absBOMPath, err := filepath.Abs(target.bomPath)

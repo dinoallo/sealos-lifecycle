@@ -25,7 +25,7 @@ this document can stay at the architecture level.
 - For release channels, health proof, and promotion policy, see
   [Release and promotion](../architecture/release-and-promotion.md).
 - For the object model around BOM revisions, distribution lines, and
-  `DistributionChannel`, see
+  `ReleaseChannel`, see
   [BOM and channel](../guides/bom-and-channel.md).
 - For repo-scoped epics, milestones, package boundaries, and testing order, see
   [Distribution implementation plan](../plans/distribution-implementation-plan.md).
@@ -42,7 +42,7 @@ and forking behavior stay precise.
 | `BOM revision` | One digest-pinned set of component package revisions. | This is the concrete releasable baseline snapshot. |
 | `Distribution snapshot` | The full platform baseline represented by one BOM revision. | This is what a cluster actually targets at one point in time. |
 | `Distribution line` | A named release lineage made of successive BOM revisions, plus the channel and promotion metadata that govern how clusters follow it. | This is what operators stay on, advance along, or fork away from. |
-| `DistributionChannel` | A mutable release object that declares which BOM revision is current for one release channel on one distribution line. | This is how clusters can follow a line indirectly rather than pinning one revision manually. |
+| `ReleaseChannel` | A mutable release object that declares which BOM revision is current for one release channel on one distribution line. | This is how clusters can follow a line indirectly rather than pinning one revision manually. |
 
 The practical reading rule is:
 

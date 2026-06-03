@@ -30,9 +30,8 @@ import (
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
 
-type DistributionChannelSpec struct {
+type ReleaseChannelDocumentSpec struct {
 	Distribution     string                     `json:"distribution" yaml:"distribution"`
-	Line             string                     `json:"line,omitempty" yaml:"line,omitempty"`
 	Channel          ReleaseChannel             `json:"channel" yaml:"channel"`
 	TargetRevision   string                     `json:"targetRevision" yaml:"targetRevision"`
 	BOMPath          string                     `json:"bomPath" yaml:"bomPath"`
@@ -51,20 +50,20 @@ type DistributionPromotionRef struct {
 	HealthProofSummary string `json:"healthProofSummary,omitempty" yaml:"healthProofSummary,omitempty"`
 }
 
-type DistributionChannel struct {
-	APIVersion string                  `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                  `json:"kind" yaml:"kind"`
-	Metadata   Metadata                `json:"metadata" yaml:"metadata"`
-	Spec       DistributionChannelSpec `json:"spec" yaml:"spec"`
+type ReleaseChannelDocument struct {
+	APIVersion string                     `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string                     `json:"kind" yaml:"kind"`
+	Metadata   Metadata                   `json:"metadata" yaml:"metadata"`
+	Spec       ReleaseChannelDocumentSpec `json:"spec" yaml:"spec"`
 }
 
-type ResolvedDistributionChannel struct {
-	Channel *DistributionChannel
+type ResolvedReleaseChannel struct {
+	Channel *ReleaseChannelDocument
 	BOM     *BOM
 	BOMPath string
 }
 
-type PromoteDistributionChannelOptions struct {
+type PromoteReleaseChannelOptions struct {
 	ChannelPath     string
 	TargetBOMPath   string
 	SourceChannel   ReleaseChannel
@@ -74,8 +73,8 @@ type PromoteDistributionChannelOptions struct {
 	ApprovedAt      time.Time
 }
 
-type PromoteDistributionChannelResult struct {
-	Channel       *DistributionChannel
+type PromoteReleaseChannelResult struct {
+	Channel       *ReleaseChannelDocument
 	BOM           *BOM
 	ChannelPath   string
 	BOMPath       string
@@ -125,15 +124,15 @@ func NewDistributionHealthProof(name, line, targetRevision string, passed bool) 
 	}
 }
 
-func NewDistributionChannel(name, line string, channel ReleaseChannel, targetRevision, bomPath string) *DistributionChannel {
-	return &DistributionChannel{
+func NewReleaseChannel(name, distributionLine string, channel ReleaseChannel, targetRevision, bomPath string) *ReleaseChannelDocument {
+	return &ReleaseChannelDocument{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindReleaseChannel,
 		Metadata: Metadata{
 			Name: name,
 		},
-		Spec: DistributionChannelSpec{
-			Distribution:   line,
+		Spec: ReleaseChannelDocumentSpec{
+			Distribution:   distributionLine,
 			Channel:        channel,
 			TargetRevision: targetRevision,
 			BOMPath:        bomPath,
@@ -141,16 +140,16 @@ func NewDistributionChannel(name, line string, channel ReleaseChannel, targetRev
 	}
 }
 
-func (c DistributionChannel) String() string {
+func (c ReleaseChannelDocument) String() string {
 	data, _ := yaml.Marshal(c)
 	return string(data)
 }
 
-func (c DistributionChannel) Validate() error {
+func (c ReleaseChannelDocument) Validate() error {
 	if c.APIVersion != distribution.APIVersion {
 		return fmt.Errorf("unsupported apiVersion %q", c.APIVersion)
 	}
-	if c.Kind != distribution.KindDistributionChannel && c.Kind != distribution.KindReleaseChannel {
+	if c.Kind != distribution.KindReleaseChannel {
 		return fmt.Errorf("unsupported kind %q", c.Kind)
 	}
 	if c.Metadata.Name == "" {
@@ -176,33 +175,23 @@ func (c DistributionChannel) Validate() error {
 	return nil
 }
 
-func (c DistributionChannel) Distribution() string {
-	if strings.TrimSpace(c.Spec.Distribution) != "" {
-		return strings.TrimSpace(c.Spec.Distribution)
-	}
-	return strings.TrimSpace(c.Spec.Line)
+func (c ReleaseChannelDocument) Distribution() string {
+	return strings.TrimSpace(c.Spec.Distribution)
 }
 
-func (c DistributionChannel) releaseChannel() ReleaseChannel {
+func (c ReleaseChannelDocument) releaseChannel() ReleaseChannel {
 	if c.Spec.Channel != "" {
 		return c.Spec.Channel
 	}
 	return ReleaseChannel(strings.TrimSpace(c.Metadata.Name))
 }
 
-func (c *DistributionChannel) Normalize() {
+func (c *ReleaseChannelDocument) Normalize() {
 	if c == nil {
 		return
 	}
-	if strings.TrimSpace(c.Spec.Distribution) == "" {
-		c.Spec.Distribution = strings.TrimSpace(c.Spec.Line)
-	}
-	c.Spec.Line = ""
 	if c.Spec.Channel == "" {
 		c.Spec.Channel = c.releaseChannel()
-	}
-	if c.Kind == distribution.KindReleaseChannel {
-		return
 	}
 	if c.Kind == "" {
 		c.Kind = distribution.KindReleaseChannel
@@ -263,18 +252,18 @@ func (p DistributionHealthProof) Validate() error {
 	return nil
 }
 
-func LoadDistributionChannelFile(path string) (*DistributionChannel, error) {
+func LoadReleaseChannelFile(path string) (*ReleaseChannelDocument, error) {
 	if !fileutil.IsFile(path) {
-		return nil, fmt.Errorf("distribution channel file %q not found", path)
+		return nil, fmt.Errorf("release channel file %q not found", path)
 	}
 
-	var doc DistributionChannel
+	var doc ReleaseChannelDocument
 	if err := yamlutil.UnmarshalFile(path, &doc); err != nil {
-		return nil, fmt.Errorf("unmarshal distribution channel %q: %w", path, err)
+		return nil, fmt.Errorf("unmarshal release channel %q: %w", path, err)
 	}
 	doc.Normalize()
 	if err := doc.Validate(); err != nil {
-		return nil, fmt.Errorf("validate distribution channel %q: %w", path, err)
+		return nil, fmt.Errorf("validate release channel %q: %w", path, err)
 	}
 	return &doc, nil
 }
@@ -299,8 +288,8 @@ func LoadDistributionHealthProofFile(path string) (*DistributionHealthProof, str
 	return &doc, proofDigest, nil
 }
 
-func ResolveDistributionChannelFile(path string) (*ResolvedDistributionChannel, error) {
-	channel, err := LoadDistributionChannelFile(path)
+func ResolveReleaseChannelFile(path string) (*ResolvedReleaseChannel, error) {
+	channel, err := LoadReleaseChannelFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -313,20 +302,20 @@ func ResolveDistributionChannelFile(path string) (*ResolvedDistributionChannel, 
 		return nil, err
 	}
 	if doc.Metadata.Name != channel.Distribution() {
-		return nil, fmt.Errorf("distribution channel %q distribution %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), doc.Metadata.Name)
+		return nil, fmt.Errorf("release channel %q distribution %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), doc.Metadata.Name)
 	}
 	if doc.Spec.Revision != channel.Spec.TargetRevision {
-		return nil, fmt.Errorf("distribution channel %q targetRevision %q does not match BOM spec.revision %q", channel.Metadata.Name, channel.Spec.TargetRevision, doc.Spec.Revision)
+		return nil, fmt.Errorf("release channel %q targetRevision %q does not match BOM spec.revision %q", channel.Metadata.Name, channel.Spec.TargetRevision, doc.Spec.Revision)
 	}
 	doc.SetRuntimeChannel(channel.Spec.Channel)
-	return &ResolvedDistributionChannel{
+	return &ResolvedReleaseChannel{
 		Channel: channel,
 		BOM:     doc,
 		BOMPath: bomPath,
 	}, nil
 }
 
-func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*PromoteDistributionChannelResult, error) {
+func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteReleaseChannelResult, error) {
 	channelPath := strings.TrimSpace(opts.ChannelPath)
 	if channelPath == "" {
 		return nil, fmt.Errorf("channel path cannot be empty")
@@ -344,7 +333,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		return nil, fmt.Errorf("promotion approvedBy cannot be empty")
 	}
 
-	channel, err := LoadDistributionChannelFile(channelPath)
+	channel, err := LoadReleaseChannelFile(channelPath)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +342,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		return nil, err
 	}
 	if targetBOM.Metadata.Name != channel.Distribution() {
-		return nil, fmt.Errorf("distribution channel %q distribution %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), targetBOM.Metadata.Name)
+		return nil, fmt.Errorf("release channel %q distribution %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), targetBOM.Metadata.Name)
 	}
 	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(opts.HealthProofPath, targetBOM)
 	if err != nil {
@@ -370,7 +359,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		return nil, err
 	}
 
-	targetBOMPathForChannel := distributionChannelRelativePath(channelPath, targetBOMPath)
+	targetBOMPathForChannel := releaseChannelRelativePath(channelPath, targetBOMPath)
 	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
 	channel.Spec.BOMPath = targetBOMPathForChannel
@@ -389,7 +378,7 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 		ApprovedAt:   approvedAt.UTC().Format(time.RFC3339),
 	}
 	if healthProof != nil {
-		healthProofPath := distributionChannelRelativePath(channelPath, opts.HealthProofPath)
+		healthProofPath := releaseChannelRelativePath(channelPath, opts.HealthProofPath)
 		promotion.HealthProofPath = healthProofPath
 		promotion.HealthProofDigest = healthProofDigest
 		promotion.HealthProofSummary = strings.TrimSpace(healthProof.Spec.Summary)
@@ -397,13 +386,13 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	channel.Spec.PromotionHistory = append(channel.Spec.PromotionHistory, promotion)
 
 	if err := channel.Validate(); err != nil {
-		return nil, fmt.Errorf("validate promoted distribution channel %q: %w", channelPath, err)
+		return nil, fmt.Errorf("validate promoted release channel %q: %w", channelPath, err)
 	}
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
-		return nil, fmt.Errorf("write promoted distribution channel %q: %w", channelPath, err)
+		return nil, fmt.Errorf("write promoted release channel %q: %w", channelPath, err)
 	}
 
-	return &PromoteDistributionChannelResult{
+	return &PromoteReleaseChannelResult{
 		Channel:       channel,
 		BOM:           targetBOM,
 		ChannelPath:   channelPath,
@@ -418,9 +407,9 @@ func PromoteDistributionChannelFile(opts PromoteDistributionChannelOptions) (*Pr
 	}, nil
 }
 
-func evaluateDistributionPromotion(channel *DistributionChannel, targetBOM *BOM, healthProof *DistributionHealthProof, sourceChannel ReleaseChannel) (*promotionpolicy.Decision, error) {
+func evaluateDistributionPromotion(channel *ReleaseChannelDocument, targetBOM *BOM, healthProof *DistributionHealthProof, sourceChannel ReleaseChannel) (*promotionpolicy.Decision, error) {
 	if channel == nil {
-		return nil, fmt.Errorf("distribution channel cannot be nil")
+		return nil, fmt.Errorf("release channel cannot be nil")
 	}
 	if targetBOM == nil {
 		return nil, fmt.Errorf("target BOM cannot be nil")
@@ -507,7 +496,7 @@ func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*Distribu
 	return proof, digest, nil
 }
 
-func distributionChannelRelativePath(channelPath, path string) string {
+func releaseChannelRelativePath(channelPath, path string) string {
 	channelAbs, err := filepath.Abs(channelPath)
 	if err != nil {
 		return filepath.ToSlash(filepath.Clean(path))

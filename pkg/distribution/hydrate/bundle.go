@@ -60,15 +60,15 @@ type BundleSpec struct {
 }
 
 type RenderProvenance struct {
-	DistributionChannelPath   string                          `json:"distributionChannelPath,omitempty" yaml:"distributionChannelPath,omitempty"`
-	DistributionChannelDigest string                          `json:"distributionChannelDigest,omitempty" yaml:"distributionChannelDigest,omitempty"`
-	DistributionLine          string                          `json:"distributionLine,omitempty" yaml:"distributionLine,omitempty"`
-	BOMPath                   string                          `json:"bomPath,omitempty" yaml:"bomPath,omitempty"`
-	BOMDigest                 string                          `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
-	LocalRepoPath             string                          `json:"localRepoPath,omitempty" yaml:"localRepoPath,omitempty"`
-	LocalRepoRevision         string                          `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
-	LocalPatchRevision        string                          `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
-	PackageSources            []RenderProvenancePackageSource `json:"packageSources,omitempty" yaml:"packageSources,omitempty"`
+	ReleaseChannelPath   string                          `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
+	ReleaseChannelDigest string                          `json:"releaseChannelDigest,omitempty" yaml:"releaseChannelDigest,omitempty"`
+	DistributionLine     string                          `json:"distributionLine,omitempty" yaml:"distributionLine,omitempty"`
+	BOMPath              string                          `json:"bomPath,omitempty" yaml:"bomPath,omitempty"`
+	BOMDigest            string                          `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
+	LocalRepoPath        string                          `json:"localRepoPath,omitempty" yaml:"localRepoPath,omitempty"`
+	LocalRepoRevision    string                          `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
+	LocalPatchRevision   string                          `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
+	PackageSources       []RenderProvenancePackageSource `json:"packageSources,omitempty" yaml:"packageSources,omitempty"`
 }
 
 type RenderProvenancePackageSource struct {
@@ -107,8 +107,8 @@ type SourcePreflightCheck struct {
 }
 
 func (p RenderProvenance) Empty() bool {
-	return strings.TrimSpace(p.DistributionChannelPath) == "" &&
-		strings.TrimSpace(p.DistributionChannelDigest) == "" &&
+	return strings.TrimSpace(p.ReleaseChannelPath) == "" &&
+		strings.TrimSpace(p.ReleaseChannelDigest) == "" &&
 		strings.TrimSpace(p.DistributionLine) == "" &&
 		strings.TrimSpace(p.BOMPath) == "" &&
 		strings.TrimSpace(p.BOMDigest) == "" &&
@@ -120,14 +120,14 @@ func (p RenderProvenance) Empty() bool {
 
 func (p RenderProvenance) Normalize() RenderProvenance {
 	normalized := RenderProvenance{
-		DistributionChannelPath:   strings.TrimSpace(p.DistributionChannelPath),
-		DistributionChannelDigest: strings.TrimSpace(p.DistributionChannelDigest),
-		DistributionLine:          strings.TrimSpace(p.DistributionLine),
-		BOMPath:                   strings.TrimSpace(p.BOMPath),
-		BOMDigest:                 strings.TrimSpace(p.BOMDigest),
-		LocalRepoPath:             strings.TrimSpace(p.LocalRepoPath),
-		LocalRepoRevision:         strings.TrimSpace(p.LocalRepoRevision),
-		LocalPatchRevision:        strings.TrimSpace(p.LocalPatchRevision),
+		ReleaseChannelPath:   strings.TrimSpace(p.ReleaseChannelPath),
+		ReleaseChannelDigest: strings.TrimSpace(p.ReleaseChannelDigest),
+		DistributionLine:     strings.TrimSpace(p.DistributionLine),
+		BOMPath:              strings.TrimSpace(p.BOMPath),
+		BOMDigest:            strings.TrimSpace(p.BOMDigest),
+		LocalRepoPath:        strings.TrimSpace(p.LocalRepoPath),
+		LocalRepoRevision:    strings.TrimSpace(p.LocalRepoRevision),
+		LocalPatchRevision:   strings.TrimSpace(p.LocalPatchRevision),
 	}
 	if len(p.PackageSources) > 0 {
 		normalized.PackageSources = make([]RenderProvenancePackageSource, 0, len(p.PackageSources))

@@ -28,7 +28,7 @@ distribution line，通常表现为：
   [Reconcile and ownership](../architecture/reconcile-and-ownership.md)
 - release channel 与 promotion：
   [Release and promotion](../architecture/release-and-promotion.md)
-- BOM 与 `DistributionChannel` 语义：
+- BOM 与 `ReleaseChannel` 语义：
   [BOM and channel](../guides/bom-and-channel.md)
 - 组件包契约：
   [Package format](../architecture/package-format.md)
@@ -185,7 +185,7 @@ distribution line，通常表现为：
 - `metadata.name`
 - `spec.revision`
 - 在当前 BOM schema 里，必要时 `spec.channel`
-- 在目标 release 模型里，发布或更新单独的 `DistributionChannel`
+- 在目标 release 模型里，发布或更新单独的 `ReleaseChannel`
 - 明确保留依赖图
 - 未变更的组件继续引用上游 artifact digest
 

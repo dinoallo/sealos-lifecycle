@@ -18,7 +18,7 @@ metadata:
   namespace: sealos-system
 spec:
   clusterName: default
-  distributionChannelPath: /var/lib/sealos/distribution/default-platform/stable-channel.yaml
+  releaseChannelPath: /var/lib/sealos/distribution/default-platform/stable-channel.yaml
   localRepoPath: /var/lib/sealos/distribution/default-platform/local-repo
   kubeconfigPath: /host/etc/kubernetes/admin.conf
   hostRoot: /host

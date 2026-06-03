@@ -60,8 +60,7 @@ status: {}
 | [`ComponentPackage`](./kinds/component-package.zh-CN.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`、materialized package root | 已实现文件 schema |
 | [`BuildClass`](./kinds/build-class.zh-CN.md) | Built-in contract | Platform team | Sealos built-in class registry；可选 `classes/<name>/<version>.yaml` | Proposed |
 | [`BOM`](./kinds/bom.zh-CN.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | 已实现文件 schema |
-| [`ReleaseChannel`](./kinds/release-channel.zh-CN.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | 已实现推荐名称，代码接受旧别名 |
-| [`DistributionChannel`](./kinds/distribution-channel.zh-CN.md) | Repository source document | Release manager | 现有本地 channel 文件 | 已实现兼容名称 |
+| [`ReleaseChannel`](./kinds/release-channel.zh-CN.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | 已实现文件 schema |
 | [`DistributionHealthProof`](./kinds/distribution-health-proof.zh-CN.md) | Evidence document | Release automation | CI artifact 或 promotion evidence path | 已实现文件 schema |
 | [`ClusterTarget`](./kinds/cluster-target.zh-CN.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/target.yaml` | Proposed |
 | [`ComponentInput`](./kinds/component-input.zh-CN.md) | Repository source document | Cluster owner | `cluster-config/clusters/<scope>/<cluster>/inputs/*.yaml` | Proposed |
@@ -191,16 +190,6 @@ channels/<distribution>/<channel>.yaml
 - channel 移动是 release intent，应该是一个小型、可审查变更
 - 被引用 BOM 的 revision 必须匹配 `spec.targetRevision`
 - 新的 repository layout 应优先使用 `ReleaseChannel`
-
-### `DistributionChannel`
-
-目的：当前 guides 和命令使用的已实现 channel document 名称。
-
-规则：
-
-- 作为 channel pointer document 的兼容名称处理
-- 新的 git-synced repository layout 应迁移到 `ReleaseChannel`
-- 迁移期间 resolver 可以同时接受两个名称
 
 ### `DistributionHealthProof`
 
@@ -396,7 +385,7 @@ deploy/distribution-controller/base/crd.yaml
 
 最小契约：
 
-- `spec.bomPath` 和 `spec.distributionChannelPath` 二选一
+- `spec.bomPath` 和 `spec.releaseChannelPath` 二选一
 - 可选 local repo path
 - 可选 package source overrides
 - controller pod 可见的可选 cache、kubeconfig 和 host-root paths
@@ -428,8 +417,7 @@ deploy/distribution-controller/base/crd.yaml
 
 - 不要把所有 distribution document 都称作 CRD。除非该 kind 真的有 Kubernetes
   `CustomResourceDefinition`，否则用 "document kind"。
-- 新的 git-synced channel pointer document 使用 `ReleaseChannel`。
-- 当前 commands 和 guides 仍使用 `DistributionChannel` 时，继续接受该名称。
+- git-synced channel pointer document 使用 `ReleaseChannel`。
 - `ClusterTarget` 和 `DistributionTarget` 保持分离：`ClusterTarget` 是 cluster owner 的 Git 意图；
   `DistributionTarget` 是 Kubernetes runtime object。
 - `HydratedBundle`、`AppliedRevision` 和 `PackageAcceptanceReport` 这类 generated kind

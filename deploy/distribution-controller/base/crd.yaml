@@ -65,9 +65,9 @@ spec:
                 bomPath:
                   type: string
                   description: Local path to a BOM document visible inside the controller pod.
-                distributionChannelPath:
+                releaseChannelPath:
                   type: string
-                  description: Local path to a DistributionChannel document visible inside the controller pod.
+                  description: Local path to a ReleaseChannel document visible inside the controller pod.
                 localRepoPath:
                   type: string
                   description: Local cluster repo used for render-time input bindings and local patches.
@@ -120,9 +120,9 @@ spec:
                     - bomPath
                   not:
                     required:
-                      - distributionChannelPath
+                      - releaseChannelPath
                 - required:
-                    - distributionChannelPath
+                    - releaseChannelPath
                   not:
                     required:
                       - bomPath

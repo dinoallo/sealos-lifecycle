@@ -29,7 +29,7 @@
 | 文档 | 作用 |
 | --- | --- |
 | [Controller install](./guides/controller-install.md) | 安装或升级 `DistributionTarget` CRD、RBAC 和 `sealos-agent --controller` deployment。中文：[zh-CN](./guides/controller-install.zh-CN.md)。 |
-| [BOM and channel](./guides/bom-and-channel.md) | 说明 BOM revisions、distribution lines 和 `DistributionChannel` objects。中文：[zh-CN](./guides/bom-and-channel.zh-CN.md)。 |
+| [BOM and channel](./guides/bom-and-channel.md) | 说明 BOM revisions、distribution lines 和 `ReleaseChannel` objects。中文：[zh-CN](./guides/bom-and-channel.zh-CN.md)。 |
 | [Local repo and secret](./guides/local-repo-and-secret.md) | 描述 cluster-local repo layout 和 secret initialization workflow。中文：[zh-CN](./guides/local-repo-and-secret.zh-CN.md)。 |
 | [Local patch policy authoring](./guides/local-patch-policy-authoring.md) | 描述 local patch policy 的 authorship、review rules 和 validation。中文：[zh-CN](./guides/local-patch-policy-authoring.zh-CN.md)。 |
 | [Sync drift](./guides/sync-drift.md) | 走读当前 `sync diff`、`sync status`、`sync commit` 和 `sync revert` loop。中文：[zh-CN](./guides/sync-drift.zh-CN.md)。 |

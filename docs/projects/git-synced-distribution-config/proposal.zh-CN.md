@@ -346,7 +346,7 @@ spec:
 
 本文只定义 `distribution-config` 仓库。配套的 [cluster configuration proposal](cluster-config.zh-CN.md) 定义 `cluster-config` 仓库，包括 `ClusterTarget`、delivery policy、local inputs、patches 和 secret references。
 
-Sealos agent 可以 clone 或 fetch 两个仓库，先从 `cluster-config` 读取集群本地意图，再从 `distribution-config` 解析 distribution channel、BOM、profile 和 package materialization 数据。
+Sealos agent 可以 clone 或 fetch 两个仓库，先从 `cluster-config` 读取集群本地意图，再从 `distribution-config` 解析 release channel、BOM、profile 和 package materialization 数据。
 
 这保留了现有 global/local 所有权边界：
 

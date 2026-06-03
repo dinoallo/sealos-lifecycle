@@ -75,7 +75,7 @@ func newRootCmd() *cobra.Command {
 	var flags struct {
 		clusterName             string
 		bomFile                 string
-		distributionChannelFile string
+		releaseChannelFile      string
 		localRepo               string
 		localPatchRevision      string
 		packageSources          []string
@@ -126,7 +126,7 @@ func newRootCmd() *cobra.Command {
 					leaderElectionNamespace: flags.leaderElectionNamespace,
 				})
 			}
-			target, err := targetOptions(flags.bomFile, flags.distributionChannelFile)
+			target, err := targetOptions(flags.bomFile, flags.releaseChannelFile)
 			if err != nil {
 				return err
 			}
@@ -176,7 +176,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logger")
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "cluster name to reconcile")
 	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the BOM file to reconcile")
-	cmd.Flags().StringVar(&flags.distributionChannelFile, "distribution-channel", "", "path to a DistributionChannel file to resolve before loading the target BOM")
+	cmd.Flags().StringVar(&flags.releaseChannelFile, "release-channel", "", "path to a ReleaseChannel file to resolve before loading the target BOM")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "path to a cluster-local repo that provides input bindings during render")
 	cmd.Flags().StringVar(&flags.localPatchRevision, "local-patch-revision", "", "optional local patch revision recorded in applied state")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local development")
@@ -284,18 +284,18 @@ func runController(ctx context.Context, errOut io.Writer, opts controllerOptions
 	return mgr.Start(ctx)
 }
 
-func targetOptions(bomPath, distributionChannelPath string) (agent.TargetOptions, error) {
+func targetOptions(bomPath, releaseChannelPath string) (agent.TargetOptions, error) {
 	bomPath = strings.TrimSpace(bomPath)
-	distributionChannelPath = strings.TrimSpace(distributionChannelPath)
+	releaseChannelPath = strings.TrimSpace(releaseChannelPath)
 	switch {
-	case bomPath == "" && distributionChannelPath == "":
-		return agent.TargetOptions{}, fmt.Errorf("one of --file or --distribution-channel is required")
-	case bomPath != "" && distributionChannelPath != "":
-		return agent.TargetOptions{}, fmt.Errorf("use either --file or --distribution-channel, not both")
+	case bomPath == "" && releaseChannelPath == "":
+		return agent.TargetOptions{}, fmt.Errorf("one of --file or --release-channel is required")
+	case bomPath != "" && releaseChannelPath != "":
+		return agent.TargetOptions{}, fmt.Errorf("use either --file or --release-channel, not both")
 	default:
 		return agent.TargetOptions{
-			BOMPath:                 bomPath,
-			DistributionChannelPath: distributionChannelPath,
+			BOMPath:            bomPath,
+			ReleaseChannelPath: releaseChannelPath,
 		}, nil
 	}
 }

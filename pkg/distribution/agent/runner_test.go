@@ -78,7 +78,7 @@ func TestRunnerRunOnceWithExplicitBOM(t *testing.T) {
 	}
 }
 
-func TestRunnerRunOnceWithDistributionChannel(t *testing.T) {
+func TestRunnerRunOnceWithReleaseChannelDocument(t *testing.T) {
 	withRuntimeRoot(t)
 	root := t.TempDir()
 	packageRoot := writeAgentPackage(t, root)
@@ -88,7 +88,7 @@ func TestRunnerRunOnceWithDistributionChannel(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := bom.NewDistributionChannel("agent-runtime-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "bom.yaml")
+	channel := bom.NewReleaseChannel("agent-runtime-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "bom.yaml")
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRunnerRunOnceWithDistributionChannel(t *testing.T) {
 	result, err := runner.Run(context.Background(), Options{
 		ClusterName: "agent-channel",
 		Target: TargetOptions{
-			DistributionChannelPath: channelPath,
+			ReleaseChannelPath: channelPath,
 		},
 		PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
 		Once:           true,
@@ -138,8 +138,8 @@ func TestRunnerRunOnceWithDistributionChannel(t *testing.T) {
 	if got, want := provenance.DistributionLine, doc.Metadata.Name; got != want {
 		t.Fatalf("provenance.DistributionLine = %q, want %q", got, want)
 	}
-	if provenance.DistributionChannelDigest == "" {
-		t.Fatal("provenance.DistributionChannelDigest is empty")
+	if provenance.ReleaseChannelDigest == "" {
+		t.Fatal("provenance.ReleaseChannelDigest is empty")
 	}
 }
 

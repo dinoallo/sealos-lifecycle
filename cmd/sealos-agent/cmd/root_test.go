@@ -31,7 +31,7 @@ func TestTargetOptions(t *testing.T) {
 		{
 			name:    "channel",
 			channel: "channel.yaml",
-			want:    agent.TargetOptions{DistributionChannelPath: "channel.yaml"},
+			want:    agent.TargetOptions{ReleaseChannelPath: "channel.yaml"},
 		},
 		{
 			name:    "missing",
