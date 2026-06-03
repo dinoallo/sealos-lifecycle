@@ -16,7 +16,9 @@ package ssh
 
 import (
 	"net"
-	"path"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/containers/storage/pkg/homedir"
@@ -54,25 +56,91 @@ const (
 )
 
 func NewOption() *Option {
-	homedir := homedir.Get()
-	getSSHFile := func(filenames ...string) string {
-		for _, fn := range filenames {
-			absPath := path.Join(homedir, ".ssh", fn)
-			if file.IsExist(absPath) {
-				return absPath
-			}
-		}
-		return ""
-	}
+	homeDir := homedir.Get()
 	opt := &Option{
 		user:       defaultUsername,
-		privateKey: getSSHFile("id_rsa", "id_dsa"),
+		privateKey: defaultSSHPrivateKey(homeDir),
 		timeout:    10 * time.Second,
 		hostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return nil
 		},
 	}
 	return opt
+}
+
+func defaultSSHPrivateKey(homeDir string) string {
+	if key := identityFileFromSSHConfig(homeDir); key != "" {
+		return key
+	}
+	return firstExistingSSHFile(homeDir, "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")
+}
+
+func firstExistingSSHFile(homeDir string, filenames ...string) string {
+	for _, fn := range filenames {
+		absPath := filepath.Join(homeDir, ".ssh", fn)
+		if file.IsExist(absPath) {
+			return absPath
+		}
+	}
+	return ""
+}
+
+func identityFileFromSSHConfig(homeDir string) string {
+	data, err := os.ReadFile(filepath.Join(homeDir, ".ssh", "config"))
+	if err != nil {
+		return ""
+	}
+
+	active := true
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "host":
+			active = false
+			for _, pattern := range fields[1:] {
+				if pattern == "*" {
+					active = true
+					break
+				}
+			}
+		case "identityfile":
+			if !active {
+				continue
+			}
+			identityFile := expandSSHIdentityFile(homeDir, fields[1])
+			if file.IsExist(identityFile) {
+				return identityFile
+			}
+		}
+	}
+	return ""
+}
+
+func expandSSHIdentityFile(homeDir, identityFile string) string {
+	identityFile = strings.Trim(identityFile, `"'`)
+	if identityFile == "~" {
+		return homeDir
+	}
+	if strings.HasPrefix(identityFile, "~/") {
+		return filepath.Join(homeDir, identityFile[2:])
+	}
+	identityFile = os.Expand(identityFile, func(key string) string {
+		if key == "HOME" {
+			return homeDir
+		}
+		return ""
+	})
+	if filepath.IsAbs(identityFile) {
+		return identityFile
+	}
+	return filepath.Join(homeDir, ".ssh", identityFile)
 }
 
 type OptionFunc func(*Option)

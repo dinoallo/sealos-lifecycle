@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
+	"sigs.k8s.io/yaml"
 )
 
 func TestRenderKubeadmClusterConfigSetsControlPlaneEndpoint(t *testing.T) {
@@ -109,6 +111,101 @@ networking:
 	if len(kubeletConfig.FeatureGates) != 0 {
 		t.Fatalf("KubeletConfiguration.FeatureGates = %#v, want empty", kubeletConfig.FeatureGates)
 	}
+}
+
+func TestRenderKubeadmJoinConfigResolvesHostnameAdvertiseAddress(t *testing.T) {
+	bundleDir := t.TempDir()
+	configPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	config := []byte(`apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+clusterName: poc-minimal
+kubernetesVersion: v1.30.3
+networking:
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+`)
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	executor := &bundleExecutor{bundlePath: bundleDir, topology: &clusterExecutionTopology{
+		hostRoles: map[string][]string{"localhost": {v1beta1.MASTER}},
+	}}
+	step := hydrate.RenderedStep{
+		BundlePath: "components/kubernetes/files/files/etc/kubernetes/kubeadm.yaml",
+		SourcePath: "files/etc/kubernetes/kubeadm.yaml",
+	}
+	joinMetadata := &kubeadmJoinMetadata{
+		apiServerEndpoint: "127.0.0.1:6443",
+		token:             "abcdef.0123456789abcdef",
+		caCertHashes:      []string{"sha256:0123456789abcdef"},
+		certificateKey:    "0123456789abcdef",
+	}
+	rendered, err := executor.renderKubeadmJoinConfig(step, "localhost", joinMetadata)
+	if err != nil {
+		t.Fatalf("renderKubeadmJoinConfig() error = %v", err)
+	}
+
+	joinConfig, ok, err := findRenderedJoinConfiguration(rendered)
+	if err != nil {
+		t.Fatalf("findRenderedJoinConfiguration() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("rendered join config missing JoinConfiguration:\n%s", string(rendered))
+	}
+	advertiseAddress := stringAtPath(t, joinConfig, "controlPlane", "localAPIEndpoint", "advertiseAddress")
+	if net.ParseIP(advertiseAddress) == nil {
+		t.Fatalf("AdvertiseAddress = %q, want resolved IP address", advertiseAddress)
+	}
+	if got := stringAtPath(t, joinConfig, "nodeRegistration", "kubeletExtraArgs", "node-ip"); got != advertiseAddress {
+		t.Fatalf("node-ip = %q, want %q", got, advertiseAddress)
+	}
+}
+
+func stringAtPath(t *testing.T, data map[string]interface{}, path ...string) string {
+	t.Helper()
+	var current interface{} = data
+	for _, key := range path {
+		asMap, ok := current.(map[string]interface{})
+		if !ok {
+			t.Fatalf("path %s cannot descend into %T", strings.Join(path, "."), current)
+		}
+		current, ok = asMap[key]
+		if !ok {
+			t.Fatalf("path %s missing key %q", strings.Join(path, "."), key)
+		}
+	}
+	value, ok := current.(string)
+	if !ok {
+		t.Fatalf("path %s = %#v, want string", strings.Join(path, "."), current)
+	}
+	return value
+}
+
+func findRenderedJoinConfiguration(rendered []byte) (map[string]interface{}, bool, error) {
+	for _, doc := range yamlutil.ToJSON(rendered) {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
+		var typeMeta struct {
+			Kind string `json:"kind"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &typeMeta); err != nil {
+			return nil, false, err
+		}
+		if typeMeta.Kind != "JoinConfiguration" {
+			continue
+		}
+		var joinConfig map[string]interface{}
+		if err := yaml.Unmarshal([]byte(doc), &joinConfig); err != nil {
+			return nil, false, err
+		}
+		return joinConfig, true, nil
+	}
+	return nil, false, nil
 }
 
 func TestRunKubeadmBootstrapHookRepairsJoinedSecondaryControlPlaneWithoutFreshHosts(t *testing.T) {

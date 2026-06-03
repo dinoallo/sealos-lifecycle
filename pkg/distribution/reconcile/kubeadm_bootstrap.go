@@ -16,6 +16,7 @@ package reconcile
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,7 +264,11 @@ func (e *bundleExecutor) ensureStableControlPlaneEndpoint(firstMasterHost string
 		return nil
 	}
 
-	controlPlaneEndpoint := fmt.Sprintf("%s:6443", iputils.GetHostIP(firstMasterHost))
+	firstMasterIP, err := kubeadmAdvertiseAddressForHost(firstMasterHost)
+	if err != nil {
+		return err
+	}
+	controlPlaneEndpoint := fmt.Sprintf("%s:6443", firstMasterIP)
 	currentConfig, err := e.outputCommand(0, nil, "kubectl", "--kubeconfig", e.kubeconfigPath, "-n", "kube-system", "get", "cm", "kubeadm-config", "-o", "jsonpath={.data.ClusterConfiguration}")
 	if err == nil {
 		currentKubeadmConfig, parseErr := loadKubeadmClusterConfigFromString(currentConfig)
@@ -494,7 +499,10 @@ func (e *bundleExecutor) renderKubeadmJoinConfig(step hydrate.RenderedStep, host
 		return nil, err
 	}
 
-	hostIP := iputils.GetHostIP(host)
+	hostIP, err := kubeadmAdvertiseAddressForHost(host)
+	if err != nil {
+		return nil, err
+	}
 	setOrReplaceKubeadmArg(&kubeadmConfig.JoinConfiguration.NodeRegistration.KubeletExtraArgs, "node-ip", hostIP)
 	if kubeadmConfig.JoinConfiguration.Discovery.BootstrapToken == nil {
 		kubeadmConfig.JoinConfiguration.Discovery.BootstrapToken = &kubeadmapi.BootstrapTokenDiscovery{}
@@ -518,6 +526,26 @@ func (e *bundleExecutor) renderKubeadmJoinConfig(step hydrate.RenderedStep, host
 		return nil, err
 	}
 	return yamlutil.MarshalConfigs(&conversion.JoinConfiguration, &conversion.KubeletConfiguration)
+}
+
+func kubeadmAdvertiseAddressForHost(host string) (string, error) {
+	hostIP := strings.TrimSpace(iputils.GetHostIP(host))
+	if hostIP == "" {
+		return "", fmt.Errorf("host %q does not resolve to an advertise address", host)
+	}
+	if net.ParseIP(hostIP) != nil {
+		return hostIP, nil
+	}
+	addrs, err := net.LookupHost(hostIP)
+	if err != nil {
+		return "", fmt.Errorf("resolve host %q advertise address: %w", host, err)
+	}
+	for _, addr := range addrs {
+		if ip := net.ParseIP(addr); ip != nil {
+			return ip.String(), nil
+		}
+	}
+	return "", fmt.Errorf("resolve host %q advertise address: no IP addresses found", host)
 }
 
 func (e *bundleExecutor) renderKubeadmClusterConfig(step hydrate.RenderedStep, controlPlaneEndpoint string) ([]byte, error) {

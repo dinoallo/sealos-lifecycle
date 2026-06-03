@@ -83,7 +83,18 @@ type syncRenderInputChange struct {
 
 func syncExecutionTopologyForBundle(clusterName string, bundle *hydrate.Bundle) (*syncExecutionTopology, error) {
 	if bundle != nil && !bundle.Spec.ExecutionTopology.Empty() {
-		return syncExecutionTopologyFromSnapshot(bundle.Spec.ExecutionTopology)
+		topology, err := syncExecutionTopologyFromSnapshot(bundle.Spec.ExecutionTopology)
+		if err != nil {
+			return nil, err
+		}
+		current, err := loadSyncExecutionTopology(clusterName)
+		if err != nil {
+			return nil, err
+		}
+		if current != nil && current.cluster != nil {
+			topology.cluster = current.cluster
+		}
+		return topology, nil
 	}
 	return loadSyncExecutionTopology(clusterName)
 }

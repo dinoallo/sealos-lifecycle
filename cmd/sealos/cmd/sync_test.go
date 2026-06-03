@@ -6820,9 +6820,12 @@ func TestSyncCompareBundleUsesExecutionTopologySnapshot(t *testing.T) {
 
 	previousTopologyLoader := loadSyncExecutionTopology
 	previousRemoteExecutor := newSyncRemoteExecutor
+	topologyLoaded := false
 	loadSyncExecutionTopology = func(string) (*syncExecutionTopology, error) {
-		t.Fatal("loadSyncExecutionTopology should not be called when bundle has executionTopology")
-		return nil, nil
+		topologyLoaded = true
+		return &syncExecutionTopology{
+			cluster: &v1beta1.Cluster{},
+		}, nil
 	}
 	remoteHostRoot := t.TempDir()
 	fakeRemote := &fakeSyncRemoteExecutor{
@@ -6883,6 +6886,9 @@ func TestSyncCompareBundleUsesExecutionTopologySnapshot(t *testing.T) {
 	result, err := syncCompareBundle("snapshot-compare", bundle, bundleDir, "/tmp/test-kubeconfig", t.TempDir())
 	if err != nil {
 		t.Fatalf("syncCompareBundle() error = %v", err)
+	}
+	if !topologyLoaded {
+		t.Fatal("loadSyncExecutionTopology was not called for remote executor credentials")
 	}
 	if got, want := len(result.HostPaths), 1; got != want {
 		t.Fatalf("len(result.HostPaths) = %d, want %d", got, want)
