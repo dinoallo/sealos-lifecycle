@@ -28,6 +28,7 @@ This directory contains the design, guides, references, examples, and project pr
 
 | Document | Role |
 | --- | --- |
+| [Day 0 install](./guides/day-0-install.md) | Walks through installing one Sealos cluster from target selection through render, apply, and validation. Chinese: [zh-CN](./guides/day-0-install.zh-CN.md). |
 | [Controller install](./guides/controller-install.md) | Installs or upgrades the `DistributionTarget` CRD, RBAC, and `sealos-agent --controller` deployment. Chinese: [zh-CN](./guides/controller-install.zh-CN.md). |
 | [BOM and channel](./guides/bom-and-channel.md) | Explains BOM revisions, distribution lines, and `ReleaseChannel` objects. Chinese: [zh-CN](./guides/bom-and-channel.zh-CN.md). |
 | [Local repo and secret](./guides/local-repo-and-secret.md) | Describes a cluster-local repo layout and secret initialization workflow. Chinese: [zh-CN](./guides/local-repo-and-secret.zh-CN.md). |
@@ -72,7 +73,7 @@ This directory contains the design, guides, references, examples, and project pr
 2. Check [Capability matrix](./reference/capability-matrix.md) for current implementation status.
 3. Read [Distribution and config sync](./architecture/distribution-and-config-sync.md) for the top-level model.
 4. Read [Reconcile and ownership](./architecture/reconcile-and-ownership.md), [Materialization and drift](./architecture/materialization-and-drift.md), and [Release and promotion](./architecture/release-and-promotion.md) for the focused sub-designs.
-5. Use [Controller install](./guides/controller-install.md), [BOM and channel](./guides/bom-and-channel.md), [Local repo and secret](./guides/local-repo-and-secret.md), and [Sync drift](./guides/sync-drift.md) for operational workflows.
+5. Use [Day 0 install](./guides/day-0-install.md), [Controller install](./guides/controller-install.md), [BOM and channel](./guides/bom-and-channel.md), [Local repo and secret](./guides/local-repo-and-secret.md), and [Sync drift](./guides/sync-drift.md) for operational workflows.
 6. Use [Sync drift minimal example](./examples/sync-drift-minimal/README.md) when following the drift walkthroughs.
 7. Use [Distribution implementation plan](./plans/distribution-implementation-plan.md) for repo-scoped execution sequencing.
 

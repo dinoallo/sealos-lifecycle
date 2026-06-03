@@ -28,6 +28,7 @@
 
 | 文档 | 作用 |
 | --- | --- |
+| [Day 0 install](./guides/day-0-install.md) | 走读从 target selection 到 render、apply、validation 的单集群安装流程。中文：[zh-CN](./guides/day-0-install.zh-CN.md)。 |
 | [Controller install](./guides/controller-install.md) | 安装或升级 `DistributionTarget` CRD、RBAC 和 `sealos-agent --controller` deployment。中文：[zh-CN](./guides/controller-install.zh-CN.md)。 |
 | [BOM and channel](./guides/bom-and-channel.md) | 说明 BOM revisions、distribution lines 和 `ReleaseChannel` objects。中文：[zh-CN](./guides/bom-and-channel.zh-CN.md)。 |
 | [Local repo and secret](./guides/local-repo-and-secret.md) | 描述 cluster-local repo layout 和 secret initialization workflow。中文：[zh-CN](./guides/local-repo-and-secret.zh-CN.md)。 |
@@ -72,7 +73,7 @@
 2. 查看 [Capability matrix](./reference/capability-matrix.md) 了解当前实现状态。
 3. 阅读 [Distribution and config sync](./architecture/distribution-and-config-sync.md) 理解顶层模型。
 4. 阅读 [Reconcile and ownership](./architecture/reconcile-and-ownership.md)、[Materialization and drift](./architecture/materialization-and-drift.md) 和 [Release and promotion](./architecture/release-and-promotion.md) 理解聚焦子设计。
-5. 使用 [Controller install](./guides/controller-install.md)、[BOM and channel](./guides/bom-and-channel.md)、[Local repo and secret](./guides/local-repo-and-secret.md) 和 [Sync drift](./guides/sync-drift.md) 完成操作流程。
+5. 使用 [Day 0 install](./guides/day-0-install.md)、[Controller install](./guides/controller-install.md)、[BOM and channel](./guides/bom-and-channel.md)、[Local repo and secret](./guides/local-repo-and-secret.md) 和 [Sync drift](./guides/sync-drift.md) 完成操作流程。
 6. 跟随 drift walkthrough 时使用 [Sync drift minimal example](./examples/sync-drift-minimal/README.md)。
 7. 使用 [Distribution implementation plan](./plans/distribution-implementation-plan.md) 了解 repo-scoped execution sequencing。
 
