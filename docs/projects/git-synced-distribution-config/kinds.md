@@ -20,6 +20,7 @@ be installed as CRDs.
 | Kubernetes CRD | Installed into the Kubernetes API server and reconciled by a controller. |
 | Repository source document | Reviewed source of truth stored in `distribution-config` or `cluster-config`. |
 | Local source document | Cluster-local source of truth stored near a local repo or cluster workspace. |
+| Built-in contract | Versioned behavior implemented by Sealos and referenced by source documents; repositories may carry optional descriptors. |
 | Generated document | Deterministic output from render, apply, smoke, or validation workflows. |
 | Evidence document | Reviewable proof used by promotion or policy gates. |
 | Proposed document | Planned schema that is not implemented as a first-class loader yet. |
@@ -62,7 +63,7 @@ links each kind to its detailed page.
 | Kind | Class | Owner | Normal Location | Status |
 | --- | --- | --- | --- | --- |
 | [`ComponentPackage`](./kinds/component-package.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`, materialized package roots | Implemented file schema |
-| [`BuildClass`](./kinds/build-class.md) | Repository source document | Platform team | `classes/<name>/<version>.yaml` | Proposed |
+| [`BuildClass`](./kinds/build-class.md) | Built-in contract | Platform team | Sealos built-in class registry; optional `classes/<name>/<version>.yaml` | Proposed |
 | [`BOM`](./kinds/bom.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | Implemented file schema |
 | [`ReleaseChannel`](./kinds/release-channel.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | Implemented preferred name, code accepts legacy alias |
 | [`DistributionChannel`](./kinds/distribution-channel.md) | Repository source document | Release manager | Existing local channel files | Implemented compatibility name |
@@ -114,11 +115,17 @@ Must not contain:
 Purpose: defines the reusable build workflow contract used to turn package
 source facts into a materialized package payload.
 
-Normal location:
+Normal resolution:
 
 ```text
-classes/<name>/<version>.yaml
+Sealos built-in class registry
+optional classes/<name>/<version>.yaml
 ```
+
+Standard classes such as `rootfs/v1` and `manifest-bundle/v1` are implemented
+by Sealos and do not need to be present in every distribution repository.
+Repo-local `BuildClass` files are optional descriptors for custom,
+experimental, or policy-pinned classes.
 
 Minimum contract:
 
@@ -135,6 +142,8 @@ Minimum contract:
 
 Rules:
 
+- unknown classes fail closed unless the running Sealos binary or an approved
+  extension provides the implementation
 - build class versions are immutable
 - a change that can affect package bytes, selected source files, or output
   metadata requires a new class version

@@ -2,22 +2,34 @@
 
 ## Status
 
-Proposed file schema. The current implementation records `build.class` in `BOM`
-entries, but a standalone `BuildClass` document is not implemented yet.
+Proposed contract. The current implementation records `build.class` in `BOM`
+entries, but Sealos does not yet implement a class registry or standalone
+repo-local `BuildClass` document loading.
 
 ## Class
 
-Repository source document.
+Built-in build contract with optional repository descriptor.
 
 ## Owner
 
-The distribution platform owner maintains build classes. Package owners select a
-build class but should not redefine its semantics inside a package.
+The Sealos distribution implementation owns standard build classes. The
+distribution platform owner approves which classes can be used and may maintain
+repo-local descriptors for custom or policy-pinned classes. Package owners
+select a build class but should not redefine its semantics inside a package.
 
-## Normal Locations
+## Resolution Locations
 
-- `classes/<name>/<version>.yaml`
-- `build/classes/<name>/<version>.yaml`
+Resolve build classes in this order:
+
+1. Sealos built-in class registry.
+2. Approved extension class implementations installed with Sealos.
+3. Optional repo-local `classes/<name>/<version>.yaml` descriptors for custom,
+   experimental, or policy-pinned classes backed by installed implementations.
+
+Built-in classes such as `rootfs/v1`, `manifest-bundle/v1`, `helm-render/v1`,
+and `patch-overlay/v1` do not need to be stored in every distribution
+repository. A repo-local descriptor may document or constrain built-in class use,
+but it does not replace the implementation shipped with Sealos.
 
 ## Purpose
 
@@ -31,14 +43,18 @@ model:
   already built elsewhere.
 
 The class is the boundary between package metadata and build execution. A
-package declares what it contains; a build class declares how that source shape
-is built.
+package declares what it contains; a build class implementation declares how
+that source shape is built.
 
 Package-specific build details still belong to `ComponentPackage.spec.build`.
 For example, the list of Kubernetes binaries that must be staged into
 `rootfs/usr/bin/` is package source metadata, not reusable class semantics.
 
-## Required Envelope
+## Optional Descriptor Envelope
+
+Built-in classes are referenced by identity and do not require this file. When a
+repository carries a descriptor for a custom, experimental, or policy-pinned
+class, it should use this envelope:
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
@@ -55,7 +71,7 @@ The canonical build class identity is:
 <metadata.name>/<spec.version>
 ```
 
-For example, the document above is referenced as `rootfs/v1` from
+For example, the descriptor above is referenced as `rootfs/v1` from
 `ComponentPackage.spec.build.class` or `BOM.spec.packages[*].build.class`.
 
 ## Spec Contract
@@ -73,8 +89,10 @@ For example, the document above is referenced as `rootfs/v1` from
 
 ## Validation Rules
 
-- The class identity `metadata.name/spec.version` must be globally unique
-  within the distribution source repository.
+- The class identity `metadata.name/spec.version` must resolve to one approved
+  implementation: a Sealos built-in class, an approved extension, or a
+  repo-local descriptor that points to an installed custom extension.
+- Unknown classes fail closed.
 - `metadata.name` and `spec.version` must be set.
 - `driver` and `output` must be set.
 - Every value in `packageClasses` must be a supported `ComponentPackage` class.
@@ -82,6 +100,8 @@ For example, the document above is referenced as `rootfs/v1` from
   CI environment and referenced only by name.
 - Build classes should be immutable after adoption. Changing class behavior
   requires a new class name or versioned class name.
+- Repo-local descriptors must not enable arbitrary package-specific behavior
+  unless that behavior is represented by an approved extension implementation.
 
 ## Build Inputs
 
@@ -96,8 +116,8 @@ The package build workflow resolves these values before invoking a build class:
 - package-local build inputs and staging rules from
   `ComponentPackage.spec.build`
 
-The build class must not read undeclared host paths, cluster configuration,
-runtime state, or secret contents.
+The build class implementation must not read undeclared host paths, cluster
+configuration, runtime state, or secret contents.
 
 Before invoking the class, the build workflow should load the package-local
 contract from the selected `ComponentPackage`. The class provides the driver
@@ -144,11 +164,15 @@ This avoids maintaining separate package schemas for local and non-local
 delivery.
 
 Repository-level `scripts/` may wrap a build class for operator convenience,
-but they should be generic dispatchers. A package-specific script may be used
-only when it is referenced by the package-local build contract and lives inside
-the package source directory.
+but they should be generic dispatchers. They should not carry reusable class
+implementations that every distribution repository must copy. A package-specific
+script may be used only when it is referenced by the package-local build
+contract and lives inside the package source directory.
 
-## Example
+## Descriptor Example
+
+This descriptor shape documents the contract. For a built-in class such as
+`rootfs/v1`, the executable behavior still comes from the Sealos class registry.
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
@@ -180,11 +204,11 @@ spec:
       - platform
 ```
 
-## Initial Build Classes
+## Initial Built-in Build Classes
 
-The initial class set should stay small. Add a new class only when the source
-shape or output semantics differ enough that validation and provenance need a
-separate contract.
+The initial built-in class set should stay small. Add a new class only when the
+source shape or output semantics differ enough that validation and provenance
+need a separate contract.
 
 | Class | Driver | Output | Package classes | Use case |
 | --- | --- | --- | --- | --- |
@@ -196,7 +220,9 @@ separate contract.
 Avoid a generic `script/v1` class as an initial default. Package-local scripts
 are allowed as adapters when declared in `ComponentPackage.spec.build`, but a
 catch-all script class would make build behavior harder to validate and
-reproduce.
+reproduce. Custom script-like behavior should be introduced through an approved
+extension class, not by placing arbitrary reusable scripts in each distribution
+repository.
 
 ### `rootfs/v1`
 
@@ -342,6 +368,8 @@ packages:
 - `BuildClass` does not define cluster-specific inputs.
 - `BuildClass` does not list package-specific external assets.
 - `BuildClass` does not hide package-specific staging rules in repository-level scripts.
+- `BuildClass` does not require every distribution repository to vendor
+  standard class definitions.
 - `BuildClass` does not approve local patches.
 - `BuildClass` does not represent an applied runtime state.
 

@@ -19,6 +19,7 @@ document kinds 的目录和基本规范。
 | Kubernetes CRD | 安装到 Kubernetes API server，并由 controller reconcile。 |
 | Repository source document | 存在 `distribution-config` 或 `cluster-config` 中的可审查事实源。 |
 | Local source document | 存在 local repo 或 cluster workspace 附近的 cluster-local 事实源。 |
+| Built-in contract | 由 Sealos 实现并被 source document 引用的版本化行为；仓库可携带可选 descriptor。 |
 | Generated document | render、apply、smoke 或 validation workflow 产生的确定性输出。 |
 | Evidence document | promotion 或 policy gate 使用的可审查证明。 |
 | Proposed document | 规划中的 schema，还没有一等 loader 实现。 |
@@ -57,7 +58,7 @@ status: {}
 | Kind | 分类 | Owner | 常见位置 | 状态 |
 | --- | --- | --- | --- | --- |
 | [`ComponentPackage`](./kinds/component-package.zh-CN.md) | Repository source document | Package owner | `packages/<category>/<name>/<version>/package.yaml`、materialized package root | 已实现文件 schema |
-| [`BuildClass`](./kinds/build-class.zh-CN.md) | Repository source document | Platform team | `classes/<name>/<version>.yaml` | Proposed |
+| [`BuildClass`](./kinds/build-class.zh-CN.md) | Built-in contract | Platform team | Sealos built-in class registry；可选 `classes/<name>/<version>.yaml` | Proposed |
 | [`BOM`](./kinds/bom.zh-CN.md) | Repository source document | Platform release owner | `releases/<distribution>/<revision>/bom.yaml` | 已实现文件 schema |
 | [`ReleaseChannel`](./kinds/release-channel.zh-CN.md) | Repository source document | Release manager | `channels/<distribution>/<channel>.yaml` | 已实现推荐名称，代码接受旧别名 |
 | [`DistributionChannel`](./kinds/distribution-channel.zh-CN.md) | Repository source document | Release manager | 现有本地 channel 文件 | 已实现兼容名称 |
@@ -109,11 +110,16 @@ packages/<category>/<name>/<version>/package.yaml
 目的：定义可复用的构建 workflow contract，用来把 package source facts 转成
 materialized package payload。
 
-常见位置：
+常见解析位置：
 
 ```text
-classes/<name>/<version>.yaml
+Sealos built-in class registry
+可选 classes/<name>/<version>.yaml
 ```
+
+`rootfs/v1` 和 `manifest-bundle/v1` 等标准 class 由 Sealos 实现，不需要出现在每个
+distribution 仓库中。Repo-local `BuildClass` 文件是 custom、experimental 或
+policy-pinned class 的可选 descriptor。
 
 最小契约：
 
@@ -129,6 +135,7 @@ classes/<name>/<version>.yaml
 
 规则：
 
+- 未知 class 应 fail closed，除非当前运行的 Sealos binary 或已批准 extension 提供该实现
 - build class version 不可变
 - 只要变更可能影响 package bytes、被选中的 source files 或 output metadata，就必须发布新的 class version
 - builder 不能读取 `cluster-config`、live cluster state、未声明 host files 或 secret values

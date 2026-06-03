@@ -2,20 +2,31 @@
 
 ## 状态
 
-提议中的文件 schema。当前实现已经在 `BOM` entry 中记录 `build.class`，但独立的 `BuildClass` 文档还未实现。
+提议中的契约。当前实现已经在 `BOM` entry 中记录 `build.class`，但 Sealos 还没有实现 class
+registry 或独立的 repo-local `BuildClass` 文档加载。
 
 ## 类别
 
-源仓库文档。
+Built-in contract。
 
 ## 维护方
 
-distribution 平台 owner 维护 build class。包 owner 可以选择 build class，但不应在包内重新定义 class 的语义。
+Sealos distribution implementation 维护标准 build class。Distribution 平台 owner 审批哪些
+class 可用，也可以维护 custom 或 policy-pinned class 的 repo-local descriptor。包 owner
+可以选择 build class，但不应在包内重新定义 class 的语义。
 
-## 常见位置
+## 解析位置
 
-- `classes/<name>/<version>.yaml`
-- `build/classes/<name>/<version>.yaml`
+Build class 按以下顺序解析：
+
+1. Sealos built-in class registry。
+2. 随 Sealos 安装的已批准 extension class implementation。
+3. 可选的 repo-local `classes/<name>/<version>.yaml` descriptor，用于 custom、
+   experimental 或 policy-pinned class，但必须由已安装 implementation backing。
+
+`rootfs/v1`、`manifest-bundle/v1`、`helm-render/v1` 和 `patch-overlay/v1` 等 built-in
+class 不需要保存在每个 distribution 仓库中。Repo-local descriptor 可以记录或约束 built-in
+class 的使用，但不能替代 Sealos 随 binary 提供的 implementation。
 
 ## 用途
 
@@ -24,13 +35,17 @@ distribution 平台 owner 维护 build class。包 owner 可以选择 build clas
 - 源优先模式使用 build class 从仓库事实构建 artifact。
 - 非本地模式消费已经构建好的 artifact，但仍通过同一个 class 名称保留 provenance。
 
-Class 是包元数据和构建执行之间的边界。包声明自己包含什么，build class 声明这种 source shape 如何构建。
+Class 是包元数据和构建执行之间的边界。包声明自己包含什么，build class implementation
+声明这种 source shape 如何构建。
 
 Package-specific build details 仍然属于 `ComponentPackage.spec.build`。例如，需要 stage
 到 `rootfs/usr/bin/` 的 Kubernetes binaries 清单是 package source metadata，不是可复用的
 class 语义。
 
-## 必需信封
+## 可选 Descriptor Envelope
+
+Built-in class 只通过 identity 引用，不要求这个文件。仓库如果为 custom、experimental 或
+policy-pinned class 携带 descriptor，应使用这个 envelope：
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
@@ -47,7 +62,7 @@ Canonical build class identity 是：
 <metadata.name>/<spec.version>
 ```
 
-例如，上面的文档在 `ComponentPackage.spec.build.class` 或
+例如，上面的 descriptor 在 `ComponentPackage.spec.build.class` 或
 `BOM.spec.packages[*].build.class` 中被引用为 `rootfs/v1`。
 
 ## Spec 契约
@@ -65,12 +80,16 @@ Canonical build class identity 是：
 
 ## 校验规则
 
-- Class identity `metadata.name/spec.version` 在 distribution 源仓库内必须全局唯一。
+- Class identity `metadata.name/spec.version` 必须解析到唯一已批准 implementation：Sealos
+  built-in class、已批准 extension，或指向已安装 custom extension 的 repo-local descriptor。
+- 未知 class 应 fail closed。
 - 必须设置 `metadata.name` 和 `spec.version`。
 - 必须设置 `driver` 和 `output`。
 - `packageClasses` 中的每个值都必须是支持的 `ComponentPackage` class。
 - `parameters` 必须是非 secret。Secret 只能由运行时或 CI 环境提供，并且只能通过名称引用。
 - Build class 被采用后应保持不可变。需要改变 class 行为时，应创建新的 class 名称或版本化 class 名称。
+- Repo-local descriptor 不应开启任意 package-specific 行为，除非该行为由已批准 extension
+  implementation 表示。
 
 ## 构建输入
 
@@ -84,7 +103,7 @@ Canonical build class identity 是：
 - 已声明的 build options
 - 来自 `ComponentPackage.spec.build` 的 package-local build inputs 和 staging rules
 
-Build class 不能读取未声明的 host path、cluster 配置、运行时状态或 secret 内容。
+Build class implementation 不能读取未声明的 host path、cluster 配置、运行时状态或 secret 内容。
 
 在调用 class 前，构建流程应从被选择的 `ComponentPackage` 加载 package-local contract。
 Class 提供 driver 语义；package-local contract 提供 per-package build facts。
@@ -119,10 +138,14 @@ BOM package.version == output ComponentPackage.spec.version
 这样可以避免为本地和非本地 delivery 维护两套 package schema。
 
 仓库级 `scripts/` 可以为了 operator 便利包装 build class，但它们应保持为通用 dispatcher。
-只有当 package-specific script 被 package-local build contract 引用，并且位于 package source
-目录内时，才应使用它。
+它们不应该携带每个 distribution 仓库都必须复制的可复用 class implementation。只有当
+package-specific script 被 package-local build contract 引用，并且位于 package source 目录内时，
+才应使用它。
 
-## 示例
+## Descriptor 示例
+
+下面的 descriptor shape 用来记录契约。对于 `rootfs/v1` 这样的 built-in class，可执行行为仍然来自
+Sealos class registry。
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
@@ -154,9 +177,9 @@ spec:
       - platform
 ```
 
-## 初始 Build Classes
+## 初始 Built-in Build Classes
 
-初始 class 集合应保持小。只有当 source shape 或 output semantics 差异足够大，需要独立
+初始 built-in class 集合应保持小。只有当 source shape 或 output semantics 差异足够大，需要独立
 validation 和 provenance contract 时，才新增 class。
 
 | Class | Driver | Output | Package classes | 适用场景 |
@@ -168,7 +191,8 @@ validation 和 provenance contract 时，才新增 class。
 
 初始默认集合里不建议放通用 `script/v1` class。Package-local scripts 可以作为
 `ComponentPackage.spec.build` 中声明的 adapter 使用，但 catch-all script class 会让 build
-behavior 更难校验和复现。
+behavior 更难校验和复现。Custom script-like behavior 应通过已批准 extension class 引入，
+而不是把任意可复用 scripts 放进每个 distribution 仓库。
 
 ### `rootfs/v1`
 
@@ -313,6 +337,7 @@ packages:
 - `BuildClass` 不定义集群特定 inputs。
 - `BuildClass` 不列出 package-specific external assets。
 - `BuildClass` 不把 package-specific staging rules 隐藏在仓库级 scripts 中。
+- `BuildClass` 不要求每个 distribution 仓库 vendor 标准 class 定义。
 - `BuildClass` 不批准本地 patches。
 - `BuildClass` 不表示已应用的运行时状态。
 

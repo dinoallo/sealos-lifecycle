@@ -6,9 +6,9 @@ Draft
 
 ## Summary
 
-This document proposes a Git repository layout for synchronizing Sealos distribution configuration, including package manifests, build classes, distribution profiles, BOM files, and release channels.
+This document proposes a Git repository layout for synchronizing Sealos distribution configuration, including package manifests, build class references, distribution profiles, BOM files, and release channels.
 
-The recommended model is to use Git as the source of truth for distribution configuration, release intent, and the source facts needed to materialize packages. Git stores small, reviewable YAML documents such as `package.yaml`, build classes, profiles, BOMs, and channel pointers. OCI remains the preferred transport and cache for prebuilt immutable package artifacts, but it is not the only way to materialize a package.
+The recommended model is to use Git as the source of truth for distribution configuration, release intent, and the source facts needed to materialize packages. Git stores small, reviewable YAML documents such as `package.yaml`, optional repo-local build class descriptors, profiles, BOMs, and channel pointers. Standard build classes are implemented by Sealos and referenced by immutable class identity; distribution repositories do not need to vendor their definitions. OCI remains the preferred transport and cache for prebuilt immutable package artifacts, but it is not the only way to materialize a package.
 
 The proposal intentionally defines repository conventions and resolution rules first. It does not require Sealos to introduce new API types before teams can adopt the layout; formal schemas such as `ReleaseChannel` and `ClusterTarget` can be added later without changing the path model. The companion [document kind reference](kinds.md) tracks which kinds are Kubernetes CRDs, repository source documents, generated documents, evidence documents, or proposal-only schemas.
 
@@ -32,7 +32,7 @@ Without a clear layout:
 - Distinguish package types in the repository layout and BOMs.
 - Support both source-first local builds and prebuilt artifact consumption without changing the repository layout.
 - Keep built package payloads out of Git, whether they are stored in OCI, a local registry, an OCI layout, or an agent cache.
-- Separate package definitions, build classes, distribution profiles, release BOMs, and channel pointers.
+- Separate package definitions, build class references and optional custom class descriptors, distribution profiles, release BOMs, and channel pointers.
 - Define a clear boundary with separate `cluster-config` repositories for cluster-local targets, inputs, and patches.
 - Make the repository layout friendly to pull-based synchronization from private clusters.
 - Avoid committing generated render output by default.
@@ -77,14 +77,8 @@ distribution-config/
       pod-security/
         v1.0.0/
           package.yaml
-  classes/
-    rootfs/
-      v1.yaml
-    manifest-bundle/
-      v1.yaml
-    helm-render/
-      v1.yaml
-    patch-overlay/
+  classes/                    # optional: custom or policy-pinned class descriptors
+    site-overlay/
       v1.yaml
   profiles/
     default-platform/
@@ -107,7 +101,7 @@ distribution-config/
   README.md
 ```
 
-This repository should contain the source files needed to build, validate, select, and render a distribution. It should not contain generated render output, downloaded OCI artifact contents, or locally built package artifacts.
+This repository should contain the source files needed to build, validate, select, and render a distribution. It should not contain generated render output, downloaded OCI artifact contents, or locally built package artifacts. It also does not need to carry definitions for Sealos built-in build classes such as `rootfs/v1` or `manifest-bundle/v1`.
 
 Cluster-local configuration is intentionally outside this repository model. Use a separate `cluster-config` repository for `ClusterTarget`, local inputs, patches, delivery policy, and secret references.
 
@@ -118,7 +112,7 @@ Cluster-local configuration is intentionally outside this repository model. Use 
 | `packages/<category>/<name>/<version>/` | Source configuration for one package revision. |
 | `packages/<category>/<name>/<version>/package.yaml` | The package manifest that will be copied into the materialized package root. |
 | `packages/<category>/<name>/<version>/build/` | Optional package-local build adapters or helpers referenced by `package.yaml`. |
-| `classes/<name>/<version>.yaml` | Reusable build or render class definitions used by packages. |
+| `classes/<name>/<version>.yaml` | Optional repo-local `BuildClass` descriptor for custom, experimental, or policy-pinned classes. Built-in classes such as `rootfs/v1` are resolved from the Sealos class registry and do not need to be vendored. |
 | `profiles/<distribution>/<profile>/` | Distribution-level defaults, feature masks, package masks, and support matrix rules. |
 | `releases/<distribution>/<revision>/bom.yaml` | A release BOM that pins source facts, build contracts, and optional package artifacts by digest. |
 | `channels/<distribution>/<channel>.yaml` | A small pointer from a channel name to an approved BOM revision. |
@@ -131,7 +125,7 @@ Git should store files that are small, intentional, and useful for review:
 - package manifests
 - package source files referenced by `package.yaml`
 - package-local build recipes, adapters, and declared build input metadata
-- build and render class definitions
+- optional repo-local build class descriptors for custom or policy-pinned classes
 - distribution profile defaults, masks, and support matrix rules
 - release BOM files
 - release channel pointer files
@@ -456,7 +450,17 @@ The build workflow should run in this order:
 12. Store or expose the output according to the selected fulfillment mode.
 
 The build class is the reusable contract that keeps this workflow
-implementation-independent. A build class version should declare:
+implementation-independent. Standard classes should be built into Sealos as a
+versioned class registry, so every distribution repository can reference the
+same `rootfs/v1` or `manifest-bundle/v1` behavior without copying class
+definitions. Repo-local `BuildClass` files are optional extension descriptors:
+they may document custom classes backed by installed extensions, constrain
+allowed built-in classes for a repository, or pin policy metadata, but they must
+not be required for built-in class execution.
+
+Unknown classes should fail closed unless the running Sealos binary or an
+approved extension explicitly provides that class implementation. A build class
+version should declare:
 
 - the builder implementation or command family
 - the output kind, such as package root, OCI artifact, OCI layout, or local
@@ -471,7 +475,7 @@ belong in `ComponentPackage.spec.build`, not in the reusable build class. This
 keeps a class like `rootfs/v1` reusable across Kubernetes, containerd,
 and other rootfs packages without encoding every package's asset layout.
 
-Recommended initial build classes:
+Recommended initial built-in build classes:
 
 | Class | Purpose |
 | --- | --- |
@@ -486,11 +490,14 @@ shapes, not arbitrary shell entrypoints.
 
 Build class versions should be treated as immutable. If a class changes in a
 way that can change package bytes, source selection, or output metadata, it
-should get a new class version. Builders must not read `cluster-config`, live
-cluster state, undeclared host files, or secret values. Network inputs are
-allowed only when they are declared and digest-pinned, or when they are
-pre-staged into the source facts. Source-first local build mode must be able to
-run without an undeclared remote fetch.
+should get a new class version. The class implementation, not the distribution
+repository, owns the reusable behavior. Package repositories own only the
+package-specific source facts, build inputs, staging rules, and optional
+adapters declared in `ComponentPackage.spec.build`. Builders must not read
+`cluster-config`, live cluster state, undeclared host files, or secret values.
+Network inputs are allowed only when they are declared and digest-pinned, or
+when they are pre-staged into the source facts. Source-first local build mode
+must be able to run without an undeclared remote fetch.
 
 The build output should carry enough provenance to prove which inputs produced
 it:
@@ -535,7 +542,9 @@ Given a distribution, channel, profile, and delivery mode selected by `cluster-c
 2. Resolve the channel's `targetRevision` and `bomPath` to one BOM file.
 3. Verify that the BOM `spec.revision` matches the channel `targetRevision`.
 4. Resolve the selected profile under `profiles/<distribution>/<profile>/`.
-5. Verify referenced build classes and package source paths.
+5. Verify referenced build classes through the built-in class registry or
+   approved extension descriptors backed by installed implementations, and
+   verify package source paths.
 6. Materialize each package by pulling a pinned artifact, building from pinned source facts, or using `preferArtifact` fallback rules.
 7. Expose package defaults, profile defaults, and materialized package payloads to the cluster render/apply workflow.
 
@@ -590,7 +599,8 @@ CI for the distribution configuration repository should validate:
 - every `category/name` tuple is unique
 - every buildable BOM package points to a source path and source digest
 - every buildable BOM package names a supported build class
-- every build class version declares an output kind, supported package classes, supported platforms, and required provenance fields
+- every referenced build class is provided by the Sealos built-in class registry or an approved extension descriptor backed by an installed implementation
+- every approved build class version declares an output kind, supported package classes, supported platforms, and required provenance fields
 - every package-local build input is non-secret and digest-pinned when it resolves outside the package source
 - every package-local staging path is relative to the materialized package root and references a declared build input
 - every source digest can be recomputed from the normalized source facts
@@ -605,7 +615,7 @@ CI for the distribution configuration repository should validate:
 - every channel target revision matches the referenced BOM revision
 - every channel pointer references an existing BOM path
 - every profile references existing defaults, masks, full package identities, and supported features
-- every build class reference points to an approved class definition
+- every build class reference points to a supported built-in class or approved custom class backed by an installed implementation
 - delivery mode changes do not change resolved package graphs or patch ordering
 - generated output paths and local caches are ignored by Git
 
@@ -633,7 +643,7 @@ Rejected because that mixes global package ownership with environment-specific c
 
 - Should Sealos define a first-class `ReleaseChannel` schema, or should channel pointers remain a repository convention at first?
 - What exact canonicalization algorithm should compute `source.digest` for a package source tree so it remains deterministic across platforms?
-- Should the BOM also pin an explicit build class digest, or is an immutable class version plus the selected Git revision sufficient?
+- Should custom repo-local build classes be allowed to execute arbitrary code, or should they be limited to descriptors for extension implementations installed with Sealos?
 - How should validation discover externally produced package artifacts that do not have source under `packages/`?
 - Should rendered bundle snapshots be allowed in a dedicated audit repository for regulated environments?
 
