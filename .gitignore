@@ -2,7 +2,8 @@
 *rpmnew
 *swo
 .idea
-.codex/
+.codex
+.agents
 .zed/
 oss-config
 ossutil64
