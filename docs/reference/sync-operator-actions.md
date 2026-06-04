@@ -84,6 +84,14 @@ They are shortened, schema-aligned snapshots that show:
 | `rerenderOrUpdateGlobalBaseline` | generated drift driven by package/BOM global baseline | The generated projection should be fixed by changing the selected global baseline and regenerating desired state. | no | no | no | update package/BOM global baseline, then `sync render` and `sync apply` |
 | `manualReview` | semantic parse failure or unsupported generated drift | Sealos cannot safely route this through an automated ownership path yet. | no | no | no | inspect manually before changing desired or live state |
 
+Generated host-path remediation blocks also carry projection-level routing
+metadata: `projectionClass`, `generator`, `generatedKind`, `generatedName`, and
+`repairable`. Treat `repairable` as a narrower projection signal than
+`operatorAction`: it only says whether this exact generated projection has a
+known CLI repair path. The summary-level `operatorAction` still describes the
+usual source-of-truth fix, such as local input, package/BOM baseline, or manual
+review.
+
 ## Quick Interpretation Rules
 
 ### If `allowsDirectCommit: true`
@@ -102,6 +110,8 @@ They are shortened, schema-aligned snapshots that show:
   - supported local overlay drift
   - supported local input-backed host-file drift
   - direct global baseline drift that should be pulled back to desired state
+  - selected modeled generated control-plane host paths when their remediation
+    has `repairable=true` and the bundle contains the retained kubeadm input
 
 ### If `requiresBundleMatch: true`
 
@@ -201,7 +211,8 @@ It does not imply:
 
 - multi-node commit/revert coverage beyond the narrow host-input path
 - controller-driven continuous reconciliation
-- direct generated-projection revert support
+- direct generated-projection revert support beyond the narrow
+  `repairable=true` control-plane host-path subset
 - a fully externalized ownership-policy object
 
 Those remain future work.

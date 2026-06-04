@@ -93,6 +93,21 @@ func TestMaterializeFile(t *testing.T) {
 	if !strings.HasPrefix(loaded.Spec.BOM.Digest, "sha256:") {
 		t.Fatalf("loaded.spec.bom.digest = %q, want sha256 digest", loaded.Spec.BOM.Digest)
 	}
+	if loaded.Spec.RequestedTarget == nil {
+		t.Fatal("loaded.spec.requestedTarget = nil, want value")
+	}
+	if got, want := loaded.Spec.RequestedTarget.Kind, state.TargetKindBOM; got != want {
+		t.Fatalf("loaded.spec.requestedTarget.kind = %q, want %q", got, want)
+	}
+	if got, want := loaded.Spec.RequestedTarget.BOMPath, bomPath; got != want {
+		t.Fatalf("loaded.spec.requestedTarget.bomPath = %q, want %q", got, want)
+	}
+	if loaded.Spec.ResolvedTarget == nil {
+		t.Fatal("loaded.spec.resolvedTarget = nil, want value")
+	}
+	if got, want := loaded.Spec.ResolvedTarget.BOM, loaded.Spec.BOM; got != want {
+		t.Fatalf("loaded.spec.resolvedTarget.bom = %#v, want %#v", got, want)
+	}
 	if got, want := result.Bundle.Spec.ExecutionTopology.FirstMaster, "localhost"; got != want {
 		t.Fatalf("bundle.executionTopology.firstMaster = %q, want %q", got, want)
 	}

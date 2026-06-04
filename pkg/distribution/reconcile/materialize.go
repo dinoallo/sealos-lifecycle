@@ -153,6 +153,7 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	provenance := opts.RenderProvenance
 	provenance.LocalRepoRevision = localRepoRevision(opts.LocalRepo)
 	provenance.LocalPatchRevision = opts.LocalPatchRevision
+	provenance = provenance.Normalize()
 	renderedBundle, stagePath, err := materializeBundle(plan, opts.ClusterName, opts.BOMRoot, opts.Sources, topology, provenance, opts.SourcePreflight)
 	if err != nil {
 		return nil, err
@@ -179,12 +180,17 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
-	appliedRevision, err := state.PersistRenderedState(
+	targetState := appliedRevisionTargetState(provenance, ref)
+	appliedRevision, err := state.PersistRenderedStateWithOptions(
 		opts.ClusterName,
 		ref,
 		desiredStateDigest.String(),
 		localRepoRevision(opts.LocalRepo),
 		opts.LocalPatchRevision,
+		state.PersistRevisionOptions{
+			RequestedTarget: targetState.Requested,
+			ResolvedTarget:  targetState.Resolved,
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -439,4 +445,51 @@ func newBOMReference(doc *bom.BOM, channel bom.ReleaseChannel) (state.BOMReferen
 		Channel:  channel,
 		Digest:   digest.Canonical.FromBytes(data).String(),
 	}, nil
+}
+
+func appliedRevisionTargetState(provenance hydrate.RenderProvenance, ref state.BOMReference) state.TargetState {
+	provenance = provenance.Normalize()
+	requested := state.RequestedTarget{
+		Kind:                 state.TargetKindBOM,
+		BOMPath:              provenance.BOMPath,
+		BOMDigest:            provenance.BOMDigest,
+		ReleaseChannelPath:   provenance.ReleaseChannelPath,
+		ReleaseChannelDigest: provenance.ReleaseChannelDigest,
+		ReleaseSource:        provenance.ReleaseSource,
+		DistributionLine:     provenance.DistributionLine,
+		Channel:              bom.ReleaseChannel(provenance.ReleaseChannel),
+	}
+	if requested.BOMDigest == "" {
+		requested.BOMDigest = ref.Digest
+	}
+	if requested.ReleaseSource != "" {
+		requested.Kind = state.TargetKindReleaseChannelLookup
+	} else if requested.ReleaseChannelPath != "" || requested.ReleaseChannelDigest != "" {
+		requested.Kind = state.TargetKindReleaseChannelFile
+	} else if requested.BOMPath == "" && requested.BOMDigest == "" {
+		requested.BOMDigest = ref.Digest
+	}
+	if requested.DistributionLine == "" && requested.Kind != state.TargetKindBOM {
+		requested.DistributionLine = ref.Name
+	}
+	if requested.Channel == "" && requested.Kind != state.TargetKindBOM {
+		requested.Channel = ref.Channel
+	}
+
+	resolved := state.ResolvedTarget{
+		BOM: ref,
+	}
+	if requested.Kind != state.TargetKindBOM {
+		resolved.ReleaseChannel = &state.ReleaseChannelReference{
+			DistributionLine: requested.DistributionLine,
+			Channel:          requested.Channel,
+			TargetRevision:   ref.Revision,
+			Source:           requested.ReleaseChannelPath,
+			Digest:           requested.ReleaseChannelDigest,
+		}
+	}
+	return state.TargetState{
+		Requested: &requested,
+		Resolved:  &resolved,
+	}
 }

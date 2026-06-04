@@ -82,6 +82,13 @@ Draft
 | `rerenderOrUpdateGlobalBaseline` | 由 package/BOM global baseline 驱动的 generated drift | 正确修复路径是改 global baseline，再重新生成 desired state。 | no | no | no | 更新 package/BOM global baseline，然后 `sync render` 和 `sync apply` |
 | `manualReview` | semantic parse 失败或当前不支持自动路由的 generated drift | Sealos 还不能安全地把它放进自动 ownership 流程。 | no | no | no | 手工检查后再决定是否修改 desired 或 live state |
 
+generated host-path remediation block 还会带 projection 级路由 metadata：
+`projectionClass`、`generator`、`generatedKind`、`generatedName` 和
+`repairable`。`repairable` 是比 `operatorAction` 更窄的 projection 信号：
+它只表示这一个 generated projection 当前是否有已知 CLI repair path。摘要层的
+`operatorAction` 仍然描述常规 source-of-truth 修复方向，例如 local input、
+package/BOM baseline 或 manual review。
+
 ## 快速判断规则
 
 ### 如果 `allowsDirectCommit: true`
@@ -98,6 +105,8 @@ Draft
   - 支持的本地 overlay drift
   - 支持的 local input-backed host-file drift
   - 应该被拉回 desired state 的 direct global baseline drift
+  - remediation 带 `repairable=true`，且 bundle 中保留 kubeadm input 的部分
+    已建模 generated control-plane host path
 
 ### 如果 `requiresBundleMatch: true`
 
@@ -192,7 +201,7 @@ direct-action 概况。
 
 - 多节点 target resolution
 - controller-driven continuous reconciliation
-- direct generated-projection revert
+- 超出 `repairable=true` control-plane host-path 子集的 direct generated-projection revert
 - 完全外置化的 ownership-policy 对象
 
 这些仍然是后续工作。

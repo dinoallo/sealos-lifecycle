@@ -2402,7 +2402,7 @@ exit 0
 	if _, err := state.PersistSuccessfulApply(
 		clusterName,
 		state.BOMReference{
-			Name:     previousBundle.Spec.BOMName,
+			Name:     "previous-platform",
 			Revision: previousBundle.Spec.Revision,
 			Channel:  previousBundle.Spec.Channel,
 			Digest:   "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -2412,6 +2412,36 @@ exit 0
 		"local-rev-1",
 	); err != nil {
 		t.Fatalf("PersistSuccessfulApply(previous) error = %v", err)
+	}
+	previousApplied, err := state.LoadAppliedRevision(clusterName)
+	if err != nil {
+		t.Fatalf("LoadAppliedRevision(previous) error = %v", err)
+	}
+	previousApplied.Spec.RequestedTarget = &state.RequestedTarget{
+		Kind:             state.TargetKindReleaseChannelLookup,
+		ReleaseSource:    "https://release.sealos.example",
+		DistributionLine: "previous-platform",
+		Channel:          previousBundle.Spec.Channel,
+	}
+	previousApplied.Spec.ResolvedTarget = &state.ResolvedTarget{
+		BOM: state.BOMReference{
+			Name:     "previous-platform",
+			Revision: previousBundle.Spec.Revision,
+			Channel:  previousBundle.Spec.Channel,
+			Digest:   "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		},
+		ReleaseChannel: &state.ReleaseChannelReference{
+			DistributionLine: "previous-platform",
+			Channel:          previousBundle.Spec.Channel,
+			TargetRevision:   previousBundle.Spec.Revision,
+			Source:           "https://release.sealos.example/v1/distributions/previous-platform/channels/alpha",
+		},
+	}
+	if err := state.SaveAppliedRevision(previousApplied); err != nil {
+		t.Fatalf("SaveAppliedRevision(previous target) error = %v", err)
+	}
+	if _, err := state.MarkSuccessfulApply(clusterName); err != nil {
+		t.Fatalf("MarkSuccessfulApply(previous target) error = %v", err)
 	}
 
 	nextBundleDir := filepath.Join(tmpDir, "next-bundle")
@@ -2453,6 +2483,18 @@ exit 0
 	}
 	if got, want := loaded.Spec.DesiredStateDigest, previousDigest.String(); got != want {
 		t.Fatalf("loaded.spec.desiredStateDigest = %q, want %q", got, want)
+	}
+	if got, want := loaded.Spec.BOM.Name, "previous-platform"; got != want {
+		t.Fatalf("loaded.spec.bom.name = %q, want %q", got, want)
+	}
+	if loaded.Spec.RequestedTarget == nil || loaded.Spec.RequestedTarget.DistributionLine != "previous-platform" {
+		t.Fatalf("loaded.spec.requestedTarget = %#v, want previous target", loaded.Spec.RequestedTarget)
+	}
+	if loaded.Spec.ResolvedTarget == nil || loaded.Spec.ResolvedTarget.BOM.Name != "previous-platform" {
+		t.Fatalf("loaded.spec.resolvedTarget = %#v, want previous resolved target", loaded.Spec.ResolvedTarget)
+	}
+	if got := len(loaded.Status.SuccessfulRevisions); got < 1 {
+		t.Fatalf("len(status.successfulRevisions) = %d, want rollback history", got)
 	}
 }
 
