@@ -328,6 +328,19 @@ For such a generated host file, Sealos should track at least:
 
 Current single-node MVP note:
 
+- packages can now declare generated host files in
+  `ComponentPackage.spec.generatedOutputs.hostPaths[]`. During render, those
+  declarations are copied into the hydrated bundle and become
+  `spec.trackedHostPaths[]` entries with
+  `projectionClass=generatedHostPath` and
+  `compareStrategy=semanticGeneratedFile`.
+- this is the current bundle-local inventory location for generated outputs;
+  it records the target host path, component, generator tool/hook identity,
+  generated object identity, and known semantic expectations such as container
+  image, command, flags, and mounts.
+- declaration is not limited to kubeadm. Package authors can model other
+  generated Kubernetes-object host files, for example a Cilium health/status
+  projection rendered by a package hook.
 - the repository now tracks three known generated host files from this flow:
   `kube-apiserver.yaml`, `kube-controller-manager.yaml`, and
   `kube-scheduler.yaml` under `/etc/kubernetes/manifests/`
@@ -348,8 +361,10 @@ Current single-node MVP note:
   expected mounts from `extraVolumes`
 - it still does not compare the full generated manifest against a complete
   field-level desired intent model
-- `sync diff` and `sync status` report this projection today, but
-  `sync revert` and `sync commit` do not yet manage it directly
+- `sync diff` and `sync status` report this projection today; `sync revert`
+  can repair a narrow subset of known kubeadm control-plane host paths when the
+  rendered kubeadm input is retained, while `sync commit` still does not manage
+  generated projections directly
 - current CLI output also carries a generated-projection remediation hint:
   semantic field drift points operators back to the rendered `kubeadm` input,
   while parse-level failures are classified as manual-review cases
@@ -366,6 +381,11 @@ Current single-node MVP note:
   preconditions and an evaluated `availability`, so `sync diff/status` can say
   not only which command is relevant, but also whether it is currently blocked
   by a missing prerequisite such as a bundle digest mismatch
+- generated remediation now also carries structured projection metadata:
+  `projectionClass`, `generator`, `generatedKind`, `generatedName`, and an
+  explicit `repairable` flag. This lets operators and automation distinguish
+  modeled-but-not-repairable generated drift from the narrow generated
+  projections with a known repair path.
 
 ## Current Remediation Model For Ordinary Drift
 
@@ -461,8 +481,10 @@ recorded desired state.
 The current `AppliedRevision` is still useful, but it is too coarse to explain
 which projected objects or files are expected and how they should be compared.
 
-Sealos should eventually keep a finer-grained materialization inventory next to
-the revision snapshot.
+The current MVP keeps that finer-grained materialization inventory inside the
+rendered bundle under `spec.trackedK8sObjects[]` and `spec.trackedHostPaths[]`.
+A future controller-facing API could lift the same information into a separate
+state object next to the revision snapshot.
 
 An illustrative shape is:
 
@@ -556,8 +578,8 @@ It does need a clear first-pass model for:
 
 - direct `rootfs` and `file` projections
 - direct manifest-backed Kubernetes objects whose live state is stored in etcd
-- a small set of known generated outputs, especially kubeadm-produced static
-  Pod manifests
+- generated host-path outputs declared by package metadata, plus the known
+  kubeadm-produced static Pod manifests derived from retained kubeadm input
 - local repo Secret and `ExternalSecret` resources
 
 That is enough to keep the Kubernetes bootstrap path, Cilium package flow, and
@@ -945,11 +967,9 @@ guidance becomes `available` or `blocked`.
 
 ## Open Questions
 
-- Where should generated outputs be declared: in package metadata, in ownership
-  policy, or in a separate tracking manifest?
 - What is the smallest ownership selector language that can express field-level
   rules for generated files and Kubernetes objects?
-- Should the fine-grained inventory live inside one new state object, or in a
-  bundle-local file next to the current applied revision record?
-- Which generated outputs should the first MVP support explicitly beyond
-  kubeadm static Pod manifests?
+- Which generated outputs should get direct automated repair paths beyond the
+  current kubeadm control-plane subset?
+- When should the bundle-local inventory be promoted into a dedicated
+  controller-facing state object?

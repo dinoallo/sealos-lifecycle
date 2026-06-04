@@ -6,8 +6,8 @@ Current repo walkthrough
 
 ## Summary
 
-This walkthrough shows how the current single-node repo handles desired-state
-drift with the `sealos sync` command set.
+This walkthrough shows how the current repo handles desired-state drift with the
+`sealos sync` command set.
 
 It is intentionally about the implementation that exists today, not a future
 controller design. In the current repo, operators can:
@@ -21,7 +21,11 @@ The walkthrough focuses on the current boundaries that matter in practice:
 
 - `global` object or host-file drift is treated as `globalBaseline`-owned
 - `local` object or host-file drift is treated as local-owned
-- generated projections are reported, but not directly committed or reverted
+- multi-node host-file commit/revert exists for explicitly selected tracked
+  host paths, with host-scoped input provenance for local-input commits
+- generated projections declared by packages or discovered from retained
+  kubeadm input are reported with structured routing metadata; only the narrow
+  `repairable=true` control-plane host-path subset has a direct repair path
 
 ## Related Documents
 
@@ -105,7 +109,7 @@ Use this table before choosing a command:
 | package-owned direct host file | `Orphan` | `globalBaseline` | revert it, or update the global baseline |
 | local input-backed direct host file | `Dirty` | `localInput` | commit it if intentional, or revert it |
 | missing local-owned object or file | `Dirty` | `localOverlay` or `localInput` | revert it; current MVP does not commit a missing projection |
-| generated static Pod projection | usually `Orphan` | `localInput`, `globalBaseline`, or `manualReview` | follow the remediation hint; current MVP does not directly commit or revert it |
+| generated static Pod projection | usually `Orphan` | `localInput`, `globalBaseline`, or `manualReview` | follow the remediation hint; only `repairable=true` control-plane host paths have direct repair |
 
 One practical rule follows:
 
@@ -213,6 +217,9 @@ The fields that matter most are:
 
 - `action`
 - `changeOwner`
+- generated-projection routing metadata when present:
+  `projectionClass`, `generator`, `generatedKind`, `generatedName`, and
+  `repairable`
 - `nextSteps[]`
 - `allowedCommands[]`
 - `commandGuidance[]`
@@ -229,6 +236,12 @@ Today, the ownership routing is:
   - the drift belongs to a declared local input binding, often a host-side file
 - `changeOwner=manualReview`
   - Sealos cannot safely classify the generated projection automatically
+
+For generated host-path projections, the remediation block also identifies the
+generator and generated object shape. `repairable=true` means the current CLI
+has a known repair path for that generated projection; `repairable=false` means
+the projection is tracked and routed, but the fix still goes through local
+input, package/BOM baseline, or manual review.
 
 The command guidance is also evaluated, not just listed. The current single-node
 MVP uses one especially important precondition:
@@ -364,10 +377,31 @@ sealos sync revert \
   --scope local
 ```
 
+For multi-node host paths, add `--host` to target one execution host. If the
+same host path is tracked by more than one component, also add `--component`.
+For local-input-backed host paths with host-scoped input bindings, the selected
+host is reverted from its host-scoped desired payload:
+
+```bash
+sealos sync revert \
+  --cluster demo \
+  --bundle-dir docs/examples/sync-drift-minimal/bundle \
+  --kubeconfig /etc/kubernetes/admin.conf \
+  --host-root / \
+  --scope local \
+  --host-path /etc/kubernetes/kubeadm.yaml \
+  --host 192.168.0.240:22
+```
+
 Current MVP behavior worth remembering:
 
 - missing local-owned objects or files can be restored by `revert`
-- generated projections are reported, but are not directly reverted
+- direct host-path revert can target local or remote hosts, and ambiguous
+  multi-component host paths require `--component`
+- generated projections are reported from
+  `ComponentPackage.spec.generatedOutputs.hostPaths[]` declarations or known
+  kubeadm static Pod discovery; only modeled control-plane host paths whose
+  remediation says `repairable=true` are directly repairable
 - local-scope revert will reject clearly global-owned selections
 
 ## Step 6: Re-Run `diff` Or `status`
@@ -424,6 +458,8 @@ That loop is already enough to handle the current single-node cases for:
 - local patch drift
 - direct host-file drift backed by declared local inputs
 - `globalBaseline`-owned object or file drift that should be discarded
+- modeled generated host-path drift, including package-declared generated
+  Kubernetes-object host files beyond kubeadm static Pods
 
 If you want a concrete sample directory that matches this loop, use:
 [docs/examples/sync-drift-minimal](../examples/sync-drift-minimal/README.md).

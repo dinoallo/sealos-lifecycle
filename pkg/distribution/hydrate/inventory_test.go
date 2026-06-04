@@ -484,6 +484,120 @@ scheduler:
 	}
 }
 
+func TestRenderPlanCollectsDeclaredGeneratedHostPathsBeyondKubeadm(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "manifests"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(manifests) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifests", "cilium.yaml"), []byte(`apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cilium
+  namespace: kube-system
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	pkg := packageformat.New("cilium-application", "cilium", "v1.16.0", packageformat.ClassApplication)
+	pkg.Spec.Contents = []packageformat.Content{{
+		Name: "cilium-manifest",
+		Type: packageformat.ContentManifest,
+		Path: "manifests/cilium.yaml",
+	}}
+	pkg.Spec.GeneratedOutputs.HostPaths = []packageformat.GeneratedHostPathOutput{{
+		Name:            "cilium-status-projection",
+		HostPath:        "/var/lib/sealos/generated/cilium/status.yaml",
+		Tool:            "cilium-cli",
+		Hook:            "healthcheck",
+		APIVersion:      "v1",
+		Kind:            "ConfigMap",
+		Namespace:       "kube-system",
+		ObjectName:      "cilium-status",
+		ContainerName:   "cilium-status",
+		ExpectedImage:   "registry.example.io/sealos/cilium-status:v1.16.0",
+		ExpectedCommand: "cilium-status-renderer",
+		ExpectedArgs: map[string]string{
+			"cluster-name": "generated-tracking",
+		},
+		ExpectedVolumeMounts: []string{"/var/run/cilium"},
+	}}
+	if err := pkg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, packageformat.ManifestFileName), []byte(pkg.String()), 0o644); err != nil {
+		t.Fatalf("WriteFile(package.yaml) error = %v", err)
+	}
+
+	doc := bom.New("declared-generated", "rev-generated-001", bom.ChannelAlpha)
+	doc.Spec.Packages = []bom.Package{{
+		Name:     "cilium",
+		Category: "networking",
+		Version:  "v1.16.0",
+		Artifact: bom.ArtifactReference{
+			Name:   "cilium-application",
+			Image:  "registry.example.io/sealos/cilium-application:v1.16.0",
+			Digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+		},
+	}}
+
+	plan, err := BuildPlanFromResolved(doc, map[string]*packageformat.ComponentPackage{
+		"cilium": pkg,
+	})
+	if err != nil {
+		t.Fatalf("BuildPlanFromResolved() error = %v", err)
+	}
+
+	out := t.TempDir()
+	bundle, err := RenderPlan(plan, SourceMap{"cilium": root}, out)
+	if err != nil {
+		t.Fatalf("RenderPlan() error = %v", err)
+	}
+
+	var tracked *TrackedHostPath
+	for i := range bundle.Spec.TrackedHostPaths {
+		path := &bundle.Spec.TrackedHostPaths[i]
+		if path.HostPath == "/var/lib/sealos/generated/cilium/status.yaml" {
+			tracked = path
+			break
+		}
+	}
+	if tracked == nil {
+		t.Fatalf("tracked host paths missing declared generated output: %+v", bundle.Spec.TrackedHostPaths)
+	}
+	if got, want := tracked.Component, "cilium"; got != want {
+		t.Fatalf("tracked component = %q, want %q", got, want)
+	}
+	if got, want := tracked.Source, InventorySourceGeneratedHook; got != want {
+		t.Fatalf("tracked source = %q, want %q", got, want)
+	}
+	if got, want := tracked.ProjectionClass, HostPathProjectionClassGenerated; got != want {
+		t.Fatalf("tracked projectionClass = %q, want %q", got, want)
+	}
+	if got, want := tracked.CompareStrategy, HostPathCompareStrategySemanticGenerated; got != want {
+		t.Fatalf("tracked compareStrategy = %q, want %q", got, want)
+	}
+	if tracked.Generated == nil {
+		t.Fatal("tracked generated metadata = nil, want declared semantics")
+	}
+	if got, want := tracked.Generated.Tool, "cilium-cli"; got != want {
+		t.Fatalf("generated.tool = %q, want %q", got, want)
+	}
+	if got, want := tracked.Generated.Kind, "ConfigMap"; got != want {
+		t.Fatalf("generated.kind = %q, want %q", got, want)
+	}
+	if got, want := tracked.Generated.Name, "cilium-status"; got != want {
+		t.Fatalf("generated.name = %q, want %q", got, want)
+	}
+	if got, want := tracked.Generated.ExpectedArgs["cluster-name"], "generated-tracking"; got != want {
+		t.Fatalf("generated.expectedArgs[cluster-name] = %q, want %q", got, want)
+	}
+	if !containsString(tracked.Generated.ExpectedVolumeMounts, "/var/run/cilium") {
+		t.Fatalf("generated.expectedVolumeMounts missing cilium socket: %+v", tracked.Generated.ExpectedVolumeMounts)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

@@ -717,6 +717,13 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	if got, want := drifted.Remediation.ChangeOwner, "globalBaseline"; got != want {
 		t.Fatalf("drifted.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, drifted.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "kube-controller-manager",
+		Repairable:      true,
+	})
 	if got, want := drifted.Remediation.NextSteps[0], "Review the selected BOM revision and package baseline that define this generated projection."; got != want {
 		t.Fatalf("drifted.remediation.nextSteps[0] = %q, want %q", got, want)
 	}
@@ -776,6 +783,13 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	if got, want := schedulerDrifted.Remediation.ChangeOwner, "localInput"; got != want {
 		t.Fatalf("schedulerDrifted.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, schedulerDrifted.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "kube-scheduler",
+		Repairable:      true,
+	})
 	if got, want := schedulerDrifted.Remediation.NextSteps[0], "Update the cluster-local bootstrap input that feeds the rendered kubeadm config."; got != want {
 		t.Fatalf("schedulerDrifted.remediation.nextSteps[0] = %q, want %q", got, want)
 	}
@@ -802,6 +816,13 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	if got, want := missing.Remediation.ChangeOwner, "globalBaseline"; got != want {
 		t.Fatalf("missing.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, missing.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "etcd",
+		Repairable:      false,
+	})
 	if got, want := missing.Remediation.AllowedCommands[4], "sync package build"; got != want {
 		t.Fatalf("missing.remediation.allowedCommands[4] = %q, want %q", got, want)
 	}
@@ -866,6 +887,13 @@ func TestCompareBundleWithGeneratedHostPathSemanticParseErrorUsesManualReviewRem
 	if got, want := status.Remediation.ChangeOwner, "manualReview"; got != want {
 		t.Fatalf("status.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, status.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "kube-apiserver",
+		Repairable:      true,
+	})
 	if got, want := status.Remediation.NextSteps[0], "Inspect the live generated static Pod manifest and identify why Sealos could not classify it semantically."; got != want {
 		t.Fatalf("status.remediation.nextSteps[0] = %q, want %q", got, want)
 	}
@@ -1352,4 +1380,38 @@ type resolverFunc func(apiVersion, kind, namespace, name string) ([]byte, error)
 
 func (f resolverFunc) Get(apiVersion, kind, namespace, name string) ([]byte, error) {
 	return f(apiVersion, kind, namespace, name)
+}
+
+type generatedRemediationMetadata struct {
+	ProjectionClass string
+	Generator       string
+	GeneratedKind   string
+	GeneratedName   string
+	Repairable      bool
+}
+
+func assertGeneratedHostPathRemediation(t *testing.T, remediation *HostPathRemediation, want generatedRemediationMetadata) {
+	t.Helper()
+
+	if remediation == nil {
+		t.Fatal("remediation = nil, want generated host path remediation")
+	}
+	if got := remediation.ProjectionClass; got != want.ProjectionClass {
+		t.Fatalf("remediation.projectionClass = %q, want %q", got, want.ProjectionClass)
+	}
+	if got := remediation.Generator; got != want.Generator {
+		t.Fatalf("remediation.generator = %q, want %q", got, want.Generator)
+	}
+	if got := remediation.GeneratedKind; got != want.GeneratedKind {
+		t.Fatalf("remediation.generatedKind = %q, want %q", got, want.GeneratedKind)
+	}
+	if got := remediation.GeneratedName; got != want.GeneratedName {
+		t.Fatalf("remediation.generatedName = %q, want %q", got, want.GeneratedName)
+	}
+	if remediation.Repairable == nil {
+		t.Fatal("remediation.repairable = nil, want explicit generated repairability")
+	}
+	if got := *remediation.Repairable; got != want.Repairable {
+		t.Fatalf("remediation.repairable = %t, want %t", got, want.Repairable)
+	}
 }

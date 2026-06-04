@@ -52,18 +52,19 @@ type LocalResource struct {
 }
 
 type ComponentPlan struct {
-	Name              string                       `json:"name" yaml:"name"`
-	PackageName       string                       `json:"packageName" yaml:"packageName"`
-	Version           string                       `json:"version" yaml:"version"`
-	Class             packageformat.PackageClass   `json:"class" yaml:"class"`
-	Artifact          string                       `json:"artifact" yaml:"artifact"`
-	Dependencies      []string                     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Inputs            []packageformat.Input        `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	LocalPatchPolicy  string                       `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
-	InputBindings     map[string]string            `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
-	HostInputBindings map[string]map[string]string `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
-	LocalPatches      []LocalPatch                 `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
-	Steps             []Step                       `json:"steps" yaml:"steps"`
+	Name              string                         `json:"name" yaml:"name"`
+	PackageName       string                         `json:"packageName" yaml:"packageName"`
+	Version           string                         `json:"version" yaml:"version"`
+	Class             packageformat.PackageClass     `json:"class" yaml:"class"`
+	Artifact          string                         `json:"artifact" yaml:"artifact"`
+	Dependencies      []string                       `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	Inputs            []packageformat.Input          `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	GeneratedOutputs  packageformat.GeneratedOutputs `json:"generatedOutputs,omitempty" yaml:"generatedOutputs,omitempty"`
+	LocalPatchPolicy  string                         `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
+	InputBindings     map[string]string              `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
+	HostInputBindings map[string]map[string]string   `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
+	LocalPatches      []LocalPatch                   `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
+	Steps             []Step                         `json:"steps" yaml:"steps"`
 }
 
 type Step struct {
@@ -132,12 +133,34 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 			Artifact:         component.Artifact.Reference(),
 			Dependencies:     append([]string(nil), dependenciesByComponent[name]...),
 			Inputs:           inputs,
+			GeneratedOutputs: clonePackageGeneratedOutputs(pkg.Spec.GeneratedOutputs),
 			LocalPatchPolicy: pkg.Spec.LocalPatchPolicy,
 			Steps:            buildSteps(pkg),
 		})
 	}
 
 	return plan, nil
+}
+
+func clonePackageGeneratedOutputs(outputs packageformat.GeneratedOutputs) packageformat.GeneratedOutputs {
+	if len(outputs.HostPaths) == 0 {
+		return packageformat.GeneratedOutputs{}
+	}
+	cloned := packageformat.GeneratedOutputs{
+		HostPaths: make([]packageformat.GeneratedHostPathOutput, 0, len(outputs.HostPaths)),
+	}
+	for _, hostPath := range outputs.HostPaths {
+		item := hostPath
+		if len(hostPath.ExpectedArgs) > 0 {
+			item.ExpectedArgs = make(map[string]string, len(hostPath.ExpectedArgs))
+			for key, value := range hostPath.ExpectedArgs {
+				item.ExpectedArgs[key] = value
+			}
+		}
+		item.ExpectedVolumeMounts = append([]string(nil), hostPath.ExpectedVolumeMounts...)
+		cloned.HostPaths = append(cloned.HostPaths, item)
+	}
+	return cloned
 }
 
 func buildDependencySet(componentIndex map[string]bom.Package, resolved map[string]*packageformat.ComponentPackage) (map[string][]string, error) {

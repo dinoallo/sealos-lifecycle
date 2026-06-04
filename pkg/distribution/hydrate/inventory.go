@@ -331,13 +331,58 @@ func collectKnownGeneratedHostPaths(bundle *Bundle, outputDir string) []TrackedH
 
 	paths := make([]TrackedHostPath, 0, len(bundle.Spec.Components))
 	for _, component := range bundle.Spec.Components {
-		discovered := generatedKubeadmStaticPodManifests(component, outputDir)
-		if len(discovered) == 0 {
-			continue
+		declared := declaredGeneratedHostPaths(component)
+		paths = append(paths, declared...)
+		seen := make(map[string]struct{}, len(declared))
+		for _, path := range declared {
+			seen[path.HostPath] = struct{}{}
 		}
-		paths = append(paths, discovered...)
+		discovered := generatedKubeadmStaticPodManifests(component, outputDir)
+		for _, path := range discovered {
+			if _, ok := seen[path.HostPath]; ok {
+				continue
+			}
+			paths = append(paths, path)
+		}
 	}
 	return paths
+}
+
+func declaredGeneratedHostPaths(component RenderedComponent) []TrackedHostPath {
+	if len(component.GeneratedOutputs.HostPaths) == 0 {
+		return nil
+	}
+	paths := make([]TrackedHostPath, 0, len(component.GeneratedOutputs.HostPaths))
+	for _, output := range component.GeneratedOutputs.HostPaths {
+		semantics := generatedHostPathSemanticsFromPackageOutput(output)
+		paths = append(paths, TrackedHostPath{
+			HostPath:        filepath.ToSlash(output.HostPath),
+			Component:       component.Name,
+			Source:          InventorySourceGeneratedHook,
+			Ownership:       InventoryOwnershipGlobal,
+			Type:            HostPathRegularFile,
+			ProjectionClass: HostPathProjectionClassGenerated,
+			CompareStrategy: HostPathCompareStrategySemanticGenerated,
+			Generated:       &semantics,
+		})
+	}
+	return paths
+}
+
+func generatedHostPathSemanticsFromPackageOutput(output packageformat.GeneratedHostPathOutput) GeneratedHostPathSemantics {
+	return GeneratedHostPathSemantics{
+		Tool:                 strings.TrimSpace(output.Tool),
+		Hook:                 strings.TrimSpace(output.Hook),
+		APIVersion:           strings.TrimSpace(output.APIVersion),
+		Kind:                 strings.TrimSpace(output.Kind),
+		Namespace:            strings.TrimSpace(output.Namespace),
+		Name:                 strings.TrimSpace(output.ObjectName),
+		ContainerName:        strings.TrimSpace(output.ContainerName),
+		ExpectedImage:        strings.TrimSpace(output.ExpectedImage),
+		ExpectedCommand:      strings.TrimSpace(output.ExpectedCommand),
+		ExpectedArgs:         cloneStringMap(output.ExpectedArgs),
+		ExpectedVolumeMounts: append([]string(nil), output.ExpectedVolumeMounts...),
+	}
 }
 
 func generatedKubeadmStaticPodManifests(component RenderedComponent, outputDir string) []TrackedHostPath {

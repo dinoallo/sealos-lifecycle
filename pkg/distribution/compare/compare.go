@@ -86,6 +86,11 @@ type HostPathRemediation struct {
 	Action              string                    `json:"action" yaml:"action"`
 	ChangeOwner         string                    `json:"changeOwner,omitempty" yaml:"changeOwner,omitempty"`
 	Source              string                    `json:"source,omitempty" yaml:"source,omitempty"`
+	ProjectionClass     string                    `json:"projectionClass,omitempty" yaml:"projectionClass,omitempty"`
+	Generator           string                    `json:"generator,omitempty" yaml:"generator,omitempty"`
+	GeneratedKind       string                    `json:"generatedKind,omitempty" yaml:"generatedKind,omitempty"`
+	GeneratedName       string                    `json:"generatedName,omitempty" yaml:"generatedName,omitempty"`
+	Repairable          *bool                     `json:"repairable,omitempty" yaml:"repairable,omitempty"`
 	PolicyName          string                    `json:"policyName,omitempty" yaml:"policyName,omitempty"`
 	PolicyEligiblePaths []string                  `json:"policyEligiblePaths,omitempty" yaml:"policyEligiblePaths,omitempty"`
 	SafeDirectRevert    bool                      `json:"safeDirectRevert" yaml:"safeDirectRevert"`
@@ -1261,6 +1266,7 @@ func generatedHostPathRemediation(tracked hydrate.TrackedHostPath, status HostPa
 	if tracked.Generated.Tool == "kubeadm" {
 		source = "rendered kubeadm config (files/etc/kubernetes/kubeadm.yaml)"
 	}
+	base := generatedHostPathRemediationBase(tracked, source)
 
 	manualReview := false
 	for _, mismatch := range status.Mismatches {
@@ -1271,89 +1277,118 @@ func generatedHostPathRemediation(tracked hydrate.TrackedHostPath, status HostPa
 	}
 
 	if manualReview {
-		return &HostPathRemediation{
-			Action:           "manualReviewGeneratedProjection",
-			ChangeOwner:      "manualReview",
-			Source:           source,
-			SafeDirectRevert: false,
-			SafeCommit:       false,
-			Message:          "inspect the live generated projection and its bootstrap source before rerendering; direct sync commit/revert is not supported for generated projections",
-			NextSteps: []string{
-				"Inspect the live generated static Pod manifest and identify why Sealos could not classify it semantically.",
-				"Compare the live projection with the rendered kubeadm input and the selected BOM/package baseline.",
-				"After manual review, fix the bootstrap input or baseline source, then rerender and apply again.",
-			},
-			AllowedCommands: []string{
-				"sync diff",
-				"sync status",
-				"sync render",
-				"sync apply",
-			},
-			CommandGuidance: []HostPathCommandGuidance{
-				{Command: "sync diff", Availability: "unknown"},
-				{Command: "sync status", Availability: "unknown"},
-				{Command: "sync render", Availability: "unknown"},
-				{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
-			},
+		remediation := base
+		remediation.Action = "manualReviewGeneratedProjection"
+		remediation.ChangeOwner = "manualReview"
+		remediation.SafeDirectRevert = false
+		remediation.SafeCommit = false
+		remediation.Message = "inspect the live generated projection and its bootstrap source before rerendering; direct sync commit/revert is not supported for generated projections"
+		remediation.NextSteps = []string{
+			"Inspect the live generated static Pod manifest and identify why Sealos could not classify it semantically.",
+			"Compare the live projection with the rendered kubeadm input and the selected BOM/package baseline.",
+			"After manual review, fix the bootstrap input or baseline source, then rerender and apply again.",
 		}
+		remediation.AllowedCommands = []string{
+			"sync diff",
+			"sync status",
+			"sync render",
+			"sync apply",
+		}
+		remediation.CommandGuidance = []HostPathCommandGuidance{
+			{Command: "sync diff", Availability: "unknown"},
+			{Command: "sync status", Availability: "unknown"},
+			{Command: "sync render", Availability: "unknown"},
+			{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+		}
+		return &remediation
 	}
 
 	if generatedProjectionNeedsLocalInputChange(status.Mismatches) {
-		return &HostPathRemediation{
-			Action:           "updateLocalBootstrapInputAndRerender",
-			ChangeOwner:      "localInput",
-			Source:           source,
-			SafeDirectRevert: false,
-			SafeCommit:       false,
-			Message:          "update the cluster-local bootstrap input that produced this generated projection, then rerender and sync apply; direct sync commit/revert is not supported for generated projections",
-			NextSteps: []string{
-				"Update the cluster-local bootstrap input that feeds the rendered kubeadm config.",
-				"Rerender the bundle so the generated projection expectation is recalculated from the new local input.",
-				"Re-run diff or status, then apply the refreshed desired state.",
-			},
-			AllowedCommands: []string{
-				"sync render",
-				"sync diff",
-				"sync status",
-				"sync apply",
-			},
-			CommandGuidance: []HostPathCommandGuidance{
-				{Command: "sync render", Availability: "unknown"},
-				{Command: "sync diff", Availability: "unknown"},
-				{Command: "sync status", Availability: "unknown"},
-				{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
-			},
+		remediation := base
+		remediation.Action = "updateLocalBootstrapInputAndRerender"
+		remediation.ChangeOwner = "localInput"
+		remediation.SafeDirectRevert = false
+		remediation.SafeCommit = false
+		remediation.Message = "update the cluster-local bootstrap input that produced this generated projection, then rerender and sync apply; direct sync commit/revert is not supported for generated projections"
+		remediation.NextSteps = []string{
+			"Update the cluster-local bootstrap input that feeds the rendered kubeadm config.",
+			"Rerender the bundle so the generated projection expectation is recalculated from the new local input.",
+			"Re-run diff or status, then apply the refreshed desired state.",
 		}
-	}
-
-	return &HostPathRemediation{
-		Action:           "reviewDistributionBaselineForGeneratedProjection",
-		ChangeOwner:      "globalBaseline",
-		Source:           source,
-		SafeDirectRevert: false,
-		SafeCommit:       false,
-		Message:          "review the selected BOM/package baseline and bootstrap flow for this generated projection; direct sync commit/revert is not supported for generated projections",
-		NextSteps: []string{
-			"Review the selected BOM revision and package baseline that define this generated projection.",
-			"If the baseline is wrong, update the package content or BOM selection and rerender the desired state.",
-			"Re-run diff or status, then apply the refreshed bundle.",
-		},
-		AllowedCommands: []string{
+		remediation.AllowedCommands = []string{
 			"sync render",
 			"sync diff",
 			"sync status",
 			"sync apply",
-			"sync package build",
-			"sync package push",
-		},
-		CommandGuidance: []HostPathCommandGuidance{
+		}
+		remediation.CommandGuidance = []HostPathCommandGuidance{
 			{Command: "sync render", Availability: "unknown"},
 			{Command: "sync diff", Availability: "unknown"},
 			{Command: "sync status", Availability: "unknown"},
 			{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
-			{Command: "sync package build", Availability: "unknown"},
-			{Command: "sync package push", Availability: "unknown"},
-		},
+		}
+		return &remediation
+	}
+
+	remediation := base
+	remediation.Action = "reviewDistributionBaselineForGeneratedProjection"
+	remediation.ChangeOwner = "globalBaseline"
+	remediation.SafeDirectRevert = false
+	remediation.SafeCommit = false
+	remediation.Message = "review the selected BOM/package baseline and bootstrap flow for this generated projection; direct sync commit/revert is not supported for generated projections"
+	remediation.NextSteps = []string{
+		"Review the selected BOM revision and package baseline that define this generated projection.",
+		"If the baseline is wrong, update the package content or BOM selection and rerender the desired state.",
+		"Re-run diff or status, then apply the refreshed bundle.",
+	}
+	remediation.AllowedCommands = []string{
+		"sync render",
+		"sync diff",
+		"sync status",
+		"sync apply",
+		"sync package build",
+		"sync package push",
+	}
+	remediation.CommandGuidance = []HostPathCommandGuidance{
+		{Command: "sync render", Availability: "unknown"},
+		{Command: "sync diff", Availability: "unknown"},
+		{Command: "sync status", Availability: "unknown"},
+		{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+		{Command: "sync package build", Availability: "unknown"},
+		{Command: "sync package push", Availability: "unknown"},
+	}
+	return &remediation
+}
+
+func generatedHostPathRemediationBase(tracked hydrate.TrackedHostPath, source string) HostPathRemediation {
+	repairable := isRepairableGeneratedHostPath(tracked)
+	remediation := HostPathRemediation{
+		Source:          source,
+		ProjectionClass: string(tracked.ProjectionClass),
+		Repairable:      &repairable,
+	}
+	if tracked.Generated != nil {
+		remediation.Generator = tracked.Generated.Tool
+		remediation.GeneratedKind = tracked.Generated.Kind
+		remediation.GeneratedName = tracked.Generated.Name
+	}
+	return remediation
+}
+
+func isRepairableGeneratedHostPath(tracked hydrate.TrackedHostPath) bool {
+	if tracked.ProjectionClass != hydrate.HostPathProjectionClassGenerated || tracked.Generated == nil {
+		return false
+	}
+	if tracked.Generated.Tool != "kubeadm" {
+		return false
+	}
+	switch strings.TrimSpace(tracked.HostPath) {
+	case "/etc/kubernetes/manifests/kube-apiserver.yaml",
+		"/etc/kubernetes/manifests/kube-controller-manager.yaml",
+		"/etc/kubernetes/manifests/kube-scheduler.yaml":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -244,18 +244,19 @@ func renderComponent(component ComponentPlan, sources SourceProvider, outputDir 
 	}
 
 	rendered := RenderedComponent{
-		Name:          component.Name,
-		PackageName:   component.PackageName,
-		Version:       component.Version,
-		Class:         component.Class,
-		Artifact:      component.Artifact,
-		Dependencies:  append([]string(nil), component.Dependencies...),
-		Inputs:        append([]packageformat.Input(nil), component.Inputs...),
-		InputBindings: cloneBindings(component.InputBindings),
-		LocalPatches:  make([]string, 0, len(component.LocalPatches)),
-		ManifestPath:  mustBundlePath(outputDir, manifestDst),
-		RootPath:      mustBundlePath(outputDir, componentFilesDir),
-		Steps:         make([]RenderedStep, 0, len(component.Steps)),
+		Name:             component.Name,
+		PackageName:      component.PackageName,
+		Version:          component.Version,
+		Class:            component.Class,
+		Artifact:         component.Artifact,
+		Dependencies:     append([]string(nil), component.Dependencies...),
+		Inputs:           append([]packageformat.Input(nil), component.Inputs...),
+		GeneratedOutputs: clonePackageGeneratedOutputs(component.GeneratedOutputs),
+		InputBindings:    cloneBindings(component.InputBindings),
+		LocalPatches:     make([]string, 0, len(component.LocalPatches)),
+		ManifestPath:     mustBundlePath(outputDir, manifestDst),
+		RootPath:         mustBundlePath(outputDir, componentFilesDir),
+		Steps:            make([]RenderedStep, 0, len(component.Steps)),
 	}
 
 	copied := make(map[string]string, len(component.Steps))
