@@ -7,9 +7,13 @@ SEALOS_HOME="${SEALOS_HOME:-${HOME}/.sealos}"
 
 CLUSTER_NAME="poc-minimal"
 ASSETS_WORKDIR="${SCRIPT_DIR}/artifacts"
+RUNTIME_ROOT=""
+LOCAL_REPO=""
 KUBECONFIG_PATH="/etc/kubernetes/admin.conf"
 SEALOS_BIN="${REPO_ROOT}/bin/linux_amd64/sealos"
 REGISTRY_PORT="5065"
+RELEASE_LINE="minimal-single-node"
+RELEASE_CHANNEL="alpha"
 SKIP_BUILD=0
 SKIP_APPLY=0
 SKIP_VALIDATE=0
@@ -18,6 +22,7 @@ PUBLISH_ENV_FILE=""
 REGISTRY_PID=""
 REGISTRY_PREFIX=""
 REGISTRY_LOG=""
+BUNDLE_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -28,7 +33,7 @@ Runs the minimal single-node PoC on a prepared Linux host:
   1. build sealos
   2. start a temporary local registry
   3. publish the three PoC package images to OCI
-  4. render the bundle from the generated OCI-backed BOM
+  4. render the bundle through the generated release metadata source
   5. apply the rendered bundle with sealos sync apply
   6. validate the cluster
 
@@ -40,8 +45,12 @@ This wrapper expects host prerequisites to already be in place:
 Options:
   --cluster NAME
   --assets-workdir DIR
+  --runtime-root DIR
+  --local-repo DIR
   --kubeconfig PATH
   --registry-port PORT
+  --release-line NAME
+  --channel alpha|beta|stable
   --sealos-bin PATH
   --skip-build
   --skip-apply
@@ -79,12 +88,28 @@ parse_args() {
         ASSETS_WORKDIR="${2:?missing value for --assets-workdir}"
         shift 2
         ;;
+      --runtime-root)
+        RUNTIME_ROOT="${2:?missing value for --runtime-root}"
+        shift 2
+        ;;
+      --local-repo)
+        LOCAL_REPO="${2:?missing value for --local-repo}"
+        shift 2
+        ;;
       --kubeconfig)
         KUBECONFIG_PATH="${2:?missing value for --kubeconfig}"
         shift 2
         ;;
       --registry-port)
         REGISTRY_PORT="${2:?missing value for --registry-port}"
+        shift 2
+        ;;
+      --release-line)
+        RELEASE_LINE="${2:?missing value for --release-line}"
+        shift 2
+        ;;
+      --channel)
+        RELEASE_CHANNEL="${2:?missing value for --channel}"
         shift 2
         ;;
       --sealos-bin)
@@ -227,39 +252,136 @@ publish_packages() {
   log "publishing OCI package images"
   SEALOS_BIN="${SEALOS_BIN}" "${SCRIPT_DIR}/publish-oci.sh" \
     --registry-prefix "${REGISTRY_PREFIX}" \
-    --workdir "${ASSETS_WORKDIR}/oci" > "${PUBLISH_ENV_FILE}"
+    --workdir "${ASSETS_WORKDIR}/oci" \
+    --release-line "${RELEASE_LINE}" \
+    --channel "${RELEASE_CHANNEL}" > "${PUBLISH_ENV_FILE}"
 }
 
-render_bundle() {
-  log "rendering desired-state bundle from OCI-backed BOM"
+target_args() {
+  printf '%s\n' \
+    "--release-source" "${release_source}" \
+    "--release-line" "${release_line}" \
+    "--channel" "${release_channel}"
+}
 
+runtime_root_args() {
+  if [[ -n "${RUNTIME_ROOT}" ]]; then
+    printf '%s\n' "--runtime-root" "${RUNTIME_ROOT}"
+  fi
+}
+
+resolve_local_repo() {
+  if [[ -n "${LOCAL_REPO}" ]]; then
+    return
+  fi
+  LOCAL_REPO="${ASSETS_WORKDIR}/local-repo"
+}
+
+init_local_repo() {
   set -a
   # shellcheck disable=SC1090
   . "${PUBLISH_ENV_FILE}"
   set +a
 
-  SEALOS_BIN="${SEALOS_BIN}" "${SCRIPT_DIR}/render.sh" \
+  resolve_local_repo
+  log "initializing local repo for release target"
+  local -a target=()
+  local -a runtime=()
+  mapfile -t target < <(target_args)
+  mapfile -t runtime < <(runtime_root_args)
+  "${SEALOS_BIN}" sync local-repo init \
+    "${runtime[@]}" \
     --cluster "${CLUSTER_NAME}" \
-    --package-mode oci \
-    --bom-file "${bom_path}" \
+    "${target[@]}" \
+    --output-dir "${LOCAL_REPO}" \
+    --overwrite >/dev/null
+}
+
+copy_input() {
+  local src="$1"
+  local dst="$2"
+  [[ -f "${src}" ]] || fail "required package default input not found: ${src}"
+  install -D -m 0644 "${src}" "${dst}"
+}
+
+fill_local_repo_inputs() {
+  log "filling local repo inputs from released package defaults"
+  copy_input \
+    "${SCRIPT_DIR}/packages/containerd/files/etc/containerd/config.toml" \
+    "${LOCAL_REPO}/inputs/containerd/containerd-config.toml"
+  copy_input \
+    "${SCRIPT_DIR}/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml" \
+    "${LOCAL_REPO}/inputs/kubernetes/kubeadm-cluster-config.yaml"
+  copy_input \
+    "${SCRIPT_DIR}/packages/cilium/files/values/basic.yaml" \
+    "${LOCAL_REPO}/inputs/cilium/cilium-values.yaml"
+}
+
+validate_sources() {
+  log "validating release target and local repo inputs"
+  local -a target=()
+  local -a runtime=()
+  mapfile -t target < <(target_args)
+  mapfile -t runtime < <(runtime_root_args)
+  "${SEALOS_BIN}" sync validate \
+    "${runtime[@]}" \
+    --cluster "${CLUSTER_NAME}" \
+    "${target[@]}" \
+    --local-repo "${LOCAL_REPO}" >/dev/null
+}
+
+render_bundle() {
+  log "rendering desired-state bundle from release metadata source"
+
+  local -a render_args=(
+    --cluster "${CLUSTER_NAME}" \
+    --package-mode release \
+    --release-source "${release_source}" \
+    --release-line "${release_line}" \
+    --channel "${release_channel}" \
     --sealos-bin "${SEALOS_BIN}"
+  )
+  if [[ -n "${RUNTIME_ROOT}" ]]; then
+    render_args+=(--runtime-root "${RUNTIME_ROOT}")
+  fi
+  render_args+=(--local-repo "${LOCAL_REPO}")
+
+  SEALOS_BIN="${SEALOS_BIN}" "${SCRIPT_DIR}/render.sh" "${render_args[@]}"
+
+  BUNDLE_DIR="$(bundle_dir)"
+}
+
+bundle_dir() {
+  if [[ -n "${RUNTIME_ROOT}" ]]; then
+    printf '%s\n' "${RUNTIME_ROOT}/${CLUSTER_NAME}/distribution/bundles/current"
+  else
+    printf '%s\n' "${SEALOS_HOME}/${CLUSTER_NAME}/distribution/bundles/current"
+  fi
 }
 
 apply_bundle() {
-  local bundle_dir="${SEALOS_HOME}/${CLUSTER_NAME}/distribution/bundles/current"
-
   log "applying rendered bundle with sealos sync apply"
-  "${SEALOS_BIN}" sync apply \
+  local -a args=(
+    sync
+    apply
     --cluster "${CLUSTER_NAME}" \
-    --bundle-dir "${bundle_dir}" \
+    --bundle-dir "${BUNDLE_DIR}" \
     --kubeconfig "${KUBECONFIG_PATH}"
+  )
+  if [[ -n "${RUNTIME_ROOT}" ]]; then
+    args+=(--runtime-root "${RUNTIME_ROOT}")
+  fi
+  "${SEALOS_BIN}" "${args[@]}"
 }
 
 validate_cluster() {
   log "validating rendered bundle"
-  "${SCRIPT_DIR}/validate.sh" \
+  local -a args=(
     --cluster "${CLUSTER_NAME}" \
+    --bundle-dir "${BUNDLE_DIR}" \
     --kubeconfig "${KUBECONFIG_PATH}"
+  )
+  "${SCRIPT_DIR}/validate.sh" "${args[@]}"
 }
 
 main() {
@@ -275,6 +397,9 @@ main() {
   resolve_sealos_bin
   start_registry
   publish_packages
+  init_local_repo
+  fill_local_repo_inputs
+  validate_sources
   render_bundle
   cleanup
   trap cleanup EXIT
@@ -292,7 +417,11 @@ main() {
   fi
 
   log "bootstrap completed for cluster ${CLUSTER_NAME}"
-  printf 'bundle dir: %s\n' "${SEALOS_HOME}/${CLUSTER_NAME}/distribution/bundles/current"
+  printf 'release source: %s\n' "${release_source}"
+  printf 'release line: %s\n' "${release_line}"
+  printf 'release channel: %s\n' "${release_channel}"
+  printf 'bom digest: %s\n' "${bom_digest}"
+  printf 'bundle dir: %s\n' "${BUNDLE_DIR}"
 }
 
 main "$@"

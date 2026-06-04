@@ -101,8 +101,23 @@ KUBECONFIG=/etc/kubernetes/admin.conf
 BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
 ```
 
-下面命令里使用 `--file "$TARGET_BOM"` 或
-`--release-channel "$TARGET_CHANNEL"` 二选一，不能同时传。
+如果集群要从 release metadata source 按 channel 解析目标：
+
+```bash
+CLUSTER=poc-minimal
+RELEASE_SOURCE=https://release.sealos.example
+RELEASE_LINE=default-platform
+RELEASE_CHANNEL=stable
+LOCAL_REPO=/var/lib/sealos/distribution/${CLUSTER}/local-repo
+KUBECONFIG=/etc/kubernetes/admin.conf
+BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
+```
+
+下面命令里必须只选择一种 target selector：
+
+- `--file "$TARGET_BOM"`
+- `--release-channel "$TARGET_CHANNEL"`
+- `--release-source "$RELEASE_SOURCE" --release-line "$RELEASE_LINE" --channel "$RELEASE_CHANNEL"`
 
 ## 用 explicit BOM 安装
 
@@ -183,7 +198,9 @@ sudo $SEALOS sync status \
 
 使用同一条流程，但在 `local-repo init`、`local-repo doctor`、`validate`
 和 `render` 里把 `--file "$TARGET_BOM"` 替换为
-`--release-channel "$TARGET_CHANNEL"`：
+`--release-channel "$TARGET_CHANNEL"`。如果使用 release service lookup，把 target
+flags 替换为
+`--release-source "$RELEASE_SOURCE" --release-line "$RELEASE_LINE" --channel "$RELEASE_CHANNEL"`：
 
 ```bash
 sudo $SEALOS sync render \
@@ -193,8 +210,19 @@ sudo $SEALOS sync render \
   --local-repo "$LOCAL_REPO"
 ```
 
-当前 resolver 只读取本地 `ReleaseChannel` 文件，还没有实现按 distribution line
-和 channel 做 registry/API-backed lookup。
+```bash
+sudo $SEALOS sync render \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+```
+
+release metadata source 必须在 `/v1/distributions/{line}/channels/{channel}`
+返回 `ReleaseChannel` 文档。解析出的 channel 必须指向带 `spec.bomDigest`
+的 BOM；Sealos 会在 render 前校验获取到的 BOM digest。
 
 ## 当前 PoC 快捷入口
 
@@ -202,17 +230,64 @@ sudo $SEALOS sync render \
 
 ```bash
 sudo scripts/poc/minimal-single-node/bootstrap.sh \
-  --cluster poc-minimal
+  --cluster poc-minimal \
+  --runtime-root /var/lib/sealos/runtime
 ```
 
 这个 wrapper 会：
 
 1. 构建 `sealos`
 2. 启动临时本地 registry
-3. 发布三个 PoC package 为 OCI package image
-4. 从生成的 OCI-backed BOM render
-5. 执行 `sealos sync apply`
-6. 执行 PoC validator
+3. 通过 release-build 自动化下载并把 runtime、Kubernetes、Cilium assets
+   staging 到临时 package root
+4. 发布三个 PoC package 为 OCI package image
+5. 写出 digest-pinned BOM，以及包含 `ReleaseChannel` 的本地 release metadata
+   source
+6. 通过
+   `--release-source <generated-release-source> --release-line minimal-single-node --channel alpha`
+   render
+7. 执行 `sealos sync apply`
+8. 执行 PoC validator
+
+这里的关键边界是：`stage-assets.sh` 只由 `publish-oci.sh` 调用，属于
+release build/publish 侧自动化。bootstrap 的消费路径只选择 release target，
+然后通过 `ReleaseChannel` lookup 消费生成的 digest-pinned BOM。
+
+如果只想做不修改 host 的仓库验证，覆盖 build、package publish、release metadata
+生成、channel lookup、render 和 applied-state target 记录：
+
+```bash
+make verify-day0-bootstrap-render DAY0_BOOTSTRAP_ARGS="--cluster poc-minimal-ci"
+```
+
+如果是在已经准备好的 fresh Linux host 上明确要修改主机：
+
+```bash
+sudo make verify-day0-bootstrap-apply \
+  I_UNDERSTAND_THIS_MUTATES_HOST=1 \
+  DAY0_BOOTSTRAP_ARGS="--cluster poc-minimal --runtime-root /var/lib/sealos/runtime"
+```
+
+受保护的 GitHub workflow
+`.github/workflows/day0_fresh_host_bootstrap.yml` 暴露同一套自动化。默认手动运行
+会在 GitHub-hosted Ubuntu 上执行安全的 publish/render gate。只有设置
+`mutating_apply: true` 时，才要求受保护的 `day0-fresh-host` environment 和带
+`sealos-day0` label 的 self-hosted Linux runner，然后执行会修改主机的
+bootstrap apply/validate 路径。
+
+安全的 multi-node Day 0 acceptance gate 可以这样运行：
+
+```bash
+make verify-day0-multinode-acceptance
+```
+
+这条 gate 会用三节点 inventory render PoC package set，在 `sync plan` 中检查
+`allNodes`、`firstMaster` 和 `cluster` target resolution，并通过 fake-remote
+reconcile 覆盖 kubeadm join config 生成、远端 first-master kubeconfig 拉取和
+multi-node execution targeting。它也保留 Cilium package 在 render set 里，让
+application/CNI package 成为 Day 0 acceptance 的一部分。GitHub workflow
+`.github/workflows/day0_multi_node_acceptance.yml` 会运行同一个不修改 host 的安全
+gate。
 
 这个入口适合仓库开发和验证，不是长期面向普通用户的安装入口。
 
@@ -253,9 +328,11 @@ Day 0 完成的标准是：
 
 ## 当前边界
 
-- 本地 `ReleaseChannel` resolver 仍是 file-backed。
-- 最小 PoC 仍偏 single-node prepared-host。
+- 会实际修改主机的 bootstrap wrapper 仍然偏 prepared-host；multi-node Day 0
+  现在有安全的 render/plan/reconcile acceptance gate 和 fake-remote apply 覆盖，
+  但默认还没有会修改多台 VM 的 workflow。
 - `stage-assets.sh` 存在，是因为本仓库不会直接提交大型 runtime/Kubernetes/Cilium
-  payload 作为 release artifacts。
+  payload 作为 source artifacts；bootstrap wrapper 现在只会通过 release
+  build/publish 自动化调用它。
 - 产品化安装应把 package assembly 移到 release build/publish 自动化里，让用户
   只需要选择 target 并执行 validate/render/apply。

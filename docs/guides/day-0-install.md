@@ -108,8 +108,24 @@ KUBECONFIG=/etc/kubernetes/admin.conf
 BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
 ```
 
-In the examples below, use either `--file "$TARGET_BOM"` or
-`--release-channel "$TARGET_CHANNEL"`. Do not pass both.
+Use a release metadata source when the cluster should resolve a channel from
+the release service:
+
+```bash
+CLUSTER=poc-minimal
+RELEASE_SOURCE=https://release.sealos.example
+RELEASE_LINE=default-platform
+RELEASE_CHANNEL=stable
+LOCAL_REPO=/var/lib/sealos/distribution/${CLUSTER}/local-repo
+KUBECONFIG=/etc/kubernetes/admin.conf
+BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
+```
+
+In the examples below, use exactly one target selector:
+
+- `--file "$TARGET_BOM"`
+- `--release-channel "$TARGET_CHANNEL"`
+- `--release-source "$RELEASE_SOURCE" --release-line "$RELEASE_LINE" --channel "$RELEASE_CHANNEL"`
 
 ## Install With An Explicit BOM
 
@@ -190,7 +206,9 @@ sudo $SEALOS sync status \
 
 Use the same flow, replacing `--file "$TARGET_BOM"` with
 `--release-channel "$TARGET_CHANNEL"` in `local-repo init`,
-`local-repo doctor`, `validate`, and `render`:
+`local-repo doctor`, `validate`, and `render`. For release-service lookup,
+replace the target flags with
+`--release-source "$RELEASE_SOURCE" --release-line "$RELEASE_LINE" --channel "$RELEASE_CHANNEL"`:
 
 ```bash
 sudo $SEALOS sync render \
@@ -200,8 +218,20 @@ sudo $SEALOS sync render \
   --local-repo "$LOCAL_REPO"
 ```
 
-The current resolver only reads a local `ReleaseChannel` file. It does not yet
-perform registry/API-backed lookup by distribution line and channel.
+```bash
+sudo $SEALOS sync render \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+```
+
+The release metadata source must return a `ReleaseChannel` document for
+`/v1/distributions/{line}/channels/{channel}`. The resolved channel must point
+at a BOM with `spec.bomDigest`, and Sealos verifies the fetched BOM digest
+before render.
 
 ## Current PoC Shortcut
 
@@ -209,17 +239,66 @@ For the repository's minimal single-node PoC, the convenience wrapper is:
 
 ```bash
 sudo scripts/poc/minimal-single-node/bootstrap.sh \
-  --cluster poc-minimal
+  --cluster poc-minimal \
+  --runtime-root /var/lib/sealos/runtime
 ```
 
 That wrapper:
 
 1. builds `sealos`
 2. starts a temporary local registry
-3. publishes the three PoC packages as OCI package images
-4. renders from the generated OCI-backed BOM
-5. runs `sealos sync apply`
-6. runs the PoC validator
+3. uses release-build automation to fetch and stage runtime, Kubernetes, and
+   Cilium assets into temporary package roots
+4. publishes the three PoC packages as OCI package images
+5. writes a digest-pinned BOM plus a local release metadata source containing a
+   `ReleaseChannel`
+6. renders through
+   `--release-source <generated-release-source> --release-line minimal-single-node --channel alpha`
+7. runs `sealos sync apply`
+8. runs the PoC validator
+
+The important boundary is that `stage-assets.sh` is called only by
+`publish-oci.sh`, which is release build/publish side automation. The bootstrap
+consumer path selects a release target and consumes the generated digest-pinned
+BOM through `ReleaseChannel` lookup.
+
+For a non-mutating repository check that exercises build, package publish,
+release metadata generation, channel lookup, render, and applied-state target
+recording:
+
+```bash
+make verify-day0-bootstrap-render DAY0_BOOTSTRAP_ARGS="--cluster poc-minimal-ci"
+```
+
+For a prepared fresh Linux host where host mutation is intentional:
+
+```bash
+sudo make verify-day0-bootstrap-apply \
+  I_UNDERSTAND_THIS_MUTATES_HOST=1 \
+  DAY0_BOOTSTRAP_ARGS="--cluster poc-minimal --runtime-root /var/lib/sealos/runtime"
+```
+
+The protected GitHub workflow
+`.github/workflows/day0_fresh_host_bootstrap.yml` exposes the same automation.
+Its default manual run performs the safe publish/render gate on GitHub-hosted
+Ubuntu. Setting `mutating_apply: true` requires the protected
+`day0-fresh-host` environment and a self-hosted Linux runner labeled
+`sealos-day0`, then runs the mutating bootstrap apply/validate path.
+
+For the safe multi-node Day 0 acceptance gate:
+
+```bash
+make verify-day0-multinode-acceptance
+```
+
+That gate renders the PoC package set against a three-node inventory, checks
+`allNodes`, `firstMaster`, and `cluster` target resolution in `sync plan`, and
+runs fake-remote reconcile coverage for kubeadm join config generation, remote
+first-master kubeconfig fetches, and multi-node execution targeting. It also
+keeps Cilium in the rendered package set so the application/CNI package remains
+part of Day 0 acceptance. The GitHub workflow
+`.github/workflows/day0_multi_node_acceptance.yml` runs the same safe gate
+without mutating hosts.
 
 This shortcut is useful for repository development and validation. It is not the
 intended long-term user-facing install interface.
@@ -263,9 +342,11 @@ Day 0 is complete when:
 
 ## Current Boundaries
 
-- The local `ReleaseChannel` resolver is file-backed only.
-- The minimal PoC is single-node and prepared-host oriented.
+- The mutating bootstrap wrapper is still prepared-host oriented; multi-node
+  Day 0 has a safe render/plan/reconcile acceptance gate and fake-remote apply
+  coverage, not a default mutating multi-node VM workflow.
 - `stage-assets.sh` exists because this repository does not commit large
-  runtime/Kubernetes/Cilium payloads as release artifacts.
+  runtime/Kubernetes/Cilium payloads as source artifacts; the bootstrap wrapper
+  now invokes it only through release build/publish automation.
 - A productized install should move package assembly to release build/publish
   automation so users only select a target and run validate/render/apply.

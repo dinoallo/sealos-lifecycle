@@ -58,6 +58,15 @@ Options:
                    The smoke script writes acceptance-report.yaml under its workdir
                    unless --report-file is passed here.
 
+  DAY0_BOOTSTRAP_ARGS
+                   Extra arguments passed to scripts/poc/minimal-single-node/bootstrap.sh.
+                   The bootstrap script publishes OCI packages, renders through
+                   generated release metadata, then optionally applies and validates.
+
+  DAY0_MULTINODE_ARGS
+                   Extra arguments passed to scripts/poc/multi-node-day0/acceptance.sh.
+                   The acceptance script is safe and does not mutate hosts.
+
   I_UNDERSTAND_THIS_MUTATES_HOST
                    Must be set to 1 for verify-sync-package-apply and
                    verify-sync-package-revert.
@@ -161,6 +170,26 @@ verify-sync-package-revert:
 		exit 1; \
 	fi; \
 	scripts/poc/minimal-single-node/smoke.sh --apply --revert-check $(SYNC_PACKAGE_SMOKE_ARGS)
+
+## verify-day0-bootstrap-render: Build, publish OCI packages, and render through generated release metadata without host mutation.
+.PHONY: verify-day0-bootstrap-render
+verify-day0-bootstrap-render:
+	@scripts/poc/minimal-single-node/bootstrap.sh --skip-apply $(DAY0_BOOTSTRAP_ARGS)
+
+## verify-day0-bootstrap-apply: Run the mutating fresh-host bootstrap apply and validation path.
+.PHONY: verify-day0-bootstrap-apply
+verify-day0-bootstrap-apply:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target mutates the host" >&2; \
+		exit 1; \
+	fi; \
+	scripts/poc/minimal-single-node/bootstrap.sh $(DAY0_BOOTSTRAP_ARGS)
+
+## verify-day0-multinode-acceptance: Run the safe multi-node Day 0 acceptance gate.
+.PHONY: verify-day0-multinode-acceptance
+verify-day0-multinode-acceptance:
+	@scripts/poc/multi-node-day0/acceptance.sh $(DAY0_MULTINODE_ARGS)
 
 ## build-distribution-controller-image: Build the sealos-agent controller image for testing or release preparation.
 .PHONY: build-distribution-controller-image
