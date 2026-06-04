@@ -77,8 +77,8 @@ links each kind to its detailed page.
 | [`PackageAcceptanceReport`](./kinds/package-acceptance-report.md) | Evidence document | Package test automation | smoke or acceptance artifact | Implemented file schema |
 | [`DistributionTarget`](./kinds/distribution-target.md) | Kubernetes CRD | Cluster operator | Kubernetes API, namespaced | Implemented CRD |
 | [`DistributionRolloutPolicy`](./kinds/distribution-rollout-policy.md) | Kubernetes CRD | Cluster operator | Kubernetes API, namespaced | Implemented CRD |
-| [`LocalRepo`](./kinds/local-repo.md) | Local source document | Cluster owner | local repo metadata | Illustrative, not implemented |
-| [`LocalRepoRevision`](./kinds/local-repo-revision.md) | Local source document | Cluster owner | local repo revision metadata | Illustrative, not implemented |
+| [`LocalRepo`](./kinds/local-repo.md) | Local source document | Cluster owner | local repo `repo.yaml` | Implemented file schema |
+| [`LocalRepoRevision`](./kinds/local-repo-revision.md) | Local source evidence document | Cluster owner | local repo `revisions/current.yaml` | Implemented file schema |
 
 ## Source Document Kinds
 
@@ -462,5 +462,5 @@ Rules:
    `DistributionHealthProof`, `PackageAcceptanceReport`.
 4. Keep the implemented Kubernetes CRDs focused on runtime reconciliation:
    `DistributionTarget` and `DistributionRolloutPolicy`.
-5. Treat `LocalRepo`, `LocalRepoRevision`, and `AppliedInventory` as future
-   schema work until implementation depends on them.
+5. Treat `AppliedInventory` as future schema work until implementation depends
+   on it.
