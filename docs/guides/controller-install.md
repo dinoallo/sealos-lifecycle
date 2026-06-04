@@ -1,7 +1,7 @@
 # Sealos Distribution Controller Install Guide
 
 This guide shows how to install the current `DistributionTarget` controller
-manifests and start a minimal controller-driven reconcile loop.
+manifests and start a controller-driven reconcile loop.
 
 ## What This Installs
 
@@ -16,10 +16,12 @@ install:
 - a `sealos-agent --controller` deployment
 
 The controller watches `DistributionTarget` objects in `sealos-system`, maps
-each target to one existing agent reconcile pass, and writes `Ready` and
-`Degraded` status conditions. A target can reference a same-namespace
-`DistributionRolloutPolicy` through `spec.rolloutPolicyRef`; policy updates
-enqueue the referencing targets for another reconcile pass.
+each target to one existing agent reconcile pass, and writes an explicit status
+state machine: `status.phase`, `Ready` and `Degraded` conditions, retry count,
+next retry time, hold reason, last diagnostic, and Kubernetes events. A target
+can reference a same-namespace `DistributionRolloutPolicy` through
+`spec.rolloutPolicyRef`; policy updates enqueue the referencing targets for
+another reconcile pass.
 
 The service account RBAC is scoped to the watched API, status updates, leader
 election leases, and events. Rendered bundle apply still uses the kubeconfig
@@ -212,9 +214,19 @@ channel selection file:
 kubectl apply -f deploy/distribution-controller/examples/distribution-target-channel.yaml
 ```
 
-The controller requires exactly one of `spec.bomPath` or
-`spec.releaseChannelPath`. Both paths must be readable inside the
-controller pod. The sample `DistributionRolloutPolicy` sets
+Use a release metadata source target when the cluster should follow a channel
+resolved by distribution line and channel:
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-target-lookup.yaml
+```
+
+The controller requires exactly one target selector: `spec.bomPath`,
+`spec.releaseChannelPath`, or the triple `spec.releaseSource`,
+`spec.releaseLine`, and `spec.channel`. Local paths must be readable inside the
+controller pod. HTTP(S) release sources are resolved through
+`/v1/distributions/{line}/channels/{channel}` and must return a
+digest-pinned `ReleaseChannel` target. The sample `DistributionRolloutPolicy` sets
 `spec.strategy.batchSize: 1`, `spec.strategy.canary.batchSize: 1`,
 `spec.strategy.pause.afterCanary: true`, `spec.strategy.healthGate: true`, and
 `spec.strategy.failureAction: Rollback`. That rolls eligible host-targeted
@@ -236,19 +248,28 @@ kubectl -n sealos-system describe distributiontarget default-platform
 kubectl -n sealos-system logs deploy/sealos-distribution-controller -c sealos-agent
 ```
 
-On success, the target reports `Ready=True`, `Degraded=False`, the resolved BOM
-revision, the desired state digest, and the applied revision path.
+On success, the target reports `phase=Succeeded`, `Ready=True`,
+`Degraded=False`, the resolved BOM revision, the desired state digest, and the
+applied revision path. Failed targets report `phase=Retrying` when
+`spec.retryBackoff` schedules another reconcile, `phase=PartiallyFailed` when
+the agent returned a result plus an error, `phase=Paused` for post-canary
+operator holds, or `phase=RollbackHold` after rollback to the last successful
+revision. `kubectl describe distributiontarget ...` also shows the emitted
+events for the latest transition.
 
 ## Current Boundaries
 
-This is a minimal controller install path. `DistributionRolloutPolicy` currently
-persists host rollout batch size, a first-batch canary size, an optional
-post-canary pause, an optional per-batch health gate, and a stop-or-rollback
-failure action used by the rendered-bundle executor. These settings only apply
-to eligible all-node runtime-rootfs host batches. The pause gate and rollback
-result are operator action holds, not per-host rollout cursors; continuing
-re-enters the eligible apply path with an updated target or policy. It does not
-add registry-backed `ReleaseChannel` lookup, controller-driven promotion
-automation, or a package-level safety model for every multi-node workflow.
+The controller has a durable reconcile state machine for each target, but the
+rollout execution unit is still the rendered bundle. `DistributionRolloutPolicy`
+currently persists host rollout batch size, a first-batch canary size, an
+optional post-canary pause, an optional per-batch health gate, and a
+stop-or-rollback failure action used by the rendered-bundle executor. These
+settings only apply to eligible host batches, while `sync plan` reports package
+and phase safety profiles for rootfs, host-file, manifest, chart, patch,
+values, package hook phases, local patch approval, and generated host
+projections. The pause gate and rollback result are operator action holds, not
+per-host rollout cursors; continuing re-enters the eligible apply path with an
+updated target or policy. It does not add controller-driven promotion
+automation or durable per-package rollout cursors.
 Local channel files can be advanced separately with `sealos sync promote`; the
 controller still delegates to the existing BOM-driven render/apply agent path.

@@ -32,6 +32,9 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -68,6 +71,19 @@ spec:
                 releaseChannelPath:
                   type: string
                   description: Local path to a ReleaseChannel document visible inside the controller pod.
+                releaseSource:
+                  type: string
+                  description: Release metadata source URL or directory used with releaseLine and channel.
+                releaseLine:
+                  type: string
+                  description: Distribution line resolved from releaseSource.
+                channel:
+                  type: string
+                  enum:
+                    - alpha
+                    - beta
+                    - stable
+                  description: Release channel resolved from releaseSource.
                 localRepoPath:
                   type: string
                   description: Local cluster repo used for render-time input bindings and local patches.
@@ -115,23 +131,59 @@ spec:
                   type: string
                   format: duration
                   description: Optional successful reconcile interval.
+                retryBackoff:
+                  type: string
+                  format: duration
+                  description: Optional failed reconcile retry interval; unset returns terminal errors to controller-runtime.
               oneOf:
                 - required:
                     - bomPath
                   not:
-                    required:
-                      - releaseChannelPath
+                    anyOf:
+                      - required:
+                          - releaseChannelPath
+                      - required:
+                          - releaseSource
+                      - required:
+                          - releaseLine
+                      - required:
+                          - channel
                 - required:
                     - releaseChannelPath
                   not:
-                    required:
-                      - bomPath
+                    anyOf:
+                      - required:
+                          - bomPath
+                      - required:
+                          - releaseSource
+                      - required:
+                          - releaseLine
+                      - required:
+                          - channel
+                - required:
+                    - releaseSource
+                    - releaseLine
+                    - channel
+                  not:
+                    anyOf:
+                      - required:
+                          - bomPath
+                      - required:
+                          - releaseChannelPath
             status:
               type: object
               properties:
                 observedGeneration:
                   type: integer
                   format: int64
+                phase:
+                  type: string
+                  enum:
+                    - Succeeded
+                    - Retrying
+                    - PartiallyFailed
+                    - Paused
+                    - RollbackHold
                 lastReconcileTime:
                   type: string
                   format: date-time
@@ -152,6 +204,26 @@ spec:
                       type: string
                     appliedRevisionPath:
                       type: string
+                retryCount:
+                  type: integer
+                  format: int64
+                nextRetryTime:
+                  type: string
+                  format: date-time
+                holdReason:
+                  type: string
+                lastDiagnostic:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    time:
+                      type: string
+                      format: date-time
                 conditions:
                   type: array
                   x-kubernetes-list-type: map

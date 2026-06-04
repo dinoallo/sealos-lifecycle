@@ -46,6 +46,7 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 		filepath.Join("examples", "distribution-rollout-policy.yaml"),
 		filepath.Join("examples", "distribution-target-bom.yaml"),
 		filepath.Join("examples", "distribution-target-channel.yaml"),
+		filepath.Join("examples", "distribution-target-lookup.yaml"),
 	)
 
 	want := []schema.GroupVersionKind{
@@ -57,6 +58,7 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
 		{Group: "apps", Version: "v1", Kind: "Deployment"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionRolloutPolicy"},
+		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 	}
@@ -118,6 +120,9 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 		"clusterName",
 		"bomPath",
 		"releaseChannelPath",
+		"releaseSource",
+		"releaseLine",
+		"channel",
 		"localRepoPath",
 		"localPatchRevision",
 		"packageSources",
@@ -127,19 +132,25 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 		"rolloutPolicyRef",
 		"rolloutBatchSize",
 		"requeueAfter",
+		"retryBackoff",
 	} {
 		if _, ok := spec.Properties[field]; !ok {
 			t.Fatalf("CRD spec schema missing field %q", field)
 		}
 	}
-	if len(spec.OneOf) != 2 {
-		t.Fatalf("CRD spec oneOf target validation count = %d, want 2", len(spec.OneOf))
+	if len(spec.OneOf) != 3 {
+		t.Fatalf("CRD spec oneOf target validation count = %d, want 3", len(spec.OneOf))
 	}
 	status := version.Schema.OpenAPIV3Schema.Properties["status"]
 	for _, field := range []string{
 		"observedGeneration",
+		"phase",
 		"lastReconcileTime",
 		"lastResult",
+		"retryCount",
+		"nextRetryTime",
+		"holdReason",
+		"lastDiagnostic",
 		"conditions",
 	} {
 		if _, ok := status.Properties[field]; !ok {

@@ -36,8 +36,11 @@ CRD consumed by the controller.
 | Field | Required | Description |
 | --- | --- | --- |
 | `clusterName` | No | Logical cluster name. |
-| `bomPath` | One of `bomPath` or `releaseChannelPath` | Direct path to a BOM. |
-| `releaseChannelPath` | One of `bomPath` or `releaseChannelPath` | Path to a release channel document. |
+| `bomPath` | One of the supported target selectors | Direct path to a BOM. |
+| `releaseChannelPath` | One of the supported target selectors | Path to a release channel document. |
+| `releaseSource` | With `releaseLine` and `channel` | Release metadata source URL or directory. |
+| `releaseLine` | With `releaseSource` and `channel` | Distribution line resolved from the release metadata source. |
+| `channel` | With `releaseSource` and `releaseLine` | Release channel name. |
 | `localRepoPath` | No | Local repository path for local source or artifact use. |
 | `localPatchRevision` | No | Local patch revision to apply. |
 | `packageSources` | No | Explicit package source paths and digests by component. |
@@ -46,13 +49,15 @@ CRD consumed by the controller.
 | `hostRoot` | No | Host root used by reconciliation. |
 | `rolloutPolicyRef` | No | Reference to a `DistributionRolloutPolicy`. |
 | `rolloutBatchSize` | No | Inline batch size override. |
-| `requeueAfter` | No | Controller requeue interval. |
+| `requeueAfter` | No | Successful reconcile requeue interval. |
+| `retryBackoff` | No | Failed reconcile backoff before retry. |
 
 ## Status Contract
 
 Status records:
 
 - `observedGeneration`
+- `phase`
 - `lastReconcileTime`
 - `lastResult.clusterName`
 - `lastResult.bomName`
@@ -61,12 +66,26 @@ Status records:
 - `lastResult.bundlePath`
 - `lastResult.desiredStateDigest`
 - `lastResult.appliedRevisionPath`
+- `retryCount`
+- `nextRetryTime`
+- `holdReason`
+- `lastDiagnostic`
 - `conditions`
+
+`phase` is one of:
+
+- `Succeeded`
+- `Retrying`
+- `PartiallyFailed`
+- `Paused`
+- `RollbackHold`
 
 ## Validation Rules
 
-- Exactly one of `bomPath` or `releaseChannelPath` must be set.
+- Exactly one target selector must be set: `bomPath`, `releaseChannelPath`, or
+  `releaseSource` with `releaseLine` and `channel`.
 - Paths must be meaningful to the controller runtime.
+- `requeueAfter` and `retryBackoff` must not be negative.
 - Secret values must not be embedded in the spec.
 - Status is controller-owned.
 
@@ -103,6 +122,7 @@ spec:
   rolloutPolicyRef:
     name: default-rollout
   requeueAfter: 5m
+  retryBackoff: 30s
 ```
 
 ## Related Kinds

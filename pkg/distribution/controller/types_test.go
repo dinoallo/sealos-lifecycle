@@ -77,6 +77,30 @@ func TestDistributionTargetSpecAgentOptions(t *testing.T) {
 	}
 }
 
+func TestDistributionTargetSpecAgentOptionsWithReleaseLookup(t *testing.T) {
+	t.Parallel()
+
+	spec := DistributionTargetSpec{
+		ReleaseSource: "https://release.sealos.example",
+		ReleaseLine:   "default-platform",
+		Channel:       "stable",
+	}
+
+	opts, err := spec.AgentOptions(Defaults{})
+	if err != nil {
+		t.Fatalf("AgentOptions() error = %v", err)
+	}
+	if got, want := opts.Target.ReleaseSource, "https://release.sealos.example"; got != want {
+		t.Fatalf("ReleaseSource = %q, want %q", got, want)
+	}
+	if got, want := opts.Target.ReleaseLine, "default-platform"; got != want {
+		t.Fatalf("ReleaseLine = %q, want %q", got, want)
+	}
+	if got, want := opts.Target.Channel, "stable"; got != want {
+		t.Fatalf("Channel = %q, want %q", got, want)
+	}
+}
+
 func TestDistributionTargetSpecValidateRejectsAmbiguousTarget(t *testing.T) {
 	t.Parallel()
 
@@ -86,6 +110,18 @@ func TestDistributionTargetSpecValidateRejectsAmbiguousTarget(t *testing.T) {
 	}).Validate()
 	if err == nil {
 		t.Fatal("Validate() error = nil, want ambiguous target error")
+	}
+}
+
+func TestDistributionTargetSpecValidateRejectsPartialReleaseLookup(t *testing.T) {
+	t.Parallel()
+
+	err := (DistributionTargetSpec{
+		ReleaseSource: "https://release.sealos.example",
+		ReleaseLine:   "default-platform",
+	}).Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want partial release lookup error")
 	}
 }
 
@@ -113,6 +149,18 @@ func TestDistributionTargetSpecValidateRejectsEmptyRolloutPolicyRef(t *testing.T
 	}).Validate()
 	if err == nil {
 		t.Fatal("Validate() error = nil, want empty rollout policy ref error")
+	}
+}
+
+func TestDistributionTargetSpecValidateRejectsNegativeRetryBackoff(t *testing.T) {
+	t.Parallel()
+
+	err := (DistributionTargetSpec{
+		BOMPath:      "bom.yaml",
+		RetryBackoff: &metav1.Duration{Duration: -1},
+	}).Validate()
+	if err == nil {
+		t.Fatal("Validate() error = nil, want negative retry backoff error")
 	}
 }
 

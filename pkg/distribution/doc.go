@@ -28,6 +28,8 @@ const (
 	KindComponentPackage        = "ComponentPackage"
 	KindDistributionHealthProof = "DistributionHealthProof"
 	KindHydratedBundle          = "HydratedBundle"
+	KindLocalRepo               = "LocalRepo"
+	KindLocalRepoRevision       = "LocalRepoRevision"
 	KindPackageAcceptanceReport = "PackageAcceptanceReport"
 	KindReleaseChannel          = "ReleaseChannel"
 )

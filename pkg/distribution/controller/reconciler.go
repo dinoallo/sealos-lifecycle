@@ -19,9 +19,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -45,10 +47,15 @@ type Runner interface {
 	Run(context.Context, agent.Options) (*agent.Result, error)
 }
 
+type EventRecorder interface {
+	Event(object runtime.Object, eventtype, reason, message string)
+}
+
 type Reconciler struct {
-	Client   client.Client
-	Runner   Runner
-	Defaults Defaults
+	Client        client.Client
+	Runner        Runner
+	EventRecorder EventRecorder
+	Defaults      Defaults
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -67,100 +74,53 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	result, err := r.reconcileTarget(ctx, &target)
 	target.Status.ObservedGeneration = target.Generation
 	now := metav1.Now()
 	target.Status.LastReconcileTime = &now
+	result, err := r.reconcileTarget(ctx, &target)
 	target.Status.LastResult = resultFromAgent(result)
 	if err != nil {
 		if reconcile.IsRolloutPaused(err) {
-			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-				Type:               DistributionTargetConditionReady,
-				Status:             metav1.ConditionFalse,
-				ObservedGeneration: target.Generation,
-				LastTransitionTime: now,
-				Reason:             DistributionTargetReasonRolloutPaused,
-				Message:            err.Error(),
-			})
-			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-				Type:               DistributionTargetConditionDegraded,
-				Status:             metav1.ConditionFalse,
-				ObservedGeneration: target.Generation,
-				LastTransitionTime: now,
-				Reason:             DistributionTargetReasonRolloutPaused,
-				Message:            err.Error(),
-			})
+			r.markPaused(&target, now, err)
 			updateErr := r.Client.Status().Update(ctx, &target)
 			if updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
+			r.recordEvent(&target, "Normal", DistributionTargetReasonRolloutPaused, err.Error())
 			return ctrl.Result{}, nil
 		}
 		if reconcile.IsRolloutRolledBack(err) {
-			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-				Type:               DistributionTargetConditionReady,
-				Status:             metav1.ConditionFalse,
-				ObservedGeneration: target.Generation,
-				LastTransitionTime: now,
-				Reason:             DistributionTargetReasonRolloutRolledBack,
-				Message:            err.Error(),
-			})
-			target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-				Type:               DistributionTargetConditionDegraded,
-				Status:             metav1.ConditionFalse,
-				ObservedGeneration: target.Generation,
-				LastTransitionTime: now,
-				Reason:             DistributionTargetReasonRolloutRolledBack,
-				Message:            err.Error(),
-			})
+			r.markRollbackHold(&target, now, err)
 			updateErr := r.Client.Status().Update(ctx, &target)
 			if updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
+			r.recordEvent(&target, "Warning", DistributionTargetReasonRolloutRolledBack, err.Error())
 			return ctrl.Result{}, nil
 		}
-		target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-			Type:               DistributionTargetConditionReady,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: target.Generation,
-			LastTransitionTime: now,
-			Reason:             DistributionTargetReasonReconcileFailed,
-			Message:            err.Error(),
-		})
-		target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-			Type:               DistributionTargetConditionDegraded,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: target.Generation,
-			LastTransitionTime: now,
-			Reason:             DistributionTargetReasonReconcileFailed,
-			Message:            err.Error(),
-		})
+		requeue := retryBackoff(&target)
+		partial := result != nil
+		r.markFailed(&target, now, err, partial, requeue)
 		updateErr := r.Client.Status().Update(ctx, &target)
 		if updateErr != nil {
 			return ctrl.Result{}, updateErr
 		}
+		if partial {
+			r.recordEvent(&target, "Warning", DistributionTargetReasonReconcilePartial, err.Error())
+		} else {
+			r.recordEvent(&target, "Warning", DistributionTargetReasonReconcileFailed, err.Error())
+		}
+		if requeue > 0 {
+			return ctrl.Result{RequeueAfter: requeue}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
-	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-		Type:               DistributionTargetConditionReady,
-		Status:             metav1.ConditionTrue,
-		ObservedGeneration: target.Generation,
-		LastTransitionTime: now,
-		Reason:             DistributionTargetReasonReconcileSucceeded,
-		Message:            "distribution target reconciled",
-	})
-	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
-		Type:               DistributionTargetConditionDegraded,
-		Status:             metav1.ConditionFalse,
-		ObservedGeneration: target.Generation,
-		LastTransitionTime: now,
-		Reason:             DistributionTargetReasonReconcileSucceeded,
-		Message:            "distribution target reconciled",
-	})
+	r.markSucceeded(&target, now)
 	if err := r.Client.Status().Update(ctx, &target); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.recordEvent(&target, "Normal", DistributionTargetReasonReconcileSucceeded, "distribution target reconciled")
 	return ctrl.Result{RequeueAfter: requeueDuration(&target)}, nil
 }
 
@@ -203,6 +163,9 @@ func (r *Reconciler) rolloutStrategyForTarget(ctx context.Context, target *Distr
 
 func (r *Reconciler) SetupWithManager(mgr manager.Manager) error {
 	r.Client = mgr.GetClient()
+	if r.EventRecorder == nil {
+		r.EventRecorder = mgr.GetEventRecorderFor("sealos-distribution-controller")
+	}
 	return builder.ControllerManagedBy(mgr).
 		For(&DistributionTarget{}).
 		Watches(&DistributionRolloutPolicy{}, handler.EnqueueRequestsFromMapFunc(r.targetsForRolloutPolicy)).
@@ -246,6 +209,144 @@ func setCondition(conditions []metav1.Condition, condition metav1.Condition) []m
 	}
 	conditions[existing] = condition
 	return conditions
+}
+
+func (r *Reconciler) markSucceeded(target *DistributionTarget, now metav1.Time) {
+	target.Status.Phase = DistributionTargetPhaseSucceeded
+	target.Status.RetryCount = 0
+	target.Status.NextRetryTime = nil
+	target.Status.HoldReason = ""
+	target.Status.LastDiagnostic = &DistributionTargetDiagnostic{
+		Type:    "Normal",
+		Reason:  DistributionTargetReasonReconcileSucceeded,
+		Message: "distribution target reconciled",
+		Time:    &now,
+	}
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionReady,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             DistributionTargetReasonReconcileSucceeded,
+		Message:            "distribution target reconciled",
+	})
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionDegraded,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             DistributionTargetReasonReconcileSucceeded,
+		Message:            "distribution target reconciled",
+	})
+}
+
+func (r *Reconciler) markFailed(target *DistributionTarget, now metav1.Time, err error, partial bool, requeue time.Duration) {
+	reason := DistributionTargetReasonReconcileFailed
+	target.Status.Phase = DistributionTargetPhaseRetrying
+	if partial {
+		reason = DistributionTargetReasonReconcilePartial
+		target.Status.Phase = DistributionTargetPhasePartiallyFailed
+	}
+	target.Status.RetryCount++
+	if requeue > 0 {
+		next := metav1.NewTime(now.Add(requeue))
+		target.Status.NextRetryTime = &next
+	} else {
+		target.Status.NextRetryTime = nil
+	}
+	target.Status.HoldReason = ""
+	target.Status.LastDiagnostic = &DistributionTargetDiagnostic{
+		Type:    "Warning",
+		Reason:  reason,
+		Message: err.Error(),
+		Time:    &now,
+	}
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             reason,
+		Message:            err.Error(),
+	})
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionDegraded,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             reason,
+		Message:            err.Error(),
+	})
+}
+
+func (r *Reconciler) markPaused(target *DistributionTarget, now metav1.Time, err error) {
+	target.Status.Phase = DistributionTargetPhasePaused
+	target.Status.NextRetryTime = nil
+	target.Status.HoldReason = DistributionTargetReasonRolloutPaused
+	target.Status.LastDiagnostic = &DistributionTargetDiagnostic{
+		Type:    "Normal",
+		Reason:  DistributionTargetReasonRolloutPaused,
+		Message: err.Error(),
+		Time:    &now,
+	}
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             DistributionTargetReasonRolloutPaused,
+		Message:            err.Error(),
+	})
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionDegraded,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             DistributionTargetReasonRolloutPaused,
+		Message:            err.Error(),
+	})
+}
+
+func (r *Reconciler) markRollbackHold(target *DistributionTarget, now metav1.Time, err error) {
+	target.Status.Phase = DistributionTargetPhaseRollbackHold
+	target.Status.NextRetryTime = nil
+	target.Status.HoldReason = DistributionTargetReasonRolloutRolledBack
+	target.Status.LastDiagnostic = &DistributionTargetDiagnostic{
+		Type:    "Warning",
+		Reason:  DistributionTargetReasonRolloutRolledBack,
+		Message: err.Error(),
+		Time:    &now,
+	}
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             DistributionTargetReasonRolloutRolledBack,
+		Message:            err.Error(),
+	})
+	target.Status.Conditions = setCondition(target.Status.Conditions, metav1.Condition{
+		Type:               DistributionTargetConditionDegraded,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: target.Generation,
+		LastTransitionTime: now,
+		Reason:             DistributionTargetReasonRolloutRolledBack,
+		Message:            err.Error(),
+	})
+}
+
+func (r *Reconciler) recordEvent(target *DistributionTarget, eventType, reason, message string) {
+	if r.EventRecorder == nil {
+		return
+	}
+	r.EventRecorder.Event(target, eventType, reason, message)
+}
+
+func retryBackoff(target *DistributionTarget) time.Duration {
+	if target == nil || target.Spec.RetryBackoff == nil {
+		return 0
+	}
+	return target.Spec.RetryBackoff.Duration
 }
 
 var _ ctrl.Reconciler = (*Reconciler)(nil)

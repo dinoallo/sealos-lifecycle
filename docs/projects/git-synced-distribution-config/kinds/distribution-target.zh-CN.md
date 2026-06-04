@@ -31,8 +31,11 @@ Cluster operator 创建或更新该 CRD。Distribution controller 负责 reconci
 | 字段 | 必需 | 说明 |
 | --- | --- | --- |
 | `clusterName` | 否 | 逻辑集群名称。 |
-| `bomPath` | `bomPath` 或 `releaseChannelPath` 二选一 | 直接指向 BOM 的路径。 |
-| `releaseChannelPath` | `bomPath` 或 `releaseChannelPath` 二选一 | 指向 release channel 文档的路径。 |
+| `bomPath` | 支持的 target selector 三选一 | 直接指向 BOM 的路径。 |
+| `releaseChannelPath` | 支持的 target selector 三选一 | 指向 release channel 文档的路径。 |
+| `releaseSource` | 与 `releaseLine` 和 `channel` 一起设置 | Release metadata source URL 或目录。 |
+| `releaseLine` | 与 `releaseSource` 和 `channel` 一起设置 | 从 release metadata source 解析的 distribution line。 |
+| `channel` | 与 `releaseSource` 和 `releaseLine` 一起设置 | Release channel 名称。 |
 | `localRepoPath` | 否 | 本地 source 或 artifact 使用的 local repository path。 |
 | `localPatchRevision` | 否 | 要应用的 local patch revision。 |
 | `packageSources` | 否 | 按 component 显式声明的 package source paths 和 digests。 |
@@ -41,13 +44,15 @@ Cluster operator 创建或更新该 CRD。Distribution controller 负责 reconci
 | `hostRoot` | 否 | Reconciliation 使用的 host root。 |
 | `rolloutPolicyRef` | 否 | 指向 `DistributionRolloutPolicy` 的引用。 |
 | `rolloutBatchSize` | 否 | Inline batch size override。 |
-| `requeueAfter` | 否 | Controller requeue interval。 |
+| `requeueAfter` | 否 | 成功 reconcile 后的 requeue interval。 |
+| `retryBackoff` | 否 | 失败 reconcile 的 retry backoff。 |
 
 ## Status 契约
 
 Status 记录：
 
 - `observedGeneration`
+- `phase`
 - `lastReconcileTime`
 - `lastResult.clusterName`
 - `lastResult.bomName`
@@ -56,12 +61,26 @@ Status 记录：
 - `lastResult.bundlePath`
 - `lastResult.desiredStateDigest`
 - `lastResult.appliedRevisionPath`
+- `retryCount`
+- `nextRetryTime`
+- `holdReason`
+- `lastDiagnostic`
 - `conditions`
+
+`phase` 取值：
+
+- `Succeeded`
+- `Retrying`
+- `PartiallyFailed`
+- `Paused`
+- `RollbackHold`
 
 ## 校验规则
 
-- 必须且只能设置 `bomPath` 或 `releaseChannelPath` 其中之一。
+- 必须且只能设置一种 target selector：`bomPath`、`releaseChannelPath`，或
+  `releaseSource`、`releaseLine`、`channel` 三元组。
 - Paths 必须对 controller runtime 有意义。
+- `requeueAfter` 和 `retryBackoff` 不能为负数。
 - Spec 中不能嵌入 secret 值。
 - Status 由 controller 拥有。
 
@@ -98,6 +117,7 @@ spec:
   rolloutPolicyRef:
     name: default-rollout
   requeueAfter: 5m
+  retryBackoff: 30s
 ```
 
 ## 相关 Kind

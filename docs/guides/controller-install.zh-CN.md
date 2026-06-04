@@ -1,7 +1,7 @@
 # Sealos Distribution Controller 安装指南
 
-本文说明如何安装当前 `DistributionTarget` controller manifests，并启动一个最小的
-controller 驱动 reconcile loop。
+本文说明如何安装当前 `DistributionTarget` controller manifests，并启动一个 controller 驱动
+reconcile loop。
 
 ## 会安装什么
 
@@ -15,9 +15,11 @@ controller 驱动 reconcile loop。
 - 一个运行 `sealos-agent --controller` 的 deployment
 
 controller 会 watch `sealos-system` 里的 `DistributionTarget` 对象，把每个 target
-映射成一次现有 agent reconcile pass，并写入 `Ready` 和 `Degraded` status
-condition。target 可以通过 `spec.rolloutPolicyRef` 引用同 namespace 下的
-`DistributionRolloutPolicy`；policy 更新后会重新 enqueue 引用它的 targets。
+映射成一次现有 agent reconcile pass，并写入显式 status state machine：
+`status.phase`、`Ready` 和 `Degraded` conditions、retry count、next retry time、
+hold reason、last diagnostic，以及 Kubernetes events。target 可以通过
+`spec.rolloutPolicyRef` 引用同 namespace 下的 `DistributionRolloutPolicy`；policy
+更新后会重新 enqueue 引用它的 targets。
 
 service account RBAC 只覆盖被 watch 的 API、status 更新、leader election leases 和
 events。rendered bundle apply 仍然使用 `spec.kubeconfigPath` 或 deployment 默认值选择的
@@ -193,8 +195,17 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-bom
 kubectl apply -f deploy/distribution-controller/examples/distribution-target-channel.yaml
 ```
 
-controller 要求 `spec.bomPath` 和 `spec.releaseChannelPath` 必须二选一，且不能同时设置。
-这两个路径都必须能在 controller pod 内读取。示例 `DistributionRolloutPolicy` 设置了
+如果集群要按 distribution line 和 channel 从 release metadata source 解析目标：
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-target-lookup.yaml
+```
+
+controller 要求只能设置一种 target selector：`spec.bomPath`、`spec.releaseChannelPath`，
+或者 `spec.releaseSource`、`spec.releaseLine`、`spec.channel` 三元组。本地路径必须能在
+controller pod 内读取。HTTP(S) release source 会通过
+`/v1/distributions/{line}/channels/{channel}` 解析，并且必须返回 digest-pinned
+的 `ReleaseChannel` target。示例 `DistributionRolloutPolicy` 设置了
 `spec.strategy.batchSize: 1`、`spec.strategy.canary.batchSize: 1`、
 `spec.strategy.pause.afterCanary: true`、`spec.strategy.healthGate: true` 和
 `spec.strategy.failureAction: Rollback`。这会让符合条件的 host-targeted steps 一次滚动一个
@@ -214,16 +225,22 @@ kubectl -n sealos-system describe distributiontarget default-platform
 kubectl -n sealos-system logs deploy/sealos-distribution-controller -c sealos-agent
 ```
 
-成功后，target 会报告 `Ready=True`、`Degraded=False`、解析出来的 BOM revision、
-desired state digest 和 applied revision path。
+成功后，target 会报告 `phase=Succeeded`、`Ready=True`、`Degraded=False`、解析出来的
+BOM revision、desired state digest 和 applied revision path。失败 target 在
+`spec.retryBackoff` 调度下一次 reconcile 时会报告 `phase=Retrying`；agent 同时返回 result
+和 error 时报告 `phase=PartiallyFailed`；post-canary operator hold 报告
+`phase=Paused`；rollback 到上一次成功 revision 后报告 `phase=RollbackHold`。
+`kubectl describe distributiontarget ...` 也会显示最近一次状态迁移产生的 events。
 
 ## 当前边界
 
-这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
-rendered-bundle executor 使用的 host rollout batch size、第一批 canary size、可选的
-post-canary pause、可选的逐批 health gate，以及 stop-or-rollback failure action。这些设置只作用于符合条件的
-all-node runtime-rootfs host batches。pause gate 和 rollback result 都是 operator action hold，
-不是按 host 保存的 rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
-它还没有加入 registry-backed `ReleaseChannel` lookup、controller 驱动的 promotion
-automation，也不是覆盖所有 multi-node workflow 的 package 级安全模型。本地 channel 文件可以另外通过
+controller 已经为每个 target 提供持久 reconcile state machine，但 rollout execution unit
+仍然是 rendered bundle。`DistributionRolloutPolicy` 当前持久化的是 rendered-bundle executor
+使用的 host rollout batch size、第一批 canary size、可选的 post-canary pause、可选的逐批
+health gate，以及 stop-or-rollback failure action。这些设置作用于符合条件的 host batches；
+`sync plan` 会为 rootfs、host-file、manifest、chart、patch、values、各类 package hook
+phase、local patch approval 和 generated host projection 报告 package/phase safety
+profiles。pause gate 和 rollback result 都是 operator action hold，不是按 host 保存的
+rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
+controller 驱动的 promotion automation 和 durable per-package rollout cursor 还没有加入。本地 channel 文件可以另外通过
 `sealos sync promote` 推进；controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。
