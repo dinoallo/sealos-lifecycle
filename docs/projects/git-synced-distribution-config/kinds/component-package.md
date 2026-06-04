@@ -121,6 +121,15 @@ Supported content types are:
 Each content entry must have a stable name and a repository-relative path. The
 path must not escape the package or repository root.
 
+Current executable semantics are narrower than the schema:
+
+- `manifest` is the raw Kubernetes YAML content type consumed by the current
+  apply path.
+- `chart` is accepted and copied through render, but the current apply executor
+  does not run Helm or render chart templates.
+- `values` is render support data and is not applied directly.
+- `hook` content only becomes executable when referenced by `spec.hooks[]`.
+
 ## Inputs
 
 Supported input types are:
@@ -153,6 +162,10 @@ Supported hook targets are:
 Hooks must be deterministic from declared inputs and package files. They must
 not read undeclared host files or secrets.
 
+Inline hook commands are not supported. Hook behavior must live in a referenced
+package file so review, digesting, executable-bit checks, timeouts, and audit
+tooling can inspect one stable payload.
+
 ## Validation Rules
 
 - `apiVersion`, `kind`, and `metadata.name` must be set.
@@ -167,6 +180,9 @@ not read undeclared host files or secrets.
 - Input names must be unique within the package.
 - Hook names must be unique within the package.
 - `localPatchPolicy`, when set, must be a relative path.
+- `dependencies[].version`, when set, is an exact version selected by the BOM.
+  Version ranges belong in BOM or release-channel selection policy, not in the
+  package manifest.
 
 ## Lifecycle
 

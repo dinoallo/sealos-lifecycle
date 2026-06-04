@@ -81,6 +81,10 @@
 | 能力 | 当前状态 | 为什么重要 |
 | --- | --- | --- |
 | 不经过 BOM/bundle，直接“安装这个 package” | Not implemented | 当前部署路径是 `package -> BOM -> render -> bundle -> apply`，不是 package-direct install。 |
+| 从 package `chart` content 直接 Helm render/apply | Not implemented | `chart` 是合法 schema content type，也会在 render 中被复制，但当前 executor 不会运行 Helm。Helm 路径实现前应使用 raw `manifest` content，或显式使用已 review 的 hook。 |
+| 在 `package.yaml` 中写 inline hook command | Not implemented | Hook 目前只能引用包内文件，这样 review、digest、可执行位检查、timeout policy 和审计工具才能检查稳定 payload。 |
+| 在 `ComponentPackage` 中写 dependency version range | Not implemented | package dependency 只支持命名依赖和 BOM 已选择的精确版本。BOM 和 release-channel selection 仍然是版本解析层。 |
+| 从 legacy image label 推断运行时行为 | Not implemented | legacy label 可以用于显式 metadata migration，但 hook、input、dependency、local patch policy、generated output 和 chart 语义都必须来自 `package.yaml`。 |
 | hosted fleet release platform | Not implemented | 本地 release metadata service 已支持 lookup 和 health-gated channel advancement，但它不是包含认证、远端存储、evidence collection 或 fleet policy management 的多租户 hosted service。 |
 | 完全泛化的 generated-output drift 管理 | Not implemented | 已建模的 generated Kubernetes-object host-path drift 已经有结构化路由 metadata，但当前 MVP 仍不覆盖所有 generated artifact 类型，也不会为任意外部 generator 自动 repair。 |
 | package、BOM、cluster-local 多层 policy merge | Not implemented | 当前模型刻意拒绝这层复杂度。 |

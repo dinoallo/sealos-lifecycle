@@ -500,6 +500,25 @@ Initial content types:
 
 This keeps the format flexible enough for current Sealos behavior without allowing arbitrary hidden payloads.
 
+### MVP Content Semantics
+
+The current executable MVP applies only a narrow subset of these content types:
+
+| Content Type | MVP Semantics |
+| --- | --- |
+| `rootfs` | Host-mutating payload. `sync apply` copies it to the resolved host targets and runs the related hook phases. |
+| `file` | Host-mutating file payload. `sync apply` copies it to the resolved host targets. |
+| `manifest` | Raw Kubernetes YAML payload. `sync apply` applies it with `kubectl apply -f` after kubeconfig and API readiness gates pass. |
+| `values` | Render-only support data. It is copied into the rendered bundle and may be overlaid by declared inputs, but it is not applied directly. |
+| `patch` | Local patch or ownership-reviewed overlay content. It participates in planning and approval surfaces, not direct package install. |
+| `chart` | Package-distributed chart content only. It is accepted by the file schema and copied through render, but the current apply executor does not run Helm or render chart templates. |
+| `hook` | Referenced file content used by `spec.hooks[]`; hook execution is driven by the hook declaration, not by the content entry alone. |
+
+The MVP install path is therefore raw-manifest first. Helm charts may be stored
+in a package for provenance or a future renderer, but package authors should
+not expect chart content to be installed unless a package hook explicitly and
+deterministically renders or applies it as part of that package revision.
+
 ## Inputs
 
 Packages should declare the external inputs they expect during hydration.
@@ -772,6 +791,9 @@ Rules:
 - Hydration and reconcile should be able to see hook intent from the manifest before execution.
 - `target` should describe the operational scope of the hook, not an arbitrary
   machine choice.
+- Inline hook command forms are not part of the package contract. Keeping hooks
+  as referenced files gives package review, digests, executable-bit validation,
+  timeout policy, and audit tooling one stable payload to inspect.
 
 Current implementation note:
 
@@ -805,6 +827,9 @@ Initial rules:
 - dependencies are named references, not implicit path ordering
 - dependencies must be unique
 - self-dependency is invalid
+- `version`, when present, is an exact version selected by the BOM
+- dependency version ranges are intentionally out of scope for package
+  manifests; BOM and release-channel selection remain the version resolver
 - reconcile should topologically sort components before apply
 
 ## Class-Specific Constraints
@@ -848,8 +873,23 @@ Recommended migration path:
 
 1. Accept legacy images that only expose the current label-based contract.
 2. Add `package.yaml` to new component artifacts first.
-3. Add a compatibility layer that can infer a basic package manifest from legacy images when needed.
+3. Infer only minimal metadata from legacy labels when a transitional tool
+   explicitly opts into that behavior.
 4. Move BOM-managed components to the explicit package format over time.
+
+Legacy inference boundary:
+
+- safe to infer: package class from `sealos.io.type`, component version from
+  the existing version labels, distribution labels, and platform labels that
+  already exist on the image
+- unsafe to infer: payload layout, hook phases, hook targets, input surfaces,
+  dependency intent, local patch policy, generated outputs, chart semantics, or
+  secret handling
+
+Any legacy image used by BOM-driven render/apply should therefore either carry
+an explicit `package.yaml` or be converted into a package root by a controlled
+migration step. The runtime should not silently invent hooks or input contracts
+from image labels alone.
 
 ## Initial Go Schema
 
@@ -879,16 +919,23 @@ The initial BOM integration now also supports resolving component package manife
 
 Yes, component packaging should be designed now. It sits directly on the critical path between BOM metadata and real reconcile behavior.
 
-The next implementation step should be:
+The current implementation step is no longer schema discovery; it is keeping
+the package authoring surface aligned with the narrow executable MVP:
 
-1. keep this package manifest schema small
-2. define how `package.yaml` is loaded from an OCI artifact
-3. add one example packaged component fixture
-4. decide whether the hydration MVP supports raw manifests only, or raw manifests plus charts
+1. raw manifests are the directly applied Kubernetes payload format
+2. chart content remains a packaged artifact type until a Helm renderer/apply
+   path is implemented
+3. hooks are referenced files only
+4. dependency versions are exact BOM-selected versions, not ranges in the
+   package manifest
+5. legacy label inference is metadata-only and must not silently create runtime
+   behavior
 
-## Open Questions
+## MVP Decisions
 
-- Should the MVP hydration path support both Helm charts and raw manifests, or only raw manifests?
-- Should hook scripts be modeled only as referenced files, or should inline command forms also be allowed later?
-- Should package dependencies support version ranges in the manifest, or should BOM selection remain the only version resolver?
-- How much of the legacy image metadata can be inferred safely when `package.yaml` is absent?
+| Topic | Decision |
+| --- | --- |
+| Raw manifests versus Helm charts | `manifest` is the executable MVP path. `chart` is accepted as package content and copied through render, but the current executor does not run Helm. |
+| Hook form | Hooks are referenced files only. Inline shell command forms are not part of the contract. |
+| Dependency versions | Package dependencies may name an exact BOM-selected version. Version ranges belong to BOM/release selection policy, not the package manifest. |
+| Legacy image inference | Without `package.yaml`, only metadata labels may be inferred by explicit migration tooling. Runtime behavior such as hooks, inputs, dependencies, local patch policy, and generated outputs must not be invented. |

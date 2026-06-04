@@ -84,6 +84,10 @@ These are the main things users should **not** mistake as already done.
 | Capability | Current State | Why It Matters |
 | --- | --- | --- |
 | Direct “install this package” workflow without BOM/bundle mediation | Not implemented | The current deployment path is `package -> BOM -> render -> bundle -> apply`, not package-direct install. |
+| Helm chart render/apply from package `chart` content | Not implemented | `chart` is a valid schema content type and is copied through render, but the current executor does not run Helm. Use raw `manifest` content or an explicit reviewed hook until a Helm path exists. |
+| Inline hook commands in `package.yaml` | Not implemented | Hooks are referenced package files only, so review, digesting, executable-bit checks, timeout policy, and audit tooling inspect stable payloads. |
+| Dependency version ranges inside `ComponentPackage` | Not implemented | Package dependencies support named dependencies and exact BOM-selected versions only. BOM and release-channel selection remain the version resolver. |
+| Runtime behavior inferred from legacy image labels | Not implemented | Legacy labels may support explicit metadata migration, but hooks, inputs, dependencies, local patch policy, generated outputs, and chart semantics require `package.yaml`. |
 | Hosted fleet release platform | Not implemented | The local release metadata service supports lookup and health-gated channel advancement, but it is not a multi-tenant hosted service with authentication, remote storage, evidence collection, or fleet policy management. |
 | Fully generalized generated-output drift management | Not implemented | Modeled generated Kubernetes-object host-path drift is routed with structured metadata, but the MVP still does not cover every possible generated artifact type or provide automatic repair for arbitrary external generators. |
 | Multi-layer policy merge across package, BOM, and cluster-local inputs | Not implemented | The current model intentionally rejects that complexity. |
