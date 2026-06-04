@@ -60,8 +60,36 @@ Options:
 
   DAY0_BOOTSTRAP_ARGS
                    Extra arguments passed to scripts/poc/minimal-single-node/bootstrap.sh.
-                   The bootstrap script publishes OCI packages, renders through
-                   generated release metadata, then optionally applies and validates.
+                   Legacy fixture gate only; the operator-facing PoC path is
+                   the scriptless Day 0 guide flow.
+
+  DAY0_RELEASE_SOURCE
+                   Release metadata source used by verify-day0-guide-render.
+
+  DAY0_RELEASE_LINE
+                   Distribution line used by verify-day0-guide-render.
+                   Default is minimal-single-node.
+
+  DAY0_RELEASE_CHANNEL
+                   Release channel used by verify-day0-guide-render.
+                   Default is alpha.
+
+  DAY0_CLUSTER
+                   Cluster name used by verify-day0-guide-render.
+                   Default is poc-minimal-ci.
+
+  DAY0_RUNTIME_ROOT
+                   Runtime root used by verify-day0-guide-render.
+                   Default is a temporary directory under TMPDIR.
+
+  DAY0_LOCAL_REPO
+                   Local repo directory used by verify-day0-guide-render.
+                   Default is <runtime-root>/<cluster>/local-repo.
+
+  SEALOS_BIN
+                   sealos binary used by verify-day0-guide-render.
+                   Default is ./bin/linux_amd64/sealos; the target builds it
+                   first when the binary is missing.
 
   DAY0_MULTINODE_ARGS
                    Extra arguments passed to scripts/poc/multi-node-day0/acceptance.sh.
@@ -171,12 +199,70 @@ verify-sync-package-revert:
 	fi; \
 	scripts/poc/minimal-single-node/smoke.sh --apply --revert-check $(SYNC_PACKAGE_SMOKE_ARGS)
 
-## verify-day0-bootstrap-render: Build, publish OCI packages, and render through generated release metadata without host mutation.
+## verify-day0-guide-render: Run the scriptless Day 0 guide render path against an existing release source.
+.PHONY: verify-day0-guide-render
+verify-day0-guide-render:
+	@set -eu; \
+	if [ -z "$(DAY0_RELEASE_SOURCE)" ]; then \
+		echo "DAY0_RELEASE_SOURCE is required for the scriptless Day 0 guide render gate" >&2; \
+		exit 1; \
+	fi; \
+	cluster="$(or $(DAY0_CLUSTER),poc-minimal-ci)"; \
+	line="$(or $(DAY0_RELEASE_LINE),minimal-single-node)"; \
+	channel="$(or $(DAY0_RELEASE_CHANNEL),alpha)"; \
+	runtime_root="$(or $(DAY0_RUNTIME_ROOT),$${TMPDIR:-/tmp}/sealos-day0-guide-render)"; \
+	local_repo="$(or $(DAY0_LOCAL_REPO),$${runtime_root}/$${cluster}/local-repo)"; \
+	sealos_bin="$(or $(SEALOS_BIN),./bin/linux_amd64/sealos)"; \
+	if [ ! -x "$${sealos_bin}" ]; then \
+		make build BINS=sealos >/dev/null; \
+	fi; \
+	"$${sealos_bin}" sync local-repo init \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--output-dir "$${local_repo}" \
+		--overwrite >/dev/null; \
+	install -D -m 0644 \
+		scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
+		"$${local_repo}/inputs/containerd/containerd-config.toml"; \
+	install -D -m 0644 \
+		scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
+		"$${local_repo}/inputs/kubernetes/kubeadm-cluster-config.yaml"; \
+	install -D -m 0644 \
+		scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
+		"$${local_repo}/inputs/cilium/cilium-values.yaml"; \
+	"$${sealos_bin}" sync local-repo doctor \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--local-repo "$${local_repo}" >/dev/null; \
+	"$${sealos_bin}" sync validate \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--local-repo "$${local_repo}" >/dev/null; \
+	"$${sealos_bin}" sync render \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--local-repo "$${local_repo}" >/dev/null; \
+	test -f "$${runtime_root}/$${cluster}/distribution/bundles/current/bundle.yaml"; \
+	test -f "$${runtime_root}/$${cluster}/distribution/applied-revision.yaml"
+
+## verify-day0-bootstrap-render: Legacy fixture gate that publishes OCI packages and renders generated release metadata without host mutation.
 .PHONY: verify-day0-bootstrap-render
 verify-day0-bootstrap-render:
 	@scripts/poc/minimal-single-node/bootstrap.sh --skip-apply $(DAY0_BOOTSTRAP_ARGS)
 
-## verify-day0-bootstrap-apply: Run the mutating fresh-host bootstrap apply and validation path.
+## verify-day0-bootstrap-apply: Legacy mutating fixture gate for the old prepared-host wrapper.
 .PHONY: verify-day0-bootstrap-apply
 verify-day0-bootstrap-apply:
 	@set -eu; \

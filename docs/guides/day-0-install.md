@@ -233,57 +233,121 @@ The release metadata source must return a `ReleaseChannel` document for
 at a BOM with `spec.bomDigest`, and Sealos verifies the fetched BOM digest
 before render.
 
-## Current PoC Shortcut
+## Scriptless Minimal PoC
 
-For the repository's minimal single-node PoC, the convenience wrapper is:
+The repository PoC should now be exercised with the same 0-to-1 operator flow
+described above. The PoC install path does not call helper scripts such as
+`fetch-assets.sh`, `stage-assets.sh`, `publish-oci.sh`, `render.sh`, or
+`bootstrap.sh`.
 
-```bash
-sudo scripts/poc/minimal-single-node/bootstrap.sh \
-  --cluster poc-minimal \
-  --runtime-root /var/lib/sealos/runtime
-```
+Those helpers may still exist for CI fixture generation and release-build
+experiments because this repository does not commit large runtime, Kubernetes,
+or Cilium payloads. They are not the operator-facing PoC.
 
-That wrapper:
-
-1. builds `sealos`
-2. starts a temporary local registry
-3. uses release-build automation to fetch and stage runtime, Kubernetes, and
-   Cilium assets into temporary package roots
-4. publishes the three PoC packages as OCI package images
-5. writes a digest-pinned BOM plus a local release metadata source containing a
-   `ReleaseChannel`
-6. renders through
-   `--release-source <generated-release-source> --release-line minimal-single-node --channel alpha`
-7. runs `sealos sync apply`
-8. runs the PoC validator
-
-The important boundary is that `stage-assets.sh` is called only by
-`publish-oci.sh`, which is release build/publish side automation. The bootstrap
-consumer path selects a release target and consumes the generated digest-pinned
-BOM through `ReleaseChannel` lookup.
-
-For a non-mutating repository check that exercises build, package publish,
-release metadata generation, channel lookup, render, and applied-state target
-recording:
+Start from a release target whose component packages are already published and
+whose BOM is digest-pinned:
 
 ```bash
-make verify-day0-bootstrap-render DAY0_BOOTSTRAP_ARGS="--cluster poc-minimal-ci"
+CLUSTER=poc-minimal
+RUNTIME_ROOT=/var/lib/sealos/runtime
+RELEASE_SOURCE=/var/lib/sealos/distribution/release-source
+RELEASE_LINE=minimal-single-node
+RELEASE_CHANNEL=alpha
+LOCAL_REPO=/var/lib/sealos/distribution/${CLUSTER}/local-repo
+KUBECONFIG=/etc/kubernetes/admin.conf
+BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
 ```
 
-For a prepared fresh Linux host where host mutation is intentional:
+For a local filesystem release source, verify that the channel metadata exists:
 
 ```bash
-sudo make verify-day0-bootstrap-apply \
-  I_UNDERSTAND_THIS_MUTATES_HOST=1 \
-  DAY0_BOOTSTRAP_ARGS="--cluster poc-minimal --runtime-root /var/lib/sealos/runtime"
+test -f "${RELEASE_SOURCE}/channels/${RELEASE_LINE}/${RELEASE_CHANNEL}.yaml"
 ```
 
-The protected GitHub workflow
-`.github/workflows/day0_fresh_host_bootstrap.yml` exposes the same automation.
-Its default manual run performs the safe publish/render gate on GitHub-hosted
-Ubuntu. Setting `mutating_apply: true` requires the protected
-`day0-fresh-host` environment and a self-hosted Linux runner labeled
-`sealos-day0`, then runs the mutating bootstrap apply/validate path.
+Initialize the cluster-local repo from that target:
+
+```bash
+sudo $SEALOS sync local-repo init \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --output-dir "$LOCAL_REPO" \
+  --overwrite
+```
+
+For the current in-repo PoC defaults, fill the generated inputs from the tracked
+package default files:
+
+```bash
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
+  "${LOCAL_REPO}/inputs/containerd/containerd-config.toml"
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
+  "${LOCAL_REPO}/inputs/kubernetes/kubeadm-cluster-config.yaml"
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
+  "${LOCAL_REPO}/inputs/cilium/cilium-values.yaml"
+```
+
+Then run the guide flow directly:
+
+```bash
+sudo $SEALOS sync local-repo doctor \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo $SEALOS sync validate \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo $SEALOS sync render \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo $SEALOS sync preflight \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --bundle-dir "$BUNDLE" \
+  --kubeconfig "$KUBECONFIG"
+
+sudo $SEALOS sync apply \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --bundle-dir "$BUNDLE" \
+  --kubeconfig "$KUBECONFIG"
+```
+
+Validate with normal cluster and distribution commands:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" get nodes -o wide
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status ds/cilium --timeout=180s
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status deploy/cilium-operator --timeout=180s
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status deploy/coredns --timeout=180s
+sudo $SEALOS sync status \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER"
+```
+
+For a multi-node PoC, use the same commands with a cluster name that already has
+a Sealos `Clusterfile` and SSH inventory. `sync render`, `sync plan`,
+`sync preflight`, and `sync apply` resolve `allNodes`, `firstMaster`, and
+cluster-scoped targets from that cluster state; no PoC wrapper is needed.
 
 For the safe multi-node Day 0 acceptance gate:
 
@@ -300,8 +364,23 @@ part of Day 0 acceptance. The GitHub workflow
 `.github/workflows/day0_multi_node_acceptance.yml` runs the same safe gate
 without mutating hosts.
 
-This shortcut is useful for repository development and validation. It is not the
-intended long-term user-facing install interface.
+That gate is repository validation. It is safe and does not mutate hosts.
+
+For a non-mutating repository check of the scriptless guide path, provide an
+existing release source and run:
+
+```bash
+make verify-day0-guide-render \
+  DAY0_RELEASE_SOURCE=/var/lib/sealos/distribution/release-source \
+  DAY0_RELEASE_LINE=minimal-single-node \
+  DAY0_RELEASE_CHANNEL=alpha \
+  DAY0_CLUSTER=poc-minimal-ci
+```
+
+This target runs `local-repo init`, fills the stock PoC local inputs, runs
+`local-repo doctor`, `validate`, and `render`, and then checks that the bundle
+and applied-revision files were written. It does not fetch assets, publish OCI
+packages, or apply to a host.
 
 ## Development-Only Local Package Flow
 
@@ -317,17 +396,10 @@ $SEALOS sync render \
   --package-source cilium=scripts/poc/minimal-single-node/packages/cilium
 ```
 
-For that development path, package templates must first be filled with real
-assets. That is why the PoC has:
-
-```bash
-scripts/poc/minimal-single-node/stage-assets.sh \
-  --kubelet-bin /usr/bin/kubelet \
-  --cilium-manifest /absolute/path/to/cilium.yaml
-```
-
-This should be treated as release-builder or developer work. Ordinary installers
-should consume already-published, digest-pinned packages.
+This is a renderer development path, not the 0-to-1 PoC install path. It is
+installable only when those local package directories already contain full real
+payloads. Ordinary installers should consume already-published, digest-pinned
+packages through a BOM or `ReleaseChannel`.
 
 ## Completion Criteria
 
@@ -342,11 +414,10 @@ Day 0 is complete when:
 
 ## Current Boundaries
 
-- The mutating bootstrap wrapper is still prepared-host oriented; multi-node
-  Day 0 has a safe render/plan/reconcile acceptance gate and fake-remote apply
-  coverage, not a default mutating multi-node VM workflow.
-- `stage-assets.sh` exists because this repository does not commit large
-  runtime/Kubernetes/Cilium payloads as source artifacts; the bootstrap wrapper
-  now invokes it only through release build/publish automation.
-- A productized install should move package assembly to release build/publish
-  automation so users only select a target and run validate/render/apply.
+- The operator-facing PoC assumes release assets already exist. Package assembly
+  belongs to release build/publish automation.
+- Helper scripts remain in the repository for CI fixture generation and package
+  development, but they are no longer the PoC install interface.
+- Multi-node Day 0 has CLI-driven render/plan/preflight/apply support; the
+  default GitHub gate remains non-mutating unless a protected environment is
+  used for real hosts.
