@@ -2,59 +2,52 @@
 
 ## Status
 
-Illustrative only. Not implemented as a schema or CRD.
+Implemented as a local repo file schema. It is not a Kubernetes CRD.
 
 ## Class
 
-Local repository model document.
+Local source document.
 
 ## Owner
 
-The local cluster platform owner would maintain this model if it becomes a real
-schema.
+The cluster owner maintains the local repo; `sealos sync local-repo init` writes
+the initial document.
 
 ## Purpose
 
-`LocalRepo` names the local mirror or local fact repository used by source-first
-local build mode. It describes where local source facts, cached artifacts, and
-local patch revisions are stored.
+`LocalRepo` identifies the cluster-local repository used during render, apply,
+status, and commit workflows. It records the cluster and distribution line that
+the local inputs, local resources, patches, and policy belong to.
 
-The current implementation does not require this kind. It is documented to keep
-the local mirror concept explicit and to reserve vocabulary for future schema
-work.
+## Location
 
-## Possible Locations
+```text
+local-repo/repo.yaml
+```
 
-- `local-repos/<name>.yaml`
-- `clusters/<cluster>/local-repo.yaml`
-
-## Possible Spec Contract
+## Spec Contract
 
 | Field | Description |
 | --- | --- |
-| `root` | Filesystem or repository root for local facts. |
-| `mode` | Mirror mode, such as `sourceMirror`, `artifactMirror`, or `mixed`. |
-| `distributionRef` | Distribution source repository mirrored locally. |
-| `cacheRoot` | Local cache root for generated or fetched artifacts. |
-| `patchRoot` | Local patch root. |
-| `retention` | Retention policy for cached revisions. |
+| `cluster` | Cluster name this local repo belongs to. |
+| `distributionLine` | Distribution line the local repo follows. |
+| `channel` | Optional release channel selected at init time. |
+| `bom` | BOM name used to initialize the local repo. |
+| `bomRevision` | BOM revision used to initialize the local repo. |
 
-## Validation Expectations
+## Validation
 
-If implemented, a `LocalRepo` should validate that:
-
-- roots are explicit and normalized;
-- no path escapes the configured repository root;
-- secret material is not stored inline;
-- mirror state is recorded through immutable revisions rather than mutable
-  names alone.
+`localrepo.Load` validates `apiVersion`, `kind`, `metadata.name`, `spec.cluster`,
+and `spec.distributionLine` when `repo.yaml` is present. Older local repos remain
+loadable; `sync local-repo doctor` reports a warning if the metadata file is
+missing or still uses an older illustrative shape.
 
 ## Boundaries
 
-- `LocalRepo` should not replace `BOM`.
-- `LocalRepo` should not replace `ReleaseChannel`.
-- `LocalRepo` should not be treated as runtime apply state.
-- `LocalRepo` is currently documentation vocabulary, not an API contract.
+- `LocalRepo` does not replace `BOM`.
+- `LocalRepo` does not replace `ReleaseChannel`.
+- `LocalRepo` does not carry Secret payloads.
+- `LocalRepo` is not runtime apply state.
 
 ## Example
 
@@ -62,20 +55,17 @@ If implemented, a `LocalRepo` should validate that:
 apiVersion: distribution.sealos.io/v1alpha1
 kind: LocalRepo
 metadata:
-  name: prod-01-local
+  name: prod-01-default-platform
 spec:
-  root: /var/lib/sealos/distribution/local-repo
-  mode: mixed
-  distributionRef:
-    name: sealos-distribution
-    ref: main
-  cacheRoot: cache/
-  patchRoot: patches/
+  cluster: prod-01
+  distributionLine: default-platform
+  channel: stable
+  bom: default-platform
+  bomRevision: rev-2026-06-01
 ```
 
 ## Related Kinds
 
-- `LocalRepoRevision` would identify an immutable snapshot of this local repo.
-- `ClusterTarget` may select a local delivery mode.
+- `LocalRepoRevision` records a digest-backed audit snapshot for this local repo.
 - `HydratedBundle` records local repo provenance when used.
-- `DistributionTarget` has runtime fields for local repo paths.
+- `AppliedRevision` records the local repo revision digest used by render/apply.

@@ -45,6 +45,9 @@ func TestLoadAndBindingFor(t *testing.T) {
 	if !strings.HasPrefix(repo.Revision, "sha256:") {
 		t.Fatalf("repo.Revision = %q, want sha256 digest", repo.Revision)
 	}
+	if !strings.HasPrefix(repo.InputRevision, "sha256:") {
+		t.Fatalf("repo.InputRevision = %q, want sha256 digest", repo.InputRevision)
+	}
 
 	path, ok := repo.BindingFor("cilium", packageformat.Input{Name: "cilium-values"})
 	if !ok {
@@ -97,6 +100,64 @@ func TestLoadAndBindingFor(t *testing.T) {
 	}
 	if got, want := policy.Spec.EffectiveScope(), ownership.LocalPatchPolicyScopeClusterLocal; got != want {
 		t.Fatalf("policy.Spec.EffectiveScope() = %q, want %q", got, want)
+	}
+}
+
+func TestLoadReadsLocalRepoSchema(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeLocalInput(t, root, "runtime", "runtime-config.yaml", "clusterName: poc\n")
+
+	repo, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load(before schema) error = %v", err)
+	}
+	writeLocalRepoSchema(t, root, repo)
+
+	loaded, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load(after schema) error = %v", err)
+	}
+	if loaded.Metadata == nil {
+		t.Fatal("loaded.Metadata = nil, want LocalRepo document")
+	}
+	if got, want := loaded.Metadata.Spec.Cluster, "poc"; got != want {
+		t.Fatalf("metadata.spec.cluster = %q, want %q", got, want)
+	}
+	if got, want := loaded.Metadata.Spec.DistributionLine, "default-platform"; got != want {
+		t.Fatalf("metadata.spec.distributionLine = %q, want %q", got, want)
+	}
+	if loaded.Current == nil {
+		t.Fatal("loaded.Current = nil, want LocalRepoRevision document")
+	}
+	if got, want := loaded.Current.Spec.LocalInputRevision, repo.InputRevision; got != want {
+		t.Fatalf("current.spec.localInputRevision = %q, want %q", got, want)
+	}
+	if got, want := loaded.Current.Spec.Digest, repo.Revision; got != want {
+		t.Fatalf("current.spec.digest = %q, want %q", got, want)
+	}
+	if got, want := loaded.Current.Spec.Audit.CreatedAt, "2026-06-03T00:00:00Z"; got != want {
+		t.Fatalf("current.spec.audit.createdAt = %q, want %q", got, want)
+	}
+}
+
+func TestLoadKeepsOldSchemaNonBlocking(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeLocalInput(t, root, "runtime", "runtime-config.yaml", "clusterName: poc\n")
+	writeLocalRepoFile(t, root, RepoFileName, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalRepo\nmetadata:\n  name: old\nspec:\n  bomName: old\n  revision: rev-1\n")
+
+	repo, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if repo.Metadata != nil {
+		t.Fatalf("repo.Metadata = %#v, want nil for old schema", repo.Metadata)
+	}
+	if got := len(repo.SchemaWarnings); got != 1 {
+		t.Fatalf("len(repo.SchemaWarnings) = %d, want 1", got)
 	}
 }
 
@@ -163,7 +224,47 @@ func writeLocalPatch(t *testing.T, root, component, relativePath, content string
 func writeLocalPatchPolicy(t *testing.T, root, content string) {
 	t.Helper()
 
-	path := filepath.Join(root, PolicyDirName, ownership.LocalPatchPolicyFileName)
+	writeLocalRepoFile(t, root, filepath.ToSlash(filepath.Join(PolicyDirName, ownership.LocalPatchPolicyFileName)), content)
+}
+
+func writeLocalRepoSchema(t *testing.T, root string, repo *Repo) {
+	t.Helper()
+
+	writeLocalRepoFile(t, root, RepoFileName, `apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalRepo
+metadata:
+  name: poc-default-platform
+spec:
+  cluster: poc
+  distributionLine: default-platform
+  channel: alpha
+  bom: default-platform
+  bomRevision: rev-1
+`)
+	writeLocalRepoFile(t, root, filepath.ToSlash(filepath.Join(RevisionsDirName, CurrentRevisionFileName)), `apiVersion: distribution.sealos.io/v1alpha1
+kind: LocalRepoRevision
+metadata:
+  name: current
+spec:
+  cluster: poc
+  distributionLine: default-platform
+  channel: alpha
+  bom:
+    name: default-platform
+    revision: rev-1
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  localInputRevision: `+repo.InputRevision+`
+  digest: `+repo.Revision+`
+  audit:
+    createdAt: "2026-06-03T00:00:00Z"
+    command: sealos sync local-repo init
+`)
+}
+
+func writeLocalRepoFile(t *testing.T, root, relativePath, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
 	}

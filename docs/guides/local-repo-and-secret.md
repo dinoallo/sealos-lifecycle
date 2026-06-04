@@ -211,27 +211,33 @@ Current boundary for host-scoped inputs:
 - the same `sync diff` / `sync status` output now also exposes a top-level
   `localPatchPolicy` block so operators can see the effective policy source,
   name, path, and digest for the rendered bundle they are inspecting
-- `repo.yaml` and `revisions/current.yaml` are illustrative metadata files, not
-  fixed schema commitments yet
+- `repo.yaml` and `revisions/current.yaml` are schema-backed metadata files
+  written by `sealos sync local-repo init`
 
-## Recommended Metadata Files
+## Metadata Files
 
-The local repo should eventually have a small metadata file that says what this
-repo instance is for.
+`sealos sync local-repo init` writes a small `LocalRepo` document that says what
+cluster and distribution line this repo instance is for.
 
-For example:
+Example:
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
 kind: LocalRepo
 metadata:
-  name: poc-minimal-local
+  name: poc-minimal-default-platform
 spec:
-  clusterName: poc-minimal
-  line: default-platform
+  cluster: poc-minimal
+  distributionLine: default-platform
+  channel: alpha
+  bom: default-platform
+  bomRevision: rev-poc-001
 ```
 
-And one revision bookkeeping file such as:
+It also writes `revisions/current.yaml` as a `LocalRepoRevision` audit object.
+This object records the selected cluster, distribution line, BOM identity, the
+local input revision digest, a full local repo digest, and audit fields. It does
+not carry Secret payloads.
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
@@ -239,14 +245,28 @@ kind: LocalRepoRevision
 metadata:
   name: current
 spec:
-  revision: local-20260501-001
-  inputsHash: sha256:<hash>
+  cluster: poc-minimal
+  distributionLine: default-platform
+  channel: alpha
+  bom:
+    name: default-platform
+    revision: rev-poc-001
+    digest: sha256:<bom-digest>
+  localInputRevision: sha256:<inputs-digest>
+  digest: sha256:<local-repo-digest>
+  audit:
+    createdAt: "2026-06-03T00:00:00Z"
+    command: sealos sync local-repo init
 ```
 
-These objects are not implemented yet, but the model is useful:
+Current behavior:
 
-- one document identifies the local repo
-- another identifies the current cluster-local input revision
+- `localrepo.Load` accepts older local repo directories without these files
+- if old or invalid metadata files exist, `sync local-repo doctor` reports a
+  warning and suggests re-running init with the same target
+- render/apply/status continue to use the live local repo content digest, so
+  editing input payloads after init does not expose Secret payloads or require
+  rewriting the audit object before render
 
 ## How `spec.inputs` Maps Into The Local Repo
 

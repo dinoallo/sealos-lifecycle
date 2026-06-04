@@ -46,8 +46,12 @@ type Resource struct {
 }
 
 type Repo struct {
-	Root     string
-	Revision string
+	Root           string
+	Revision       string
+	InputRevision  string
+	Metadata       *LocalRepoDocument
+	Current        *LocalRepoRevisionDocument
+	SchemaWarnings []string
 
 	inputsByComponent     map[string]map[string]string
 	hostInputsByComponent map[string]map[string]map[string]string
@@ -91,15 +95,29 @@ func Load(root string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
+	metadata, metadataWarnings, err := loadOptionalDocument(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
+	current, currentWarnings, err := loadOptionalCurrentRevisionDocument(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
 
 	hashParts := append(append(inputHashes, resourceHashes...), patchHashes...)
 	if policyHash != "" {
 		hashParts = append(hashParts, policyHash)
 	}
+	inputRevision := digestHashes(inputHashes)
+	revision := digestHashes(hashParts)
 
 	return &Repo{
 		Root:                  resolvedRoot,
-		Revision:              digestHashes(hashParts),
+		Revision:              revision,
+		InputRevision:         inputRevision,
+		Metadata:              metadata,
+		Current:               current,
+		SchemaWarnings:        append(metadataWarnings, currentWarnings...),
 		inputsByComponent:     inputsByComponent,
 		hostInputsByComponent: hostInputsByComponent,
 		resources:             resources,
@@ -107,6 +125,42 @@ func Load(root string) (*Repo, error) {
 		localPatchPolicy:      localPatchPolicy,
 		policyRelativePath:    policyRelativePath(localPatchPolicy),
 	}, nil
+}
+
+func loadOptionalDocument(root string) (*LocalRepoDocument, []string, error) {
+	path := filepath.Join(root, RepoFileName)
+	if _, err := os.Stat(filepath.Join(root, RepoFileName)); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("stat local repo metadata %q: %w", filepath.Join(root, RepoFileName), err)
+	}
+	doc, err := LoadDocument(root)
+	if err != nil {
+		if IsSchemaValidationError(err) {
+			return nil, []string{fmt.Sprintf("%s: %v", path, err)}, nil
+		}
+		return nil, nil, err
+	}
+	return doc, nil, nil
+}
+
+func loadOptionalCurrentRevisionDocument(root string) (*LocalRepoRevisionDocument, []string, error) {
+	path := filepath.Join(root, RevisionsDirName, CurrentRevisionFileName)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("stat local repo revision %q: %w", path, err)
+	}
+	doc, err := LoadCurrentRevisionDocument(root)
+	if err != nil {
+		if IsSchemaValidationError(err) {
+			return nil, []string{fmt.Sprintf("%s: %v", path, err)}, nil
+		}
+		return nil, nil, err
+	}
+	return doc, nil, nil
 }
 
 func (r *Repo) BindingFor(componentName string, input packageformat.Input) (string, bool) {

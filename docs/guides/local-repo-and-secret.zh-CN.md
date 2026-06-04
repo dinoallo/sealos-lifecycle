@@ -207,12 +207,13 @@ local-repo/
 - 同时，`sync diff` / `sync status` 现在也会在顶层额外暴露
   `localPatchPolicy`，把当前 rendered bundle 实际生效的 policy source、name、
   path 和 digest 直接带出来
-- `repo.yaml` 和 `revisions/current.yaml` 只是推荐元数据文件，不代表今天已经定
-  死 schema
+- `repo.yaml` 和 `revisions/current.yaml` 是由 `sealos sync local-repo init`
+  写入的 schema-backed 元数据文件
 
-## 推荐的元数据文件
+## 元数据文件
 
-最终 `local repo` 最好至少有一个很小的元数据文件，说明这是谁的 repo。
+`sealos sync local-repo init` 会写入一个小的 `LocalRepo` 文档，用来说明这份
+repo 属于哪个 cluster、哪条 distribution line。
 
 例如：
 
@@ -220,13 +221,18 @@ local-repo/
 apiVersion: distribution.sealos.io/v1alpha1
 kind: LocalRepo
 metadata:
-  name: poc-minimal-local
+  name: poc-minimal-default-platform
 spec:
-  clusterName: poc-minimal
-  line: default-platform
+  cluster: poc-minimal
+  distributionLine: default-platform
+  channel: alpha
+  bom: default-platform
+  bomRevision: rev-poc-001
 ```
 
-再加一个 revision bookkeeping 文件，例如：
+它还会写入 `revisions/current.yaml`，作为一个 `LocalRepoRevision` 审计对象。
+这个对象记录 cluster、distribution line、BOM identity、本地输入 revision
+digest、完整 local repo digest 和审计字段，但不携带 Secret payload。
 
 ```yaml
 apiVersion: distribution.sealos.io/v1alpha1
@@ -234,14 +240,27 @@ kind: LocalRepoRevision
 metadata:
   name: current
 spec:
-  revision: local-20260501-001
-  inputsHash: sha256:<hash>
+  cluster: poc-minimal
+  distributionLine: default-platform
+  channel: alpha
+  bom:
+    name: default-platform
+    revision: rev-poc-001
+    digest: sha256:<bom-digest>
+  localInputRevision: sha256:<inputs-digest>
+  digest: sha256:<local-repo-digest>
+  audit:
+    createdAt: "2026-06-03T00:00:00Z"
+    command: sealos sync local-repo init
 ```
 
-这些对象今天还没实现，但模型很有价值：
+当前行为：
 
-- 一个文档说明 local repo 是谁的
-- 一个文档说明当前 cluster-local input revision 是什么
+- `localrepo.Load` 仍然接受没有这些文件的旧 local repo 目录
+- 如果存在旧版或无效元数据文件，`sync local-repo doctor` 会报告 warning，并
+  建议用相同 target 重新运行 init
+- render/apply/status 继续使用当前 local repo 内容的实时 digest，所以 init 之后
+  编辑 input payload 不会暴露 Secret payload，也不要求在 render 前重写审计对象
 
 ## `spec.inputs` 怎么映射到 Local Repo
 

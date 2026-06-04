@@ -2,64 +2,61 @@
 
 ## Status
 
-Illustrative only. Not implemented as a schema or CRD.
+Implemented as a local repo file schema. It is not a Kubernetes CRD.
 
 ## Class
 
-Local repository evidence document.
+Local source evidence document.
 
 ## Owner
 
-The local build or mirror workflow would write this document if the kind becomes
-implemented.
+`sealos sync local-repo init` writes the initial `current` revision document.
+Cluster owners may refresh it after local repo edits when they need an explicit
+audit checkpoint.
 
 ## Purpose
 
-`LocalRepoRevision` would identify an immutable snapshot of a `LocalRepo`. It
-allows source-first local build mode to record exactly which local source facts,
-patches, and cached artifacts were used for hydration or apply.
+`LocalRepoRevision` records the local input revision, the full local repo digest,
+BOM identity, and audit metadata for a cluster-local repo snapshot. It gives
+operators a durable reference for the local facts used around render/apply
+without storing Secret payloads inline.
 
-## Possible Locations
+## Location
 
-- `local-repos/<name>/revisions/<revision>.yaml`
-- `clusters/<cluster>/local-repo-revisions/<revision>.yaml`
+```text
+local-repo/revisions/current.yaml
+```
 
-## Possible Spec Contract
+## Spec Contract
 
 | Field | Description |
 | --- | --- |
-| `localRepo` | Name of the local repository. |
-| `revision` | Immutable local repo revision identifier. |
-| `distributionRef` | Source distribution repository and ref. |
-| `sourceDigest` | Digest of mirrored source facts. |
-| `patchDigest` | Digest of local patch facts. |
-| `artifactIndexDigest` | Digest of local artifact index. |
-| `createdAt` | RFC3339 creation time. |
+| `cluster` | Cluster name this revision belongs to. |
+| `distributionLine` | Distribution line this revision follows. |
+| `channel` | Optional release channel selected at init time. |
+| `bom.name` | BOM name selected at init time. |
+| `bom.revision` | BOM revision selected at init time. |
+| `bom.digest` | Optional digest of the selected BOM file. |
+| `localInputRevision` | Digest of `inputs/**` only. |
+| `digest` | Digest of local repo inputs, resources, patches, and policy. |
+| `audit.createdAt` | RFC3339 creation time. |
+| `audit.createdBy` | Optional user or automation identity. |
+| `audit.command` | Optional command that wrote the document. |
 
-## Validation Expectations
+## Validation
 
-If implemented, a `LocalRepoRevision` should validate that:
-
-- revision identifiers are immutable;
-- all referenced digests are supported digest formats;
-- source and patch digests are computed from normalized file trees;
-- generated artifacts can be traced back to source and build class provenance.
-
-## Lifecycle
-
-1. A local mirror or build workflow snapshots the local repo.
-2. The workflow writes a revision document with digests.
-3. Hydration records the selected local repo revision.
-4. `AppliedRevision` records which local repo revision contributed to the
-   applied state.
+`localrepo.Load` validates `apiVersion`, `kind`, identity fields, required
+digests, and RFC3339 audit time when `revisions/current.yaml` is present. Older
+local repos remain loadable; `sync local-repo doctor` reports a warning if the
+revision file is missing or still uses an older illustrative shape.
 
 ## Boundaries
 
 - `LocalRepoRevision` does not define the target release.
 - `LocalRepoRevision` does not approve local policy changes.
-- `LocalRepoRevision` does not carry secret material.
-- `LocalRepoRevision` is currently documentation vocabulary, not an API
-  contract.
+- `LocalRepoRevision` does not carry Secret material.
+- Render/apply still use the live local repo digest, so editing inputs after
+  init does not require rewriting this audit object before render.
 
 ## Example
 
@@ -67,17 +64,20 @@ If implemented, a `LocalRepoRevision` should validate that:
 apiVersion: distribution.sealos.io/v1alpha1
 kind: LocalRepoRevision
 metadata:
-  name: prod-01-local-2026-06-01
+  name: current
 spec:
-  localRepo: prod-01-local
-  revision: 2026-06-01T00-00-00Z
-  distributionRef:
-    name: sealos-distribution
-    ref: abc123
-  sourceDigest: sha256:...
-  patchDigest: sha256:...
-  artifactIndexDigest: sha256:...
-  createdAt: "2026-06-01T00:00:00Z"
+  cluster: prod-01
+  distributionLine: default-platform
+  channel: stable
+  bom:
+    name: default-platform
+    revision: rev-2026-06-01
+    digest: sha256:...
+  localInputRevision: sha256:...
+  digest: sha256:...
+  audit:
+    createdAt: "2026-06-03T00:00:00Z"
+    command: sealos sync local-repo init
 ```
 
 ## Related Kinds
