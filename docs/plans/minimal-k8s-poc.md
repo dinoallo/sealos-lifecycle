@@ -143,6 +143,48 @@ Current Cilium profile in the repo:
 | `scripts/poc/minimal-single-node/bootstrap.sh` | Legacy end-to-end wrapper retained for compatibility gates, not the PoC operator path. |
 | `scripts/poc/minimal-single-node/validate.sh` | Legacy PoC validator; the guide uses direct Kubernetes and `sync status` checks. |
 
+## Tracked Vs Generated Asset Boundary
+
+The repository tracks package authoring fixtures and small defaults, not every
+artifact required to install a real host.
+
+Tracked PoC inputs:
+
+- package manifests, hooks, service units, default config files, and placeholder
+  rootfs `README` files under `scripts/poc/minimal-single-node/packages/`
+- `scripts/poc/minimal-single-node/bom.yaml` as the local development BOM
+  fixture
+- the current Cilium manifest at
+  `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`,
+  because it is small enough to review and keeps the application package
+  render-ready
+- package lifecycle, smoke, and legacy compatibility helpers under
+  `scripts/poc/minimal-single-node/`
+
+Release-build generated assets:
+
+- runtime binaries and archives for `containerd-runtime`
+- Kubernetes binaries, systemd drop-ins, and bootstrap payloads that turn
+  `kubernetes-rootfs` from a render fixture into an install-ready package
+- refreshed Cilium upstream assets when the Cilium package is regenerated
+- OCI package images, pushed digests, generated release BOMs, and
+  `ReleaseChannel` files
+
+Runtime generated assets:
+
+- cluster-local repos created by `sealos sync local-repo init`
+- rendered bundles created by `sealos sync render`
+- runtime package caches keyed by pulled image digest
+- smoke workdirs, acceptance reports, and local release-source directories
+
+These generated outputs must stay out of git by default. The repository
+`.gitignore` keeps `scripts/poc/minimal-single-node/artifacts/` ignored, and
+real-host PoC runs should write bundles, local repos, reports, and package
+caches under a runtime/work directory such as `/var/lib/sealos/runtime`, `/tmp`,
+or a smoke workdir. If a generated artifact becomes useful as a stable fixture,
+promote only the minimal reviewable file and document why it is no longer
+runtime-only output.
+
 ## Package Responsibilities
 
 ### 1. `containerd-runtime`
