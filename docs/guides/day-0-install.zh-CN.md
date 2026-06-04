@@ -371,6 +371,31 @@ make verify-day0-guide-render \
 applied-revision 文件已经写出。它不会 fetch assets、发布 OCI packages，也不会
 apply 到 host。
 
+## Package Set 边界
+
+当前 Day 0 PoC release set 故意只覆盖可安装的 cluster baseline：
+
+| Package | Owner | Required Local Input | Health Check |
+| --- | --- | --- | --- |
+| `containerd-runtime` | node runtime platform owner | `containerd-config` | runtime service 和本地 runtime tooling 健康 |
+| `kubernetes-rootfs` | cluster platform owner | `kubeadm-cluster-config` | kube-apiserver 可达、node 已注册、bootstrap manifests 已 apply |
+| `cilium-cni` | network platform owner | `cilium-values` | Cilium DaemonSet 和 operator rollout 完成 |
+
+下一批 package set 扩展是产品契约，还不是当前 PoC BOM 的一部分：
+
+- `kubernetes-control-plane-patch`：SRE 维护的 hardening overlays，带
+  policy/admission/static-pod inputs，以及 API/static-Pod projection healthcheck。
+- `csi-driver-*`：storage owner 维护的 addon，带 backend Secret refs、
+  topology/storage-class inputs、controller/node healthchecks 和 data-plane
+  protection notes。
+- `ingress-controller-*`：network/edge owner 维护的 addon，带 ingress class、
+  exposure/TLS/load-balancer inputs，以及 route/webhook healthchecks。
+- `observability-stack`：observability owner 维护的 addon，带 retention、
+  storage、external endpoint inputs，以及 collector/dashboard/alert healthchecks。
+
+这些 package 只有在 package directory、local repo templates、healthcheck hook、
+acceptance evidence 和 rollback/reset 边界都齐备后，才能进入 Day 0。
+
 ## 可重复运行的清理流程
 
 不依赖脚本的 PoC 有一个清理入口，用来清除可以重新生成的状态：rendered bundle

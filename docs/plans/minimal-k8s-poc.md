@@ -187,6 +187,28 @@ runtime-only output.
 
 ## Package Responsibilities
 
+Current PoC package set:
+
+| Package | Class | Owner | Required Local Inputs | Health Check |
+| --- | --- | --- | --- | --- |
+| `containerd-runtime` | `rootfs` | node runtime platform owner | `containerd-config` | `containerd` is active and `ctr`/runtime tooling can report the local runtime state. |
+| `kubernetes-rootfs` | `rootfs` | cluster platform owner | `kubeadm-cluster-config` | kube-apiserver is reachable, the node is registered, and cluster bootstrap manifests have been accepted. |
+| `cilium-cni` | `application` | network platform owner | `cilium-values` | Cilium DaemonSet and operator rollouts complete in `kube-system`. |
+
+Planned package expansion is a product contract, not an implemented PoC payload:
+
+| Package | Status | Required Owner/Input/Healthcheck Contract |
+| --- | --- | --- |
+| `kubernetes-control-plane-patch` | next package to model | SRE-owned patch package with explicit policy/admission/static-pod inputs and an API/static-Pod projection healthcheck. |
+| `csi-driver-*` | future addon | storage-owner package with backend Secret references, topology/storage-class inputs, controller/node plugin healthchecks, and data-plane protection notes. |
+| `ingress-controller-*` | future addon | network/edge-owner package with ingress class, exposure, TLS/load-balancer inputs, and route/webhook healthchecks. |
+| `observability-stack` | future addon | observability-owner package with retention/storage/external endpoint inputs and collector/dashboard/alert healthchecks. |
+
+Do not add these packages to the Day 0 PoC BOM until their package directory,
+local repo templates, healthcheck hook, acceptance evidence, and rollback/reset
+boundary are present. The current scriptless PoC intentionally proves the
+three-package cluster baseline first.
+
 ### 1. `containerd-runtime`
 
 Class:

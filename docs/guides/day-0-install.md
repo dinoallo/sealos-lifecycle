@@ -382,6 +382,34 @@ This target runs `local-repo init`, fills the stock PoC local inputs, runs
 and applied-revision files were written. It does not fetch assets, publish OCI
 packages, or apply to a host.
 
+## Package Set Boundary
+
+The current Day 0 PoC release set is intentionally limited to the installable
+cluster baseline:
+
+| Package | Owner | Required Local Input | Health Check |
+| --- | --- | --- | --- |
+| `containerd-runtime` | node runtime platform owner | `containerd-config` | runtime service and local runtime tooling report healthy |
+| `kubernetes-rootfs` | cluster platform owner | `kubeadm-cluster-config` | kube-apiserver is reachable, nodes register, and bootstrap manifests apply |
+| `cilium-cni` | network platform owner | `cilium-values` | Cilium DaemonSet and operator rollouts complete |
+
+The next package-set expansion is a product contract, not part of the current
+PoC BOM yet:
+
+- `kubernetes-control-plane-patch`: SRE-owned hardening overlays with
+  policy/admission/static-pod inputs and API/static-Pod projection healthcheck
+- `csi-driver-*`: storage-owned addon with backend Secret refs,
+  topology/storage-class inputs, controller/node healthchecks, and data-plane
+  protection notes
+- `ingress-controller-*`: network/edge-owned addon with ingress class,
+  exposure/TLS/load-balancer inputs, and route/webhook healthchecks
+- `observability-stack`: observability-owned addon with retention, storage,
+  external endpoint inputs, and collector/dashboard/alert healthchecks
+
+Do not add these packages to Day 0 until the package directory, local repo
+templates, healthcheck hook, acceptance evidence, and rollback/reset boundary
+are present.
+
 ## Repeat-Run Cleanup
 
 The scriptless PoC has a cleanup entrypoint for state that is safe to regenerate:

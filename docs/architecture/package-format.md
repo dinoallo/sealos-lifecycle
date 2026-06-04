@@ -104,6 +104,9 @@ If Sealos manages the container runtime, it should be modeled as a separate pack
 | `kubernetes-rootfs` | `rootfs` | `kubeadm`, `kubelet`, `kubectl`, host baseline files, systemd units or drop-ins, kubeadm defaults, bootstrap hooks | These assets bootstrap the node baseline and usually move together as one Kubernetes revision. |
 | `cilium-cni` | `application` | Cilium manifests, optional values files, networking health checks | Networking has its own lifecycle, release cadence, and operational owner. |
 | `kubernetes-control-plane-patch` | `patch` | audit policy, admission config, extra API server flags, static-pod patches, kubelet config overlays, policy manifests | This is the right layer for SRE customization that should be reusable across clusters without forking the rootfs package. |
+| `csi-driver-*` | `application` | CSI controller/node plugin manifests, StorageClass defaults, snapshotter integration, storage health checks | Storage has a separate operational owner, cloud/vendor lifecycle, data-plane blast radius, and rollback policy from Kubernetes bootstrap. |
+| `ingress-controller-*` | `application` | ingress controller manifests, ingress class defaults, admission webhooks, load balancer integration, request-path health checks | Ingress is an edge traffic subsystem with its own release cadence, certificates, exposure policy, and rollback workflow. |
+| `observability-stack` | `application` | metrics/logging/tracing manifests, dashboards, alerts, scrape defaults, health checks | Observability is often owned by a platform/SRE team and should evolve independently from the cluster baseline. |
 
 ### Inputs Vs Patch Packages
 
@@ -278,6 +281,9 @@ hydrate time. It does not mean the package can be overridden arbitrarily.
 | `kubernetes-rootfs` | `kubeadm`, `kubelet`, `kubectl`, systemd units, sysctl profile, bootstrap manifests, bootstrap and healthcheck hooks, baseline kubeadm config structure | cluster name, control-plane endpoint, advertise address, node IP inventory, pod/service CIDR, image repository overrides, private certificates or CA refs, kubelet extra env | audit policy, admission controller config, reusable API server flags, static-pod patches, common kubelet config overlays |
 | `cilium-cni` | Cilium manifest or chart revision, baseline RBAC and DaemonSet resources, default feature profile, healthcheck logic | cluster-specific IPAM values, native-routing or pod-CIDR integration, MTU overrides, environment-specific mirror refs, approved nodeSelector or toleration overrides | whether Cilium is the chosen CNI, shared `kubeProxyReplacement` policy, shared Hubble profile, standard operator sizing policy |
 | `kubernetes-control-plane-patch` (later) | reusable control-plane hardening overlays, audit policy, admission config, shared policy manifests, reusable static-pod patches | cluster-specific endpoint refs, certificate refs, narrowly scoped environment-specific exemptions | the hardening profile itself, standard platform security defaults |
+| `csi-driver-*` (later) | driver controller/node plugin revision, RBAC, CRDs, sidecars, default StorageClass and VolumeSnapshotClass templates, healthcheck logic | zone/region, credentials Secret references, storage pool/class names, topology labels, reclaim policy overrides | supported storage backend choice, driver version, default encryption/expansion policy, snapshot policy |
+| `ingress-controller-*` (later) | controller deployment, service model, ingress class, webhook manifests, default timeout/body-size policy, healthcheck logic | load balancer address or class, TLS Secret refs, node placement, environment-specific annotations | chosen ingress implementation, standard exposure policy, baseline security headers, shared WAF or gateway policy |
+| `observability-stack` (later) | metrics/logging/tracing manifests, dashboards, alert rules, scrape defaults, healthcheck logic | retention size, storage class, external endpoint refs, tenant labels, Secret refs for remote write or notification channels | standard dashboard pack, alert baseline, scrape policy, platform SLO profile |
 
 The decision pattern should be consistent across packages:
 
@@ -402,6 +408,32 @@ Recommended adoption sequence:
 3. Broader platform model: add independently owned addon packages such as CSI, ingress, and observability
 
 This gives SREs a place to express opinionated control-plane customizations without turning every Kubernetes daemon into its own package.
+
+### Extended Package Set Contract
+
+The first package set expansion should not just add package names. Each new
+package needs an owner, explicit local input surface, dependency contract, and
+health check before it is considered part of the supported Day 0 model.
+
+| Package | Owner | Depends On | Required Inputs | Health Check |
+| --- | --- | --- | --- | --- |
+| `kubernetes-control-plane-patch` | platform/SRE | `kubernetes-rootfs` exact Kubernetes minor | optional policy exemption refs, certificate or admission config refs, tightly scoped static-pod patch values | API server reports healthy, static Pod projections match the rendered bundle, and policy manifests are accepted by kube-apiserver. |
+| `csi-driver-*` | storage platform owner | `kubernetes-rootfs`, selected CNI, storage backend prereqs | backend credential Secret refs, zone/region/topology labels, StorageClass names, reclaim and expansion policy values | CSI controller deployment ready, node plugin DaemonSet ready on expected nodes, a non-destructive provisioning capability check passes, and no PVC data-plane deletion is attempted by default. |
+| `ingress-controller-*` | network/edge platform owner | `kubernetes-rootfs`, selected CNI, optional load balancer integration | ingress class name, service exposure mode, TLS Secret refs, load balancer annotations or address refs | controller deployment ready, admission webhook ready when present, ingress class visible, and an HTTP readiness route or synthetic backend check passes. |
+| `observability-stack` | platform/SRE observability owner | `kubernetes-rootfs`, selected CNI, optional CSI for persistent storage | retention and storage class values, external endpoint refs, Secret refs for remote write, notification, or auth | core collectors and UI deployments ready, scrape targets healthy, alert rules loaded, and dashboards or API probes respond. |
+
+Boundaries:
+
+- the PoC repository fixture remains the three-package set until these packages
+  have real package directories, local input templates, and acceptance coverage
+- `kubernetes-control-plane-patch` is the preferred place for reusable
+  hardening overlays; it should not become a dumping ground for per-cluster
+  installation facts
+- addon packages must carry cluster-scoped `healthcheck` hooks before promotion
+  beyond authoring examples
+- data-plane resources such as PVCs, database contents, and user traffic state
+  require a separate protection/runbook contract before reset, revert, or
+  destructive cleanup workflows touch them
 
 ## Transport And Discovery
 
