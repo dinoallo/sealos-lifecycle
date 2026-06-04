@@ -20,9 +20,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	ocidigest "github.com/opencontainers/go-digest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"sigs.k8s.io/yaml"
@@ -50,11 +52,26 @@ type syncPackageBuildOutput struct {
 }
 
 type syncPackagePushOutput struct {
-	SourceImage string `json:"sourceImage" yaml:"sourceImage"`
-	Destination string `json:"destination" yaml:"destination"`
-	Image       string `json:"image" yaml:"image"`
-	Digest      string `json:"digest" yaml:"digest"`
-	Reference   string `json:"reference" yaml:"reference"`
+	SourceImage    string                    `json:"sourceImage" yaml:"sourceImage"`
+	Destination    string                    `json:"destination" yaml:"destination"`
+	Image          string                    `json:"image" yaml:"image"`
+	Digest         string                    `json:"digest" yaml:"digest"`
+	Reference      string                    `json:"reference" yaml:"reference"`
+	ProvenanceFile string                    `json:"provenanceFile,omitempty" yaml:"provenanceFile,omitempty"`
+	Provenance     syncPackagePushProvenance `json:"provenance" yaml:"provenance"`
+}
+
+type syncPackagePushProvenance struct {
+	Transport       string                      `json:"transport" yaml:"transport"`
+	DigestAlgorithm string                      `json:"digestAlgorithm" yaml:"digestAlgorithm"`
+	DigestEncoded   string                      `json:"digestEncoded" yaml:"digestEncoded"`
+	AuthMode        syncPackageRegistryAuthMode `json:"authMode" yaml:"authMode"`
+}
+
+type syncPackageRegistryAuthMode struct {
+	Authfile bool `json:"authfile" yaml:"authfile"`
+	CertDir  bool `json:"certDir" yaml:"certDir"`
+	Creds    bool `json:"creds" yaml:"creds"`
 }
 
 type syncPackagePullOutput struct {
@@ -225,13 +242,14 @@ func newSyncPackageBuildCmd() *cobra.Command {
 
 func newSyncPackagePushCmd() *cobra.Command {
 	var flags struct {
-		image       string
-		destination string
-		authfile    string
-		certDir     string
-		creds       string
-		digestFile  string
-		output      string
+		image          string
+		destination    string
+		authfile       string
+		certDir        string
+		creds          string
+		digestFile     string
+		provenanceFile string
+		output         string
 	}
 
 	cmd := &cobra.Command{
@@ -258,6 +276,7 @@ func newSyncPackagePushCmd() *cobra.Command {
 			}
 
 			pushArgs := []string{"push", "--digestfile", digestFile}
+			authMode := syncPackagePushAuthMode(flags.authfile, flags.certDir, flags.creds)
 			if flags.authfile != "" {
 				pushArgs = append(pushArgs, "--authfile", flags.authfile)
 			}
@@ -274,25 +293,36 @@ func newSyncPackagePushCmd() *cobra.Command {
 				return err
 			}
 			if err := runSyncPackageSubcommand(pushArgs, cmd.ErrOrStderr()); err != nil {
-				return fmt.Errorf("push package image: %w", err)
+				return fmt.Errorf("push package image %q to %q: %w; registry diagnostics: authfile=%t cert-dir=%t creds=%t; for private registries pass --authfile or --creds, for custom CAs pass --cert-dir", flags.image, destination, err, authMode.Authfile, authMode.CertDir, authMode.Creds)
 			}
 
 			digestBytes, err := os.ReadFile(digestFile)
 			if err != nil {
 				return fmt.Errorf("read digest file %q: %w", digestFile, err)
 			}
-			digest := strings.TrimSpace(string(digestBytes))
-			if digest == "" {
-				return fmt.Errorf("push completed without digest output")
+			pushedDigest, err := parseSyncPackagePushDigest(digestBytes, digestFile)
+			if err != nil {
+				return err
 			}
 
 			image := imageRefFromSyncPackageDestination(destination)
+			digest := pushedDigest.String()
 			out := syncPackagePushOutput{
-				SourceImage: flags.image,
-				Destination: destination,
-				Image:       image,
-				Digest:      digest,
-				Reference:   image + "@" + digest,
+				SourceImage:    flags.image,
+				Destination:    destination,
+				Image:          image,
+				Digest:         digest,
+				Reference:      image + "@" + digest,
+				ProvenanceFile: flags.provenanceFile,
+				Provenance: syncPackagePushProvenance{
+					Transport:       syncPackageDestinationTransport(destination),
+					DigestAlgorithm: pushedDigest.Algorithm().String(),
+					DigestEncoded:   pushedDigest.Encoded(),
+					AuthMode:        authMode,
+				},
+			}
+			if err := writeSyncPackagePushProvenance(flags.provenanceFile, out); err != nil {
+				return err
 			}
 			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
 				{"source_image", out.SourceImage},
@@ -300,6 +330,13 @@ func newSyncPackagePushCmd() *cobra.Command {
 				{"image", out.Image},
 				{"digest", out.Digest},
 				{"reference", out.Reference},
+				{"provenance_file", out.ProvenanceFile},
+				{"transport", out.Provenance.Transport},
+				{"digest_algorithm", out.Provenance.DigestAlgorithm},
+				{"digest_encoded", out.Provenance.DigestEncoded},
+				{"authfile_configured", strconv.FormatBool(out.Provenance.AuthMode.Authfile)},
+				{"cert_dir_configured", strconv.FormatBool(out.Provenance.AuthMode.CertDir)},
+				{"creds_configured", strconv.FormatBool(out.Provenance.AuthMode.Creds)},
 			})
 		},
 	}
@@ -310,6 +347,7 @@ func newSyncPackagePushCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.certDir, "cert-dir", "", "path to registry certificates")
 	cmd.Flags().StringVar(&flags.creds, "creds", "", "registry credentials in user[:pass] form")
 	cmd.Flags().StringVar(&flags.digestFile, "digest-file", "", "write the pushed digest to this path")
+	cmd.Flags().StringVar(&flags.provenanceFile, "provenance-file", "", "write push provenance YAML to this path")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	mustMarkFlagRequired(cmd, "image")
 	mustMarkFlagRequired(cmd, "destination")
@@ -486,6 +524,54 @@ func normalizeSyncPackagePushDestination(destination string) string {
 	default:
 		return "docker://" + destination
 	}
+}
+
+func syncPackageDestinationTransport(destination string) string {
+	if index := strings.Index(destination, ":"); index > 0 {
+		return destination[:index]
+	}
+	return "docker"
+}
+
+func syncPackagePushAuthMode(authfile, certDir, creds string) syncPackageRegistryAuthMode {
+	return syncPackageRegistryAuthMode{
+		Authfile: authfile != "",
+		CertDir:  certDir != "",
+		Creds:    creds != "",
+	}
+}
+
+func parseSyncPackagePushDigest(raw []byte, digestFile string) (ocidigest.Digest, error) {
+	value := strings.TrimSpace(string(raw))
+	if value == "" {
+		return "", fmt.Errorf("push completed without digest output")
+	}
+	digest, err := ocidigest.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("parse pushed digest from %q: %w", digestFile, err)
+	}
+	if err := digest.Validate(); err != nil {
+		return "", fmt.Errorf("validate pushed digest from %q: %w", digestFile, err)
+	}
+	return digest, nil
+}
+
+func writeSyncPackagePushProvenance(path string, out syncPackagePushOutput) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create provenance directory %q: %w", filepath.Dir(path), err)
+	}
+	data, err := yaml.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal push provenance: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write push provenance %q: %w", path, err)
+	}
+	return nil
 }
 
 func imageRefFromSyncPackageDestination(destination string) string {

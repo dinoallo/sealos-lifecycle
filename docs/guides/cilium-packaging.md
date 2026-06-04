@@ -216,11 +216,26 @@ Push the previously built image:
 ```bash
 sealos sync package push \
   --image localhost:5000/poc-minimal/cilium-cni:v1.15.0 \
-  --destination localhost:5000/poc-minimal/cilium-cni:v1.15.0
+  --destination localhost:5000/poc-minimal/cilium-cni:v1.15.0 \
+  --provenance-file /tmp/cilium-cni.provenance.yaml
 ```
 
 The push command returns the pushed image digest and the fully qualified
-reference. That digest is what should be recorded in a BOM.
+reference. It validates the digest as an OCI digest before reporting success,
+and the optional provenance file records the destination transport, digest
+algorithm, encoded digest value, and which registry auth inputs were configured.
+Credential values passed through `--creds` are forwarded to the underlying push
+but are not written to command output, provenance, or failure diagnostics.
+
+That digest is what should be recorded in a BOM. Signing remains an external
+registry/image-policy concern for this PoC flow; the BOM pins package selection
+by image plus digest.
+
+For a mirror or air-gapped registry, point `--destination` at the mirror
+registry and record that mirror image plus digest in the BOM. Render-time OCI
+resolution still uses the digest-derived pull-if-missing cache; cache GC,
+prewarming, and registry-outage runbooks are separate operational tasks, not
+part of package publishing.
 
 The PoC wrapper script that does this for all three components is:
 
