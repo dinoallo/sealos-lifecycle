@@ -2508,6 +2508,119 @@ metadata:
 	}
 }
 
+func TestSyncLocalRepoDoctorAcceptsSecretReferencesAndRedactsPayloads(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	packageRoot := filepath.Join(t.TempDir(), "runtime-rootfs")
+	writeSyncTestPackage(t, packageRoot)
+	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
+	if err := yamlutil.MarshalFile(bomPath, syncLifecycleBOM()); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+
+	localRepoRoot := filepath.Join(t.TempDir(), "local-repo")
+	writeSyncTestFile(t, filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"), "clusterName: test\n", 0o644)
+	writeSyncTestFile(t, filepath.Join(localRepoRoot, "resources", "secrets", "grafana-admin-direct-secret.yaml"), `apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-direct
+stringData:
+  password: direct-secret-value
+`, 0o600)
+	writeSyncTestFile(t, filepath.Join(localRepoRoot, "resources", "external-secrets", "grafana-admin-external-secret.yaml"), `apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: grafana-admin-external
+spec:
+  data:
+    - secretKey: password
+      remoteRef:
+        key: grafana/admin-password
+        property: password
+`, 0o600)
+	secretProviderClassPath := filepath.Join(localRepoRoot, "resources", "secrets", "grafana-vault-secretproviderclass.yaml")
+	writeSyncTestFile(t, secretProviderClassPath, `apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: grafana-vault
+spec:
+  provider: vault
+  parameters:
+    roleName: grafana-vault-role
+    objects: |
+      - objectName: vault-admin-password-ref
+        secretPath: grafana/admin-password
+        secretKey: password
+`, 0o600)
+
+	doctorOut := runSyncLocalRepoDoctor(syncLocalRepoDoctorOptions{
+		BOMPath:        bomPath,
+		LocalRepoPath:  localRepoRoot,
+		PackageSources: []string{"runtime=" + packageRoot},
+	})
+	if !doctorOut.Passed {
+		t.Fatalf("doctor passed = false, issues=%#v", doctorOut.Issues)
+	}
+	doctorPayload, err := yaml.Marshal(doctorOut)
+	if err != nil {
+		t.Fatalf("Marshal(doctorOut) error = %v", err)
+	}
+	assertSyncLocalRepoDoctorOutputDoesNotContain(t, doctorPayload,
+		"direct-secret-value",
+		"grafana/admin-password",
+		"vault-admin-password-ref",
+		"grafana-vault-role",
+	)
+	codes := syncLocalRepoDoctorIssueCodeSet(doctorOut.Issues)
+	for _, code := range []string{"secretResourceKindInvalid", "secretResourceModeTooOpen"} {
+		if _, ok := codes[code]; ok {
+			t.Fatalf("doctor issue code %q present, want absent; codes=%#v output=%#v", code, codes, doctorOut)
+		}
+	}
+
+	if err := os.Chmod(secretProviderClassPath, 0o644); err != nil {
+		t.Fatalf("Chmod(SecretProviderClass) error = %v", err)
+	}
+	doctorOut = runSyncLocalRepoDoctor(syncLocalRepoDoctorOptions{
+		BOMPath:        bomPath,
+		LocalRepoPath:  localRepoRoot,
+		PackageSources: []string{"runtime=" + packageRoot},
+	})
+	if doctorOut.Passed {
+		t.Fatalf("doctor passed = true, want false for too-open SecretProviderClass; output=%#v", doctorOut)
+	}
+	doctorPayload, err = yaml.Marshal(doctorOut)
+	if err != nil {
+		t.Fatalf("Marshal(doctorOut too open) error = %v", err)
+	}
+	assertSyncLocalRepoDoctorOutputDoesNotContain(t, doctorPayload,
+		"direct-secret-value",
+		"grafana/admin-password",
+		"vault-admin-password-ref",
+		"grafana-vault-role",
+	)
+	codes = syncLocalRepoDoctorIssueCodeSet(doctorOut.Issues)
+	if _, ok := codes["secretResourceModeTooOpen"]; !ok {
+		t.Fatalf("doctor issue code secretResourceModeTooOpen missing; codes=%#v output=%#v", codes, doctorOut)
+	}
+	if _, ok := codes["secretResourceKindInvalid"]; ok {
+		t.Fatalf("doctor issue code secretResourceKindInvalid present, want absent; codes=%#v output=%#v", codes, doctorOut)
+	}
+}
+
+func assertSyncLocalRepoDoctorOutputDoesNotContain(t *testing.T, output []byte, values ...string) {
+	t.Helper()
+	for _, value := range values {
+		if strings.Contains(string(output), value) {
+			t.Fatalf("doctor output leaked %q:\n%s", value, string(output))
+		}
+	}
+}
+
 func syncLocalRepoDoctorIssueCodeSet(issues []syncLocalRepoDoctorIssue) map[string]struct{} {
 	codes := make(map[string]struct{}, len(issues))
 	for _, issue := range issues {

@@ -525,7 +525,7 @@ func (a *syncLocalRepoDoctorAccumulator) checkResources(repo *localrepo.Repo) {
 				"",
 				resource.Path,
 				fmt.Sprintf("secret-like resource path %q uses kind %q", resource.RelativePath, kind),
-				"Use kind Secret, ExternalSecret, ClusterExternalSecret, or SealedSecret for files under secret-like resource paths.",
+				"Use kind Secret, ExternalSecret, ClusterExternalSecret, SecretProviderClass, or SealedSecret for files under secret-like resource paths.",
 			)
 		}
 		a.checkSecretResourceMode(resource, secretLike || syncLocalRepoDoctorAllowedSecretResourceKind(kind))
@@ -694,7 +694,7 @@ func syncLocalRepoDoctorIsManifestPath(path string) bool {
 
 func syncLocalRepoDoctorAllowedSecretResourceKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "Secret", "ExternalSecret", "ClusterExternalSecret", "SealedSecret":
+	case "Secret", "ExternalSecret", "ClusterExternalSecret", "SecretProviderClass", "SealedSecret":
 		return true
 	default:
 		return false
