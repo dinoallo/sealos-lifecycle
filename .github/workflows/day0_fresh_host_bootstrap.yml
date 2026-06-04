@@ -171,6 +171,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cleanup previous Day 0 state
+        run: |
+          sudo scripts/poc/day0-cleanup.sh \
+            --cluster "${CLUSTER_NAME}" \
+            --runtime-root /var/lib/sealos/runtime \
+            --workdir "${WORKDIR}"
+
       - name: Run protected bootstrap
         run: |
           sudo scripts/poc/minimal-single-node/bootstrap.sh \

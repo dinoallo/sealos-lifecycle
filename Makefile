@@ -95,6 +95,11 @@ Options:
                    Extra arguments passed to scripts/poc/multi-node-day0/acceptance.sh.
                    The acceptance script is safe and does not mutate hosts.
 
+  DAY0_CLEANUP_ARGS
+                   Extra arguments passed to scripts/poc/day0-cleanup.sh.
+                   The default cleanup path removes only Day 0 distribution
+                   runtime/local-repo state and explicit temporary workdirs.
+
   I_UNDERSTAND_THIS_MUTATES_HOST
                    Must be set to 1 for verify-sync-package-apply and
                    verify-sync-package-revert.
@@ -276,6 +281,21 @@ verify-day0-bootstrap-apply:
 .PHONY: verify-day0-multinode-acceptance
 verify-day0-multinode-acceptance:
 	@scripts/poc/multi-node-day0/acceptance.sh $(DAY0_MULTINODE_ARGS)
+
+## cleanup-day0-poc: Remove repeat-run Day 0 PoC distribution state without resetting Kubernetes.
+.PHONY: cleanup-day0-poc
+cleanup-day0-poc:
+	@scripts/poc/day0-cleanup.sh $(DAY0_CLEANUP_ARGS)
+
+## reset-day0-poc: Reset the selected Day 0 PoC cluster, then remove repeat-run state.
+.PHONY: reset-day0-poc
+reset-day0-poc:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target resets a Kubernetes cluster" >&2; \
+		exit 1; \
+	fi; \
+	scripts/poc/day0-cleanup.sh --reset-cluster --yes-reset $(DAY0_CLEANUP_ARGS)
 
 ## build-distribution-controller-image: Build the sealos-agent controller image for testing or release preparation.
 .PHONY: build-distribution-controller-image

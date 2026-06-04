@@ -382,6 +382,42 @@ This target runs `local-repo init`, fills the stock PoC local inputs, runs
 and applied-revision files were written. It does not fetch assets, publish OCI
 packages, or apply to a host.
 
+## Repeat-Run Cleanup
+
+The scriptless PoC has a cleanup entrypoint for state that is safe to regenerate:
+rendered bundle state, cluster-local repo content, temporary workdirs, and
+optional remote staged bundle mirrors. The default cleanup path does not remove
+Kubernetes, CRI, kubelet, containerd, `Clusterfile`, `admin.conf`, or host data:
+
+```bash
+make cleanup-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster poc-minimal \
+    --runtime-root /var/lib/sealos/runtime \
+    --distribution-root /var/lib/sealos/distribution"
+```
+
+For multi-node reruns where `sync apply` has copied staged bundle mirrors to
+remote hosts, add `--remote-staged` only when the cluster has a default-runtime
+`Clusterfile` that `sealos exec -c <cluster>` can use:
+
+```bash
+make cleanup-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster sealos-distribution-test --remote-staged"
+```
+
+Resetting Kubernetes/CRI state is a separate destructive operation. It is never
+part of the default cleanup path. Use it only on disposable PoC hosts:
+
+```bash
+I_UNDERSTAND_THIS_MUTATES_HOST=1 make reset-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster poc-minimal"
+```
+
+For scriptless installs that use `--runtime-root /var/lib/sealos/runtime`,
+prefer the safe cleanup target before rerendering. Use `reset-day0-poc` only
+when the target cluster also exists in the default Sealos runtime root used by
+`sealos reset`, because `sealos reset` does not accept `--runtime-root`.
+
 ## Development-Only Local Package Flow
 
 When iterating on package directories in-tree, developers may bypass published

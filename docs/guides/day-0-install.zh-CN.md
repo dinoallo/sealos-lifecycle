@@ -371,6 +371,42 @@ make verify-day0-guide-render \
 applied-revision 文件已经写出。它不会 fetch assets、发布 OCI packages，也不会
 apply 到 host。
 
+## 可重复运行的清理流程
+
+不依赖脚本的 PoC 有一个清理入口，用来清除可以重新生成的状态：rendered bundle
+state、cluster-local repo、临时 workdir，以及可选的远端 staged bundle mirror。
+默认清理路径不会删除 Kubernetes、CRI、kubelet、containerd、`Clusterfile`、
+`admin.conf` 或 host 数据：
+
+```bash
+make cleanup-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster poc-minimal \
+    --runtime-root /var/lib/sealos/runtime \
+    --distribution-root /var/lib/sealos/distribution"
+```
+
+如果 multi-node rerun 中 `sync apply` 已经把 staged bundle mirror 复制到了远端
+hosts，并且该 cluster 在默认 runtime root 下有 `sealos exec -c <cluster>` 可用的
+`Clusterfile`，可以显式加 `--remote-staged`：
+
+```bash
+make cleanup-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster sealos-distribution-test --remote-staged"
+```
+
+重置 Kubernetes/CRI 状态是单独的破坏性操作，永远不是默认 cleanup 的一部分。
+只有在一次性 PoC 主机上才使用：
+
+```bash
+I_UNDERSTAND_THIS_MUTATES_HOST=1 make reset-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster poc-minimal"
+```
+
+对于使用 `--runtime-root /var/lib/sealos/runtime` 的不依赖脚本安装，rerender 之前
+优先用安全 cleanup target。只有当目标 cluster 同时存在于 `sealos reset` 使用的
+默认 Sealos runtime root 中时，才使用 `reset-day0-poc`，因为 `sealos reset` 不支持
+`--runtime-root`。
+
 ## 仅开发使用的本地 package 流程
 
 开发者在本仓库里迭代 package 目录时，可以用 `--package-source` 绕过已发布的
