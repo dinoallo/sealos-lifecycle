@@ -126,6 +126,48 @@ func TestEvaluateDefault(t *testing.T) {
 			wantHealth: true,
 		},
 		{
+			name: "stable rejects missing required health signal",
+			request: Request{
+				TargetChannel: ChannelStable,
+				Candidate: CandidateRevision{
+					Line:          "default-platform",
+					Revision:      "rev-20240424",
+					SourceChannel: ChannelBeta,
+				},
+				HealthProof: HealthProofSummary{
+					Provided:               true,
+					Passed:                 true,
+					RequiredSignals:        []string{"node-readiness", "runtime-preflight"},
+					MissingRequiredSignals: []string{"runtime-preflight"},
+					MinPassedSignals:       1,
+					PassedSignals:          1,
+				},
+			},
+			wantCodes:  []ViolationCode{ViolationHealthProofFailed},
+			wantHealth: true,
+		},
+		{
+			name: "beta accepts optional failed signal when thresholds pass",
+			request: Request{
+				TargetChannel: ChannelBeta,
+				Candidate: CandidateRevision{
+					Line:          "default-platform",
+					Revision:      "rev-20240424",
+					SourceChannel: ChannelAlpha,
+				},
+				HealthProof: HealthProofSummary{
+					Provided:              true,
+					Passed:                true,
+					RequiredSignals:       []string{"node-readiness"},
+					OptionalFailedSignals: []string{"observability-smoke"},
+					MinPassedSignals:      1,
+					PassedSignals:         1,
+				},
+			},
+			wantAllow:  true,
+			wantHealth: true,
+		},
+		{
 			name: "alpha rejects provided failed health proof",
 			request: Request{
 				TargetChannel: ChannelAlpha,
@@ -158,6 +200,9 @@ func TestEvaluateDefault(t *testing.T) {
 				t.Fatalf("HealthProofRequired = %v, want %v", got, want)
 			}
 			assertViolationCodes(t, decision.Violations, tt.wantCodes)
+			if tt.name == "beta accepts optional failed signal when thresholds pass" && len(decision.Warnings) == 0 {
+				t.Fatal("Warnings empty, want optional failed signal warning")
+			}
 		})
 	}
 }

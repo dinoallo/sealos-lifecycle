@@ -53,7 +53,8 @@ status: {}
 | --- | --- |
 | `state` | One of `Clean`, `Dirty`, `Orphan`, or `Degraded`. |
 | `lastAppliedTime` | Last apply attempt time. |
-| `lastSuccessfulRevision` | Last known successful revision. |
+| `lastSuccessfulRevision` | Last known successful revision snapshot, including BOM identity, target metadata, local revisions, and desired-state digest. |
+| `successfulRevisions` | Bounded newest-first history of successful revision snapshots, used for cross-BOM audit and rollback context. |
 | `observedSummary` | Counts or summary of observed resources. |
 | `conditions` | Structured conditions for apply and drift state. |
 
@@ -69,7 +70,10 @@ status: {}
 1. Apply consumes a `HydratedBundle`.
 2. Reconciliation writes the applied revision and desired state digest.
 3. Drift detection updates status conditions.
-4. Future applies update the same cluster state with a new revision.
+4. Future applies update the same cluster state with a new revision and prepend
+   a successful revision history entry.
+5. Rollback uses the last successful revision snapshot, including its target
+   metadata, even when the failed upgrade selected a different BOM line.
 
 ## Boundaries
 
@@ -98,7 +102,20 @@ spec:
 status:
   state: Clean
   lastAppliedTime: "2026-06-01T00:00:00Z"
-  lastSuccessfulRevision: v5.0.0
+  lastSuccessfulRevision:
+    bom:
+      name: sealos-v5.0.0
+      revision: v5.0.0
+      channel: stable
+      digest: sha256:...
+    desiredStateDigest: sha256:...
+  successfulRevisions:
+    - bom:
+        name: sealos-v5.0.0
+        revision: v5.0.0
+        channel: stable
+        digest: sha256:...
+      desiredStateDigest: sha256:...
 ```
 
 ## Related Kinds

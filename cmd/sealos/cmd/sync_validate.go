@@ -73,6 +73,9 @@ type syncValidateOutput struct {
 	ClusterName        string                      `json:"clusterName" yaml:"clusterName"`
 	BOMPath            string                      `json:"bomPath" yaml:"bomPath"`
 	ReleaseChannelPath string                      `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
+	ReleaseSource      string                      `json:"releaseSource,omitempty" yaml:"releaseSource,omitempty"`
+	ReleaseLine        string                      `json:"releaseLine,omitempty" yaml:"releaseLine,omitempty"`
+	Channel            string                      `json:"channel,omitempty" yaml:"channel,omitempty"`
 	LocalRepo          string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
 	ExecutionTopology  hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
 	Summary            syncValidateSummary         `json:"summary" yaml:"summary"`
@@ -137,6 +140,9 @@ func newSyncValidateCmd() *cobra.Command {
 		clusterName        string
 		bomFile            string
 		releaseChannelFile string
+		releaseSource      string
+		releaseLine        string
+		channel            string
 		localRepo          string
 		packageSources     []string
 		output             string
@@ -152,6 +158,9 @@ func newSyncValidateCmd() *cobra.Command {
 				ClusterName:        flags.clusterName,
 				BOMPath:            flags.bomFile,
 				ReleaseChannelPath: flags.releaseChannelFile,
+				ReleaseSource:      flags.releaseSource,
+				ReleaseLine:        flags.releaseLine,
+				Channel:            flags.channel,
 				LocalRepoPath:      flags.localRepo,
 				PackageSources:     flags.packageSources,
 			})
@@ -165,7 +174,7 @@ func newSyncValidateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose inventory should be used for topology validation")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file to validate")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, &flags.releaseSource, &flags.releaseLine, &flags.channel, "path to the BOM file to validate")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "optional cluster-local repo root to validate against package inputs and local patch policy")
 	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local validation")
 	addSyncOutputFlag(cmd, &flags.output)
@@ -176,6 +185,9 @@ type syncValidateOptions struct {
 	ClusterName        string
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 	LocalRepoPath      string
 	PackageSources     []string
 }
@@ -188,6 +200,9 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 	acc.out.BOMPath = strings.TrimSpace(opts.BOMPath)
 	acc.out.ReleaseChannelPath = strings.TrimSpace(opts.ReleaseChannelPath)
+	acc.out.ReleaseSource = strings.TrimSpace(opts.ReleaseSource)
+	acc.out.ReleaseLine = strings.TrimSpace(opts.ReleaseLine)
+	acc.out.Channel = strings.TrimSpace(opts.Channel)
 	acc.out.LocalRepo = strings.TrimSpace(opts.LocalRepoPath)
 
 	topology, err := loadSyncExecutionTopology(acc.out.ClusterName)
@@ -201,6 +216,9 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	target, err := resolveSyncTarget(syncTargetOptions{
 		BOMPath:            opts.BOMPath,
 		ReleaseChannelPath: opts.ReleaseChannelPath,
+		ReleaseSource:      opts.ReleaseSource,
+		ReleaseLine:        opts.ReleaseLine,
+		Channel:            opts.Channel,
 	})
 	if err != nil {
 		acc.error("bomInvalid", "", strings.TrimSpace(opts.BOMPath), err.Error())
@@ -213,6 +231,15 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 	if strings.TrimSpace(target.ReleaseChannelPath) != "" {
 		acc.out.ReleaseChannelPath = strings.TrimSpace(target.ReleaseChannelPath)
+	}
+	if strings.TrimSpace(target.ReleaseSource) != "" {
+		acc.out.ReleaseSource = strings.TrimSpace(target.ReleaseSource)
+	}
+	if strings.TrimSpace(target.ReleaseLine) != "" {
+		acc.out.ReleaseLine = strings.TrimSpace(target.ReleaseLine)
+	}
+	if target.Channel != "" {
+		acc.out.Channel = string(target.Channel)
 	}
 	acc.out.Summary.Components = doc.PackageCount()
 

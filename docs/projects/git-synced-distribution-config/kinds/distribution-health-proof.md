@@ -43,6 +43,9 @@ spec: {}
 | `passed` | Yes | Overall pass or fail result. |
 | `summary` | No | Human-readable health summary. |
 | `collectedAt` | Yes | RFC3339 timestamp for evidence collection. |
+| `thresholds.requiredSignals` | No | Signal names that must be present and pass for promotion. |
+| `thresholds.minPassedSignals` | No | Minimum number of passing signals required for the proof to pass. When omitted with no thresholds, legacy proofs require all signals to pass. |
+| `signalSummary` | No | Normalized evaluation counts: total, passed, failed, required, failed/missing required, and minimum passing threshold. |
 | `signals` | No | Individual health signals. |
 
 ## Signal Contract
@@ -51,17 +54,27 @@ Each signal records:
 
 - `name`
 - `passed`
+- `required`
+- `source`
+- `evidenceRef`
 - `message`
 
 Signals should be deterministic and traceable to logs, test output, or a
-`PackageAcceptanceReport`.
+`PackageAcceptanceReport`. `source` names the evidence producer, and
+`evidenceRef` points at the field, stage, artifact, or log reference used to
+derive the normalized signal.
 
 ## Validation Rules
 
 - `apiVersion`, `kind`, and `metadata.name` must be set.
 - `targetRevision` must be set.
-- `passed` must reflect the aggregate result of required signals.
+- `passed` must reflect the aggregate result of required signals and the
+  minimum passing-signal threshold.
 - `collectedAt` must be an RFC3339 timestamp.
+- `thresholds.requiredSignals` must not contain empty or duplicate names.
+- Promotion rejects missing required signals, failed required signals, or too
+  few passed signals. Failed optional signals are evidence and warnings when
+  thresholds still pass.
 - Health proof documents must not contain secret values.
 
 ## Lifecycle
@@ -91,12 +104,30 @@ spec:
   passed: true
   summary: all required package acceptance checks passed
   collectedAt: "2026-06-01T00:00:00Z"
+  thresholds:
+    requiredSignals:
+      - package-acceptance
+      - revert-check
+    minPassedSignals: 2
+  signalSummary:
+    totalSignals: 2
+    passedSignals: 2
+    failedSignals: 0
+    requiredSignals: 2
+    passedRequiredSignals: 2
+    minPassedSignals: 2
   signals:
     - name: package-acceptance
       passed: true
+      required: true
+      source: PackageAcceptanceReport
+      evidenceRef: spec.status
       message: acceptance report completed successfully
     - name: revert-check
       passed: true
+      required: true
+      source: PackageAcceptanceReport
+      evidenceRef: spec.stages[name=revert-check-revert]
       message: no managed object drift after revert
 ```
 

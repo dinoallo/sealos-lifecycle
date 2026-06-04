@@ -37,9 +37,16 @@ type CandidateRevision struct {
 }
 
 type HealthProofSummary struct {
-	Provided      bool     `json:"provided" yaml:"provided"`
-	Passed        bool     `json:"passed" yaml:"passed"`
-	FailedSignals []string `json:"failedSignals,omitempty" yaml:"failedSignals,omitempty"`
+	Provided               bool     `json:"provided" yaml:"provided"`
+	Passed                 bool     `json:"passed" yaml:"passed"`
+	TotalSignals           int      `json:"totalSignals,omitempty" yaml:"totalSignals,omitempty"`
+	PassedSignals          int      `json:"passedSignals,omitempty" yaml:"passedSignals,omitempty"`
+	FailedSignals          []string `json:"failedSignals,omitempty" yaml:"failedSignals,omitempty"`
+	OptionalFailedSignals  []string `json:"optionalFailedSignals,omitempty" yaml:"optionalFailedSignals,omitempty"`
+	RequiredSignals        []string `json:"requiredSignals,omitempty" yaml:"requiredSignals,omitempty"`
+	FailedRequiredSignals  []string `json:"failedRequiredSignals,omitempty" yaml:"failedRequiredSignals,omitempty"`
+	MissingRequiredSignals []string `json:"missingRequiredSignals,omitempty" yaml:"missingRequiredSignals,omitempty"`
+	MinPassedSignals       int      `json:"minPassedSignals,omitempty" yaml:"minPassedSignals,omitempty"`
 }
 
 type ChannelRule struct {
@@ -167,6 +174,22 @@ func (p Policy) Evaluate(req Request) (*Decision, error) {
 	if len(req.HealthProof.FailedSignals) > 0 {
 		decision.addViolation(ViolationHealthProofFailed,
 			fmt.Sprintf("health proof has failed signal(s): %s", strings.Join(req.HealthProof.FailedSignals, ", ")))
+	}
+	if len(req.HealthProof.FailedRequiredSignals) > 0 {
+		decision.addViolation(ViolationHealthProofFailed,
+			fmt.Sprintf("health proof has failed required signal(s): %s", strings.Join(req.HealthProof.FailedRequiredSignals, ", ")))
+	}
+	if len(req.HealthProof.MissingRequiredSignals) > 0 {
+		decision.addViolation(ViolationHealthProofFailed,
+			fmt.Sprintf("health proof is missing required signal(s): %s", strings.Join(req.HealthProof.MissingRequiredSignals, ", ")))
+	}
+	if req.HealthProof.MinPassedSignals > 0 && req.HealthProof.PassedSignals < req.HealthProof.MinPassedSignals {
+		decision.addViolation(ViolationHealthProofFailed,
+			fmt.Sprintf("health proof passed %d/%d required evidence threshold signal(s)", req.HealthProof.PassedSignals, req.HealthProof.MinPassedSignals))
+	}
+	if len(req.HealthProof.OptionalFailedSignals) > 0 {
+		decision.Warnings = append(decision.Warnings,
+			fmt.Sprintf("health proof has non-blocking failed optional signal(s): %s", strings.Join(req.HealthProof.OptionalFailedSignals, ", ")))
 	}
 
 	sort.Slice(decision.Violations, func(i, j int) bool {

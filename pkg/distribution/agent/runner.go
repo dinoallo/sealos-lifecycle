@@ -39,6 +39,9 @@ import (
 type TargetOptions struct {
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 }
 
 type PackageSource struct {
@@ -79,8 +82,12 @@ type Runner struct {
 type resolvedTarget struct {
 	bom                *bom.BOM
 	bomPath            string
+	bomDigest          string
 	releaseChannel     *bom.ReleaseChannelDocument
 	releaseChannelPath string
+	releaseSource      string
+	releaseLine        string
+	channel            bom.ReleaseChannel
 }
 
 type packageLoader struct {
@@ -200,11 +207,25 @@ func normalizeOptions(opts Options) Options {
 func resolveTarget(opts TargetOptions) (*resolvedTarget, error) {
 	bomPath := strings.TrimSpace(opts.BOMPath)
 	channelPath := strings.TrimSpace(opts.ReleaseChannelPath)
+	releaseSource := strings.TrimSpace(opts.ReleaseSource)
+	releaseLine := strings.TrimSpace(opts.ReleaseLine)
+	channel := bom.ReleaseChannel(strings.TrimSpace(opts.Channel))
+	lookupSelected := releaseSource != "" || releaseLine != "" || channel != ""
+	selected := 0
+	if bomPath != "" {
+		selected++
+	}
+	if channelPath != "" {
+		selected++
+	}
+	if lookupSelected {
+		selected++
+	}
 	switch {
-	case bomPath == "" && channelPath == "":
-		return nil, fmt.Errorf("one of BOMPath or ReleaseChannelPath is required")
-	case bomPath != "" && channelPath != "":
-		return nil, fmt.Errorf("use either BOMPath or ReleaseChannelPath, not both")
+	case selected == 0:
+		return nil, fmt.Errorf("one of BOMPath, ReleaseChannelPath, or ReleaseSource with ReleaseLine and Channel is required")
+	case selected > 1:
+		return nil, fmt.Errorf("use only one target selector: BOMPath, ReleaseChannelPath, or ReleaseSource with ReleaseLine and Channel")
 	case channelPath != "":
 		resolved, err := bom.ResolveReleaseChannelFile(channelPath)
 		if err != nil {
@@ -213,8 +234,30 @@ func resolveTarget(opts TargetOptions) (*resolvedTarget, error) {
 		return &resolvedTarget{
 			bom:                resolved.BOM,
 			bomPath:            resolved.BOMPath,
+			bomDigest:          resolved.BOMDigest,
 			releaseChannel:     resolved.Channel,
 			releaseChannelPath: channelPath,
+		}, nil
+	case lookupSelected:
+		if releaseSource == "" || releaseLine == "" || channel == "" {
+			return nil, fmt.Errorf("ReleaseSource, ReleaseLine, and Channel must be set together")
+		}
+		resolved, err := bom.ResolveReleaseChannelLookup(bom.ReleaseChannelLookupOptions{
+			DistributionLine: releaseLine,
+			Channel:          channel,
+			Source:           releaseSource,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &resolvedTarget{
+			bom:            resolved.BOM,
+			bomPath:        resolved.BOMPath,
+			bomDigest:      resolved.BOMDigest,
+			releaseChannel: resolved.Channel,
+			releaseSource:  releaseSource,
+			releaseLine:    releaseLine,
+			channel:        channel,
 		}, nil
 	default:
 		doc, err := bom.LoadFile(bomPath)
@@ -341,6 +384,10 @@ func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localr
 	}
 	if target != nil && target.releaseChannel != nil {
 		provenance.DistributionLine = target.releaseChannel.Distribution()
+		provenance.ReleaseChannel = string(target.releaseChannel.Spec.Channel)
+	}
+	if target != nil {
+		provenance.ReleaseSource = strings.TrimSpace(target.releaseSource)
 	}
 	if target != nil && strings.TrimSpace(target.releaseChannelPath) != "" {
 		absChannelPath, err := filepath.Abs(target.releaseChannelPath)
@@ -355,16 +402,21 @@ func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localr
 		provenance.ReleaseChannelDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if target != nil && strings.TrimSpace(target.bomPath) != "" {
-		absBOMPath, err := filepath.Abs(target.bomPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.bomPath, err)
+		if isRemoteTargetPath(target.bomPath) {
+			provenance.BOMPath = strings.TrimSpace(target.bomPath)
+			provenance.BOMDigest = strings.TrimSpace(target.bomDigest)
+		} else {
+			absBOMPath, err := filepath.Abs(target.bomPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.bomPath, err)
+			}
+			provenance.BOMPath = absBOMPath
+			data, err := os.ReadFile(absBOMPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
+			}
+			provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 		}
-		provenance.BOMPath = absBOMPath
-		data, err := os.ReadFile(absBOMPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
-		}
-		provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if repo != nil {
 		provenance.LocalRepoRevision = repo.Revision
@@ -389,6 +441,11 @@ func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localr
 		}
 	}
 	return provenance, nil
+}
+
+func isRemoteTargetPath(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 func (l packageLoader) Load(image string) (*packageformat.ComponentPackage, error) {

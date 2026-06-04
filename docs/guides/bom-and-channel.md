@@ -89,7 +89,7 @@ The key fields today are:
 - `metadata.name`
 - `spec.revision`
 - `spec.channel`
-- `spec.components[]`
+- `spec.packages[]`
 
 ### Recommended Semantics
 
@@ -100,7 +100,7 @@ The cleanest reading of those fields is:
   stable across revisions on the same distribution line.
 - `spec.revision`
   The immutable snapshot identifier for this exact BOM revision.
-- `spec.components[]`
+- `spec.packages[]`
   The actual component graph and digest-pinned artifact set.
 - `spec.channel`
   A transitional field in the current implementation, useful as metadata today,
@@ -148,16 +148,16 @@ spec:
   revision: rev-poc-001
   channel: alpha
   localPatchPolicy: policy/local-patch-policy.yaml
-  components:
+  packages:
     - name: containerd
-      kind: infra
+      category: infra
       version: v1.7.18
       artifact:
         name: containerd-runtime
         image: registry.example/platform/containerd-runtime:v1.7.18
         digest: sha256:<digest>
     - name: kubernetes
-      kind: infra
+      category: infra
       version: v1.30.3
       dependencies:
         - containerd
@@ -171,7 +171,7 @@ Important current rules:
 
 - `spec.revision` is required
 - `spec.channel` is required today
-- `spec.components` is required
+- `spec.packages` is required
 - `spec.localPatchPolicy` is optional; when set, it is a relative path to a
   `LocalPatchPolicy` file next to the BOM and takes precedence over package
   policy sources
@@ -248,7 +248,7 @@ insecure registry config above is intended only for local development.
 ## About `baseArtifacts`
 
 The BOM schema also includes `spec.baseArtifacts`, but the current PoC and the
-current walkthroughs are centered on `spec.components`.
+current walkthroughs are centered on `spec.packages`.
 
 For now, the practical reading is:
 
@@ -307,10 +307,11 @@ kind: ReleaseChannel
 metadata:
   name: default-platform-stable
 spec:
-  line: default-platform
+  distribution: default-platform
   channel: stable
   targetRevision: rev-007
   bomPath: bom.yaml
+  bomDigest: sha256:<bom-digest>
 ```
 
 That shape keeps responsibilities clean:
@@ -323,25 +324,90 @@ That shape keeps responsibilities clean:
 
 | Topic | Current Repo Behavior | Target Design Direction |
 | --- | --- | --- |
-| How a cluster chooses a target | Explicit BOM file path, or a local `ReleaseChannel` file passed with `--release-channel` | Explicit BOM revision, or `distribution line + ReleaseChannel` lookup |
-| Where channel metadata lives | `BOM.spec.channel`, plus local channel selection metadata in render provenance when a `ReleaseChannel` file is used | `ReleaseChannel` object |
-| What `sync render` resolves today | A BOM document passed directly, or a local `ReleaseChannel` whose `spec.bomPath` points at the BOM to load | One resolved BOM revision after optional channel lookup |
-| What applied state records | BOM name, revision, and channel; rendered bundles also record BOM and local `ReleaseChannel` provenance | BOM name, revision, and the channel or explicit target that led to that revision |
+| How a cluster chooses a target | Explicit BOM file path, a local `ReleaseChannel` file passed with `--release-channel`, or a release metadata source plus `distribution line + channel` | Explicit BOM revision, or `distribution line + ReleaseChannel` lookup |
+| Where channel metadata lives | `BOM.spec.channel`, plus local or release-source channel selection metadata in render provenance | `ReleaseChannel` object |
+| What `sync render` resolves today | A BOM document passed directly, a local `ReleaseChannel` whose `spec.bomPath` points at the BOM to load, or a `ReleaseChannel` resolved from `--release-source --release-line --channel` | One resolved BOM revision after optional channel lookup |
+| What applied state records | BOM name, revision, digest, `requestedTarget`, and `resolvedTarget`; rendered bundles also record BOM and `ReleaseChannel` provenance | Same contract, with release history and promotion evidence stored by the release service |
 
 This distinction is important because the current code path in
 [pkg/distribution/bom/channel.go](../../pkg/distribution/bom/channel.go)
-resolves only local channel documents. It validates that the channel `line`
-matches the target BOM `metadata.name`, that `targetRevision` matches the BOM
-`spec.revision`, and then renders that concrete BOM. It does not provide live
-lookup for "latest stable on this distribution line" yet.
+validates that the channel distribution matches the target BOM
+`metadata.name`, that `targetRevision` matches the BOM `spec.revision`, and
+then renders that concrete BOM. Local `ReleaseChannel` files remain supported.
+The release lookup path also resolves `distribution line + channel` from a
+release metadata source and requires `spec.bomDigest` so the resolved BOM is
+digest-pinned before render. A local release directory can be exposed through
+the read-only HTTP lookup API with:
 
-The same local-file boundary also has a small promotion primitive:
-`sealos sync promote`. It advances one local `ReleaseChannel` file to a
-target BOM file after checking target-channel policy, requiring local health
-proof for beta/stable targets, and recording an approver, reason, timestamp,
-and promotion history entry. That gives
-file-backed channel followers a reviewable channel advancement path without
-implying registry/API-backed release lookup.
+```bash
+sealos sync release-metadata serve \
+  --release-source /var/lib/sealos/distribution/releases \
+  --listen 127.0.0.1:8080
+```
+
+That service answers `GET /v1/distributions/{line}/channels/{channel}` with a
+`ReleaseChannel` document and `GET /v1/distributions/{line}/revisions/{revision}/bom`
+with the selected BOM document. It also accepts a health-gated promotion request
+at `POST /v1/distributions/{line}/channels/{channel}/promotions`; the request
+names a `targetRevision`, supplies a passed `DistributionHealthProof`, and then
+uses the same promotion policy as `sealos sync promote` before advancing the
+channel file.
+
+### Applied State Target Contract
+
+Every newly rendered `AppliedRevision` records the operator's request and the
+concrete BOM it resolved to:
+
+```yaml
+spec:
+  bom:
+    name: default-platform
+    revision: rev-007
+    channel: stable
+    digest: sha256:<resolved-bom-digest>
+  requestedTarget:
+    kind: releaseChannelLookup
+    releaseSource: https://release.sealos.example
+    distributionLine: default-platform
+    channel: stable
+    releaseChannelPath: https://release.sealos.example/v1/distributions/default-platform/channels/stable
+  resolvedTarget:
+    bom:
+      name: default-platform
+      revision: rev-007
+      channel: stable
+      digest: sha256:<resolved-bom-digest>
+    releaseChannel:
+      distributionLine: default-platform
+      channel: stable
+      targetRevision: rev-007
+      source: https://release.sealos.example/v1/distributions/default-platform/channels/stable
+```
+
+`requestedTarget.kind` is one of:
+
+- `bom` for an explicit BOM file target
+- `releaseChannelFile` for a local `ReleaseChannel` file
+- `releaseChannelLookup` for registry/API-backed lookup by
+  `distribution line + channel`
+
+`requestedTarget` and `resolvedTarget` are written together. Older state files
+without these fields remain loadable, but new render/apply paths persist both
+fields, and `status.lastSuccessfulRevision` keeps the same target metadata
+after a successful apply.
+
+Successful applies also maintain a bounded newest-first
+`status.successfulRevisions` history. Rollback uses the last successful
+revision snapshot, not the failed desired target, so a failed upgrade can roll
+back across BOM names, distribution lines, channels, and local revision
+metadata as long as the retained revision bundle is still present in the
+cluster runtime store.
+
+The same policy is available locally through `sealos sync promote` and through
+the release metadata service promotion endpoint. Both paths advance one
+`ReleaseChannel` file to a target BOM after checking target-channel policy,
+requiring health proof for beta/stable targets, and recording an approver,
+reason, timestamp, proof digest, and promotion history entry.
 
 ## Day 0 Selection
 
@@ -371,20 +437,22 @@ live state. It should be assigned one of these two target shapes:
 
 ### Important Current Boundary
 
-Today, the current repo implements two local document paths:
+Today, the current repo implements three target paths:
 
 - choose a specific BOM file and pass it to `sealos sync render --file`
 - choose a local `ReleaseChannel` file and pass it to
   `sealos sync render --release-channel`
+- choose a release metadata source, distribution line, and channel and pass
+  them to `sealos sync render --release-source --release-line --channel`
 
 The local `ReleaseChannel` must name the distribution line, channel,
 target revision, and `spec.bomPath` for the target BOM. The CLI resolves the
 channel to that local BOM before materialization.
 
-It does not yet implement:
-
-- registry/API-backed `ReleaseChannel` lookup
-- "follow the latest stable revision on this line" resolution
+For HTTP(S) release sources, Sealos requests
+`/v1/distributions/{line}/channels/{channel}` and expects a `ReleaseChannel`
+document. The `ReleaseChannel` must include `spec.bomDigest`; lookup fails if
+the fetched BOM digest does not match.
 
 ## Local Channel Promotion
 
@@ -412,8 +480,8 @@ The command validates that:
   candidate BOM's source channel
 - if the target channel requires proof, `--health-proof` points to a valid
   `DistributionHealthProof` that targets the same line and BOM revision,
-  reports `spec.passed: true`, includes at least one signal, and has no
-  failed signals
+  reports `spec.passed: true`, includes health signals, and satisfies its
+  required-signal and minimum-passed-signal thresholds
 
 It then writes the updated channel file and appends
 `spec.promotionHistory[]` with:
@@ -465,6 +533,14 @@ steps as mutating. Safe smoke reports that do not run a mutating apply still
 generate useful evidence, but they produce `spec.passed: false` and should not
 satisfy beta/stable promotion policy.
 
+The generated proof also normalizes evidence for channel promotion. Every
+blocking signal carries `required: true`, `source: PackageAcceptanceReport`,
+and an `evidenceRef` that points at the acceptance report field or stage that
+fed the signal. `spec.thresholds.requiredSignals` lists the signals that must
+be present and pass, `spec.thresholds.minPassedSignals` records the minimum
+passing-signal threshold, and `spec.signalSummary` stores the evaluated counts.
+Older proof files without thresholds remain strict: all signals must pass.
+
 A minimal health proof looks like:
 
 ```yaml
@@ -478,12 +554,30 @@ spec:
   passed: true
   summary: beta cohort passed rollout health checks
   collectedAt: "2026-05-20T10:30:00Z"
+  thresholds:
+    requiredSignals:
+      - reconcile
+      - node-readiness
+    minPassedSignals: 2
+  signalSummary:
+    totalSignals: 2
+    passedSignals: 2
+    failedSignals: 0
+    requiredSignals: 2
+    passedRequiredSignals: 2
+    minPassedSignals: 2
   signals:
     - name: reconcile
       passed: true
+      required: true
+      source: PackageAcceptanceReport
+      evidenceRef: spec.stages[name=reconcile]
       message: all canary targets reconciled
     - name: node-readiness
       passed: true
+      required: true
+      source: PackageAcceptanceReport
+      evidenceRef: spec.stages[name=node-readiness]
 ```
 
 When `sealos sync promote` accepts the proof, the promoted channel writes the
@@ -493,7 +587,8 @@ through `--release-channel` or `releaseChannelPath`.
 
 `sealos sync promote` also returns a `policyDecision` object in its structured
 output. The decision records the evaluated transition, target channel rule,
-health-proof requirement, and any warning or violation fields from the policy
+health-proof requirement, required/missing/failed health signals, minimum
+passing-signal threshold, and any warning or violation fields from the policy
 engine. Failed decisions block before the channel file is written.
 
 ## Day 1 To Day N Behavior
@@ -562,9 +657,13 @@ manifests, including a durable `DistributionRolloutPolicy` object for host
 batch size, first-batch canary size, optional post-canary pause, optional
 per-batch health gates, and stop-or-rollback failure behavior. A paused
 or rolled-back controller target waits for an explicit target or policy update
-before it re-enters apply. Registry-backed channel lookup, health-gated
-promotion automation, and a package-level safety model for every multi-node
-workflow are still outside the implemented surface.
+before it re-enters apply. `sync plan` also reports package and phase safety
+profiles for rootfs, host-file, manifest, chart, patch, values, package hook
+phases, local patch approval, and generated host projections so operators can
+distinguish host-wave rollout steps from cluster-wide barriers. Health-gated
+promotion automation is implemented through `sync release-metadata serve` and
+`sealos sync promote`; durable per-package rollout cursors are still outside
+the implemented surface.
 
 ## Applied Revision State
 
@@ -617,8 +716,6 @@ line, not as "whatever the cluster currently drifted into."
 ## What Still Needs To Be Designed Or Implemented
 
 - The final API-backed `ReleaseChannel` schema and storage contract
-- Resolution rules from `distribution line + channel` to one BOM revision
-  without requiring a local `spec.bomPath`
 - API-backed channel advancement history and audit storage beyond the current
   local `spec.promotionHistory[]` field
 - Health-proof ingestion or collection beyond the current local

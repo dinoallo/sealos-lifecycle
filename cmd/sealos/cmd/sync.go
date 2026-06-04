@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,13 +91,21 @@ var repairSyncGeneratedControlPlaneHost = reconcile.RepairGeneratedControlPlaneH
 type syncTargetOptions struct {
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 }
 
 type syncResolvedTarget struct {
 	BOM                    *bom.BOM
 	BOMPath                string
+	BOMDigest              string
 	ReleaseChannelDocument *bom.ReleaseChannelDocument
 	ReleaseChannelPath     string
+	ReleaseChannelSource   string
+	ReleaseSource          string
+	ReleaseLine            string
+	Channel                bom.ReleaseChannel
 }
 
 func (t *syncResolvedTarget) runtimeChannel() bom.ReleaseChannel {
@@ -106,19 +115,36 @@ func (t *syncResolvedTarget) runtimeChannel() bom.ReleaseChannel {
 	return t.ReleaseChannelDocument.Spec.Channel
 }
 
-func addSyncTargetFlags(cmd *cobra.Command, bomPath, releaseChannelPath *string, bomUsage string) {
+func addSyncTargetFlags(cmd *cobra.Command, bomPath, releaseChannelPath, releaseSource, releaseLine, channel *string, bomUsage string) {
 	cmd.Flags().StringVarP(bomPath, "file", "f", "", bomUsage)
 	cmd.Flags().StringVar(releaseChannelPath, "release-channel", "", "path to a ReleaseChannel file to resolve before loading the target BOM")
+	cmd.Flags().StringVar(releaseSource, "release-source", "", "release metadata source URL or directory used with --release-line and --channel")
+	cmd.Flags().StringVar(releaseLine, "release-line", "", "distribution line to resolve from --release-source")
+	cmd.Flags().StringVar(channel, "channel", "", "release channel to resolve from --release-source: alpha, beta, or stable")
 }
 
 func resolveSyncTarget(opts syncTargetOptions) (*syncResolvedTarget, error) {
 	bomPath := strings.TrimSpace(opts.BOMPath)
 	channelPath := strings.TrimSpace(opts.ReleaseChannelPath)
+	releaseSource := strings.TrimSpace(opts.ReleaseSource)
+	releaseLine := strings.TrimSpace(opts.ReleaseLine)
+	channel := bom.ReleaseChannel(strings.TrimSpace(opts.Channel))
+	lookupSelected := releaseSource != "" || releaseLine != "" || channel != ""
+	selected := 0
+	if bomPath != "" {
+		selected++
+	}
+	if channelPath != "" {
+		selected++
+	}
+	if lookupSelected {
+		selected++
+	}
 	switch {
-	case bomPath == "" && channelPath == "":
-		return nil, fmt.Errorf("one of --file or --release-channel is required")
-	case bomPath != "" && channelPath != "":
-		return nil, fmt.Errorf("use either --file or --release-channel, not both")
+	case selected == 0:
+		return nil, fmt.Errorf("one of --file, --release-channel, or --release-source with --release-line and --channel is required")
+	case selected > 1:
+		return nil, fmt.Errorf("use only one target selector: --file, --release-channel, or --release-source with --release-line and --channel")
 	case channelPath != "":
 		resolved, err := bom.ResolveReleaseChannelFile(channelPath)
 		if err != nil {
@@ -127,8 +153,32 @@ func resolveSyncTarget(opts syncTargetOptions) (*syncResolvedTarget, error) {
 		return &syncResolvedTarget{
 			BOM:                    resolved.BOM,
 			BOMPath:                resolved.BOMPath,
+			BOMDigest:              resolved.BOMDigest,
 			ReleaseChannelDocument: resolved.Channel,
 			ReleaseChannelPath:     channelPath,
+			ReleaseChannelSource:   resolved.ChannelSource,
+		}, nil
+	case lookupSelected:
+		if releaseSource == "" || releaseLine == "" || channel == "" {
+			return nil, fmt.Errorf("--release-source, --release-line, and --channel must be set together")
+		}
+		resolved, err := bom.ResolveReleaseChannelLookup(bom.ReleaseChannelLookupOptions{
+			DistributionLine: releaseLine,
+			Channel:          channel,
+			Source:           releaseSource,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &syncResolvedTarget{
+			BOM:                    resolved.BOM,
+			BOMPath:                resolved.BOMPath,
+			BOMDigest:              resolved.BOMDigest,
+			ReleaseChannelDocument: resolved.Channel,
+			ReleaseChannelSource:   resolved.ChannelSource,
+			ReleaseSource:          releaseSource,
+			ReleaseLine:            releaseLine,
+			Channel:                channel,
 		}, nil
 	default:
 		doc, err := bom.LoadFile(bomPath)
@@ -201,6 +251,7 @@ func newSyncCmd() *cobra.Command {
 	cmd.AddCommand(newSyncPolicyGateCmd())
 	cmd.AddCommand(newSyncHealthProofCmd())
 	cmd.AddCommand(newSyncPromoteCmd())
+	cmd.AddCommand(newSyncReleaseMetadataCmd())
 	return cmd
 }
 
@@ -491,6 +542,9 @@ func newSyncRenderCmd() *cobra.Command {
 	var flags struct {
 		bomFile             string
 		releaseChannelFile  string
+		releaseSource       string
+		releaseLine         string
+		channel             string
 		clusterName         string
 		localRepo           string
 		localPatchRevision  string
@@ -515,6 +569,9 @@ components when iterating on package directories in-tree.
 			target, err := resolveSyncTarget(syncTargetOptions{
 				BOMPath:            flags.bomFile,
 				ReleaseChannelPath: flags.releaseChannelFile,
+				ReleaseSource:      flags.releaseSource,
+				ReleaseLine:        flags.releaseLine,
+				Channel:            flags.channel,
 			})
 			if err != nil {
 				return err
@@ -526,6 +583,9 @@ components when iterating on package directories in-tree.
 					ClusterName:        flags.clusterName,
 					BOMPath:            flags.bomFile,
 					ReleaseChannelPath: flags.releaseChannelFile,
+					ReleaseSource:      flags.releaseSource,
+					ReleaseLine:        flags.releaseLine,
+					Channel:            flags.channel,
 					LocalRepoPath:      flags.localRepo,
 					PackageSources:     flags.packageSources,
 				})
@@ -579,7 +639,7 @@ components when iterating on package directories in-tree.
 			return writeSyncOutput(cmd, out, flags.output, "render result")
 		},
 	}
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file to render")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, &flags.releaseSource, &flags.releaseLine, &flags.channel, "path to the BOM file to render")
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to materialize desired state for")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "path to a cluster-local repo that provides input bindings during render")
 	cmd.Flags().StringVar(&flags.localPatchRevision, "local-patch-revision", "", "optional local patch revision recorded in applied state")
@@ -613,6 +673,9 @@ func newSyncPreflightCmd() *cobra.Command {
 		clusterName            string
 		bomFile                string
 		releaseChannelFile     string
+		releaseSource          string
+		releaseLine            string
+		channel                string
 		localRepo              string
 		bundleDir              string
 		kubeconfigPath         string
@@ -636,14 +699,17 @@ would pass sync apply freshness and runtime readiness gates.
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(flags.bomFile) != "" || strings.TrimSpace(flags.releaseChannelFile) != "" {
+			if strings.TrimSpace(flags.bomFile) != "" || strings.TrimSpace(flags.releaseChannelFile) != "" || strings.TrimSpace(flags.releaseSource) != "" || strings.TrimSpace(flags.releaseLine) != "" || strings.TrimSpace(flags.channel) != "" {
 				if strings.TrimSpace(flags.bundleDir) != "" {
-					return errors.New("use either --file/--release-channel for source preflight or --bundle-dir for rendered bundle preflight, not both")
+					return errors.New("use either target selector flags for source preflight or --bundle-dir for rendered bundle preflight, not both")
 				}
 				out := runSyncSourcePreflight(syncSourcePreflightOptions{
 					ClusterName:        flags.clusterName,
 					BOMPath:            flags.bomFile,
 					ReleaseChannelPath: flags.releaseChannelFile,
+					ReleaseSource:      flags.releaseSource,
+					ReleaseLine:        flags.releaseLine,
+					Channel:            flags.channel,
 					LocalRepoPath:      flags.localRepo,
 					PackageSources:     flags.packageSources,
 				})
@@ -685,7 +751,7 @@ would pass sync apply freshness and runtime readiness gates.
 		},
 	}
 	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to preflight desired state for")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file for source preflight")
+	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, &flags.releaseSource, &flags.releaseLine, &flags.channel, "path to the BOM file for source preflight")
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "cluster-local repo root for source preflight")
 	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
 	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for rendered bundle runtime preflight")
@@ -718,6 +784,9 @@ type syncSourcePreflightOptions struct {
 	ClusterName        string
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 	LocalRepoPath      string
 	PackageSources     []string
 }
@@ -738,6 +807,9 @@ type syncSourcePreflightOutput struct {
 	ClusterName        string                         `json:"clusterName" yaml:"clusterName"`
 	BOMPath            string                         `json:"bomPath" yaml:"bomPath"`
 	ReleaseChannelPath string                         `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
+	ReleaseSource      string                         `json:"releaseSource,omitempty" yaml:"releaseSource,omitempty"`
+	ReleaseLine        string                         `json:"releaseLine,omitempty" yaml:"releaseLine,omitempty"`
+	Channel            string                         `json:"channel,omitempty" yaml:"channel,omitempty"`
 	LocalRepo          string                         `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
 	State              syncPreflightState             `json:"state" yaml:"state"`
 	Summary            string                         `json:"summary" yaml:"summary"`
@@ -759,6 +831,9 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 		ClusterName:        clusterName,
 		BOMPath:            strings.TrimSpace(opts.BOMPath),
 		ReleaseChannelPath: strings.TrimSpace(opts.ReleaseChannelPath),
+		ReleaseSource:      strings.TrimSpace(opts.ReleaseSource),
+		ReleaseLine:        strings.TrimSpace(opts.ReleaseLine),
+		Channel:            strings.TrimSpace(opts.Channel),
 		LocalRepo:          strings.TrimSpace(opts.LocalRepoPath),
 	}
 
@@ -767,6 +842,9 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 			ClusterName:        clusterName,
 			BOMPath:            opts.BOMPath,
 			ReleaseChannelPath: opts.ReleaseChannelPath,
+			ReleaseSource:      opts.ReleaseSource,
+			ReleaseLine:        opts.ReleaseLine,
+			Channel:            opts.Channel,
 			LocalRepoPath:      opts.LocalRepoPath,
 			PackageSources:     opts.PackageSources,
 		})
@@ -783,6 +861,9 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 		ClusterName:        clusterName,
 		BOMPath:            opts.BOMPath,
 		ReleaseChannelPath: opts.ReleaseChannelPath,
+		ReleaseSource:      opts.ReleaseSource,
+		ReleaseLine:        opts.ReleaseLine,
+		Channel:            opts.Channel,
 		LocalRepoPath:      opts.LocalRepoPath,
 		PackageSources:     opts.PackageSources,
 	})
@@ -792,6 +873,15 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 	}
 	if strings.TrimSpace(validate.ReleaseChannelPath) != "" {
 		out.ReleaseChannelPath = validate.ReleaseChannelPath
+	}
+	if strings.TrimSpace(validate.ReleaseSource) != "" {
+		out.ReleaseSource = validate.ReleaseSource
+	}
+	if strings.TrimSpace(validate.ReleaseLine) != "" {
+		out.ReleaseLine = validate.ReleaseLine
+	}
+	if strings.TrimSpace(validate.Channel) != "" {
+		out.Channel = validate.Channel
 	}
 	if out.LocalRepo == "" {
 		out.LocalRepo = validate.LocalRepo
@@ -830,6 +920,8 @@ func syncSourcePreflightRenderCommand(clusterName string, opts syncSourcePreflig
 	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
 	if strings.TrimSpace(opts.ReleaseChannelPath) != "" {
 		args = append(args, "--release-channel", strings.TrimSpace(opts.ReleaseChannelPath))
+	} else if strings.TrimSpace(opts.ReleaseSource) != "" || strings.TrimSpace(opts.ReleaseLine) != "" || strings.TrimSpace(opts.Channel) != "" {
+		args = append(args, "--release-source", strings.TrimSpace(opts.ReleaseSource), "--release-line", strings.TrimSpace(opts.ReleaseLine), "--channel", strings.TrimSpace(opts.Channel))
 	} else {
 		args = append(args, "--file", strings.TrimSpace(opts.BOMPath))
 	}
@@ -2820,12 +2912,21 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 	if err != nil {
 		return reconcile.Options{}, err
 	}
+	topology, err := loadSyncExecutionTopology(clusterName)
+	if err != nil {
+		return reconcile.Options{}, err
+	}
+	executionTopology := hydrate.NewSingleNodeExecutionTopology()
+	if topology != nil {
+		executionTopology = topology.snapshot()
+	}
 
 	return reconcile.Options{
 		ClusterName:        clusterName,
 		Channel:            target.runtimeChannel(),
 		BOMRoot:            syncBOMRoot(target),
 		RenderProvenance:   provenance,
+		ExecutionTopology:  executionTopology,
 		LocalRepo:          repo,
 		LocalPatchRevision: localPatchRevision,
 		PackageLoader: syncPackageLoader{
@@ -2853,6 +2954,10 @@ func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo
 	}
 	if target != nil && target.ReleaseChannelDocument != nil {
 		provenance.DistributionLine = target.ReleaseChannelDocument.Distribution()
+		provenance.ReleaseChannel = string(target.ReleaseChannelDocument.Spec.Channel)
+	}
+	if target != nil {
+		provenance.ReleaseSource = strings.TrimSpace(target.ReleaseSource)
 	}
 	if target != nil && strings.TrimSpace(target.ReleaseChannelPath) != "" {
 		absChannelPath, err := filepath.Abs(target.ReleaseChannelPath)
@@ -2865,18 +2970,25 @@ func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo
 			return hydrate.RenderProvenance{}, fmt.Errorf("read ReleaseChannel path %q: %w", absChannelPath, err)
 		}
 		provenance.ReleaseChannelDigest = digest.Canonical.FromBytes(data).String()
+	} else if target != nil && strings.TrimSpace(target.ReleaseChannelSource) != "" {
+		provenance.ReleaseChannelPath = strings.TrimSpace(target.ReleaseChannelSource)
 	}
 	if target != nil && strings.TrimSpace(target.BOMPath) != "" {
-		absBOMPath, err := filepath.Abs(target.BOMPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.BOMPath, err)
+		if isSyncRemoteLocation(target.BOMPath) {
+			provenance.BOMPath = strings.TrimSpace(target.BOMPath)
+			provenance.BOMDigest = strings.TrimSpace(target.BOMDigest)
+		} else {
+			absBOMPath, err := filepath.Abs(target.BOMPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.BOMPath, err)
+			}
+			provenance.BOMPath = absBOMPath
+			data, err := os.ReadFile(absBOMPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
+			}
+			provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 		}
-		provenance.BOMPath = absBOMPath
-		data, err := os.ReadFile(absBOMPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
-		}
-		provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if repo != nil {
 		provenance.LocalRepoRevision = repo.Revision
@@ -2901,6 +3013,11 @@ func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo
 		}
 	}
 	return provenance, nil
+}
+
+func isSyncRemoteLocation(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 func defaultSyncMountedArtifactResolver() (packageformat.Loader, hydrate.SourceProvider, error) {

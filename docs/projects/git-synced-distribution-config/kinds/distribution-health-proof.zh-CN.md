@@ -40,6 +40,9 @@ spec: {}
 | `passed` | 是 | 整体 pass/fail 结果。 |
 | `summary` | 否 | 面向人的健康摘要。 |
 | `collectedAt` | 是 | 证据采集时间，RFC3339 格式。 |
+| `thresholds.requiredSignals` | 否 | promotion 时必须存在且通过的 signal 名称。 |
+| `thresholds.minPassedSignals` | 否 | proof 要通过时至少需要通过的 signal 数量。未设置 thresholds 的旧 proof 继续按所有 signals 必须通过处理。 |
+| `signalSummary` | 否 | 规范化评估计数：total、passed、failed、required、failed/missing required 和最少通过阈值。 |
 | `signals` | 否 | 单个健康信号。 |
 
 ## Signal 契约
@@ -48,16 +51,24 @@ spec: {}
 
 - `name`
 - `passed`
+- `required`
+- `source`
+- `evidenceRef`
 - `message`
 
 Signal 应具备确定性，并且可追溯到日志、测试输出或 `PackageAcceptanceReport`。
+`source` 标识 evidence 生产者，`evidenceRef` 指向用于派生规范化 signal 的字段、
+stage、artifact 或日志引用。
 
 ## 校验规则
 
 - 必须设置 `apiVersion`、`kind` 和 `metadata.name`。
 - 必须设置 `targetRevision`。
-- `passed` 必须反映 required signals 的聚合结果。
+- `passed` 必须反映 required signals 和最少通过 signal 数量阈值的聚合结果。
 - `collectedAt` 必须是 RFC3339 时间戳。
+- `thresholds.requiredSignals` 不能包含空名称或重复名称。
+- Promotion 会拒绝缺失 required signal、required signal 失败或通过数量低于阈值的
+  proof。thresholds 仍然通过时，失败的 optional signal 只作为 evidence 和 warning。
 - Health proof 文档不能包含 secret 值。
 
 ## 生命周期
@@ -87,12 +98,30 @@ spec:
   passed: true
   summary: all required package acceptance checks passed
   collectedAt: "2026-06-01T00:00:00Z"
+  thresholds:
+    requiredSignals:
+      - package-acceptance
+      - revert-check
+    minPassedSignals: 2
+  signalSummary:
+    totalSignals: 2
+    passedSignals: 2
+    failedSignals: 0
+    requiredSignals: 2
+    passedRequiredSignals: 2
+    minPassedSignals: 2
   signals:
     - name: package-acceptance
       passed: true
+      required: true
+      source: PackageAcceptanceReport
+      evidenceRef: spec.status
       message: acceptance report completed successfully
     - name: revert-check
       passed: true
+      required: true
+      source: PackageAcceptanceReport
+      evidenceRef: spec.stages[name=revert-check-revert]
       message: no managed object drift after revert
 ```
 

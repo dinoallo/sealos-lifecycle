@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/opencontainers/go-digest"
+
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
@@ -154,6 +156,87 @@ func TestRunnerRunOnceWithReleaseChannelDocument(t *testing.T) {
 	}
 	if provenance.ReleaseChannelDigest == "" {
 		t.Fatal("provenance.ReleaseChannelDigest is empty")
+	}
+}
+
+func TestRunnerRunOnceWithReleaseChannelLookup(t *testing.T) {
+	withRuntimeRoot(t)
+	root := t.TempDir()
+	packageRoot := writeAgentPackage(t, root)
+	doc := agentBOM()
+	bomPath := filepath.Join(root, "boms", "rev-agent-1.yaml")
+	if err := os.MkdirAll(filepath.Dir(bomPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(boms) error = %v", err)
+	}
+	if err := yamlutil.MarshalFile(bomPath, doc); err != nil {
+		t.Fatalf("MarshalFile(bom) error = %v", err)
+	}
+	bomData, err := os.ReadFile(bomPath)
+	if err != nil {
+		t.Fatalf("ReadFile(bom) error = %v", err)
+	}
+	channelPath := filepath.Join(root, doc.Metadata.Name, "stable.yaml")
+	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(channel) error = %v", err)
+	}
+	channel := bom.NewReleaseChannel("agent-runtime-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "../boms/rev-agent-1.yaml")
+	channel.Spec.BOMDigest = digest.Canonical.FromBytes(bomData).String()
+	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
+		t.Fatalf("MarshalFile(channel) error = %v", err)
+	}
+
+	var selectedChannel bom.ReleaseChannel
+	var provenance hydrate.RenderProvenance
+	runner := Runner{
+		Materialize: func(got *bom.BOM, opts reconcile.Options) (*reconcile.Result, error) {
+			selectedChannel = got.Channel()
+			provenance = opts.RenderProvenance
+			return &reconcile.Result{BundlePath: filepath.Join(root, "bundle")}, nil
+		},
+		Apply: func(opts reconcile.ApplyOptions) (*reconcile.ApplyResult, error) {
+			applied, err := state.PersistSuccessfulApply(opts.ClusterName, state.BOMReference{
+				Name:     doc.Metadata.Name,
+				Revision: doc.Spec.Revision,
+				Channel:  bom.ChannelStable,
+			}, "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "", "")
+			if err != nil {
+				return nil, err
+			}
+			return &reconcile.ApplyResult{
+				BundlePath:         opts.BundlePath,
+				DesiredStateDigest: applied.Spec.DesiredStateDigest,
+				AppliedRevision:    applied,
+			}, nil
+		},
+	}
+
+	result, err := runner.Run(context.Background(), Options{
+		ClusterName: "agent-lookup",
+		Target: TargetOptions{
+			ReleaseSource: root,
+			ReleaseLine:   doc.Metadata.Name,
+			Channel:       string(bom.ChannelStable),
+		},
+		PackageSources: []PackageSource{{Component: "runtime", Root: packageRoot}},
+		Once:           true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := selectedChannel, bom.ChannelStable; got != want {
+		t.Fatalf("selected channel = %q, want %q", got, want)
+	}
+	if got, want := result.Channel, string(bom.ChannelStable); got != want {
+		t.Fatalf("result.Channel = %q, want %q", got, want)
+	}
+	if got, want := provenance.ReleaseSource, root; got != want {
+		t.Fatalf("provenance.ReleaseSource = %q, want %q", got, want)
+	}
+	if got, want := provenance.ReleaseChannel, string(bom.ChannelStable); got != want {
+		t.Fatalf("provenance.ReleaseChannel = %q, want %q", got, want)
+	}
+	if got, want := provenance.BOMDigest, channel.Spec.BOMDigest; got != want {
+		t.Fatalf("provenance.BOMDigest = %q, want %q", got, want)
 	}
 }
 

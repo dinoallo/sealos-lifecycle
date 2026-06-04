@@ -51,7 +51,8 @@ status: {}
 | --- | --- |
 | `state` | `Clean`、`Dirty`、`Orphan` 或 `Degraded` 之一。 |
 | `lastAppliedTime` | 最后一次 apply 尝试时间。 |
-| `lastSuccessfulRevision` | 最后已知成功 revision。 |
+| `lastSuccessfulRevision` | 最后已知成功 revision snapshot，包含 BOM identity、target metadata、local revisions 和 desired-state digest。 |
+| `successfulRevisions` | 有上限、最新优先的成功 revision snapshot 历史，用于 cross-BOM 审计和 rollback 上下文。 |
 | `observedSummary` | 观测资源数量或摘要。 |
 | `conditions` | Apply 和 drift state 的结构化 conditions。 |
 
@@ -67,7 +68,9 @@ status: {}
 1. Apply 消费 `HydratedBundle`。
 2. Reconciliation 写入 applied revision 和 desired state digest。
 3. Drift detection 更新 status conditions。
-4. 后续 apply 用新 revision 更新同一个 cluster state。
+4. 后续 apply 用新 revision 更新同一个 cluster state，并把成功 revision 写入历史开头。
+5. Rollback 使用最后一次成功 revision snapshot，包括它的 target metadata；即使失败的 upgrade
+   选择了另一条 BOM line，也会恢复到上一份成功目标。
 
 ## 边界
 
@@ -96,7 +99,20 @@ spec:
 status:
   state: Clean
   lastAppliedTime: "2026-06-01T00:00:00Z"
-  lastSuccessfulRevision: v5.0.0
+  lastSuccessfulRevision:
+    bom:
+      name: sealos-v5.0.0
+      revision: v5.0.0
+      channel: stable
+      digest: sha256:...
+    desiredStateDigest: sha256:...
+  successfulRevisions:
+    - bom:
+        name: sealos-v5.0.0
+        revision: v5.0.0
+        channel: stable
+        digest: sha256:...
+      desiredStateDigest: sha256:...
 ```
 
 ## 相关 Kind

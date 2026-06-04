@@ -62,7 +62,9 @@ type BundleSpec struct {
 type RenderProvenance struct {
 	ReleaseChannelPath   string                          `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
 	ReleaseChannelDigest string                          `json:"releaseChannelDigest,omitempty" yaml:"releaseChannelDigest,omitempty"`
+	ReleaseSource        string                          `json:"releaseSource,omitempty" yaml:"releaseSource,omitempty"`
 	DistributionLine     string                          `json:"distributionLine,omitempty" yaml:"distributionLine,omitempty"`
+	ReleaseChannel       string                          `json:"releaseChannel,omitempty" yaml:"releaseChannel,omitempty"`
 	BOMPath              string                          `json:"bomPath,omitempty" yaml:"bomPath,omitempty"`
 	BOMDigest            string                          `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
 	LocalRepoPath        string                          `json:"localRepoPath,omitempty" yaml:"localRepoPath,omitempty"`
@@ -109,7 +111,9 @@ type SourcePreflightCheck struct {
 func (p RenderProvenance) Empty() bool {
 	return strings.TrimSpace(p.ReleaseChannelPath) == "" &&
 		strings.TrimSpace(p.ReleaseChannelDigest) == "" &&
+		strings.TrimSpace(p.ReleaseSource) == "" &&
 		strings.TrimSpace(p.DistributionLine) == "" &&
+		strings.TrimSpace(p.ReleaseChannel) == "" &&
 		strings.TrimSpace(p.BOMPath) == "" &&
 		strings.TrimSpace(p.BOMDigest) == "" &&
 		strings.TrimSpace(p.LocalRepoPath) == "" &&
@@ -122,7 +126,9 @@ func (p RenderProvenance) Normalize() RenderProvenance {
 	normalized := RenderProvenance{
 		ReleaseChannelPath:   strings.TrimSpace(p.ReleaseChannelPath),
 		ReleaseChannelDigest: strings.TrimSpace(p.ReleaseChannelDigest),
+		ReleaseSource:        strings.TrimSpace(p.ReleaseSource),
 		DistributionLine:     strings.TrimSpace(p.DistributionLine),
+		ReleaseChannel:       strings.TrimSpace(p.ReleaseChannel),
 		BOMPath:              strings.TrimSpace(p.BOMPath),
 		BOMDigest:            strings.TrimSpace(p.BOMDigest),
 		LocalRepoPath:        strings.TrimSpace(p.LocalRepoPath),
@@ -175,19 +181,20 @@ type ExecutionHostRoleList struct {
 }
 
 type RenderedComponent struct {
-	Name              string                       `json:"name" yaml:"name"`
-	PackageName       string                       `json:"packageName" yaml:"packageName"`
-	Version           string                       `json:"version" yaml:"version"`
-	Class             packageformat.PackageClass   `json:"class" yaml:"class"`
-	Artifact          string                       `json:"artifact" yaml:"artifact"`
-	Dependencies      []string                     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Inputs            []packageformat.Input        `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	InputBindings     map[string]string            `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
-	HostInputBindings map[string]map[string]string `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
-	LocalPatches      []string                     `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
-	ManifestPath      string                       `json:"manifestPath" yaml:"manifestPath"`
-	RootPath          string                       `json:"rootPath" yaml:"rootPath"`
-	Steps             []RenderedStep               `json:"steps" yaml:"steps"`
+	Name              string                         `json:"name" yaml:"name"`
+	PackageName       string                         `json:"packageName" yaml:"packageName"`
+	Version           string                         `json:"version" yaml:"version"`
+	Class             packageformat.PackageClass     `json:"class" yaml:"class"`
+	Artifact          string                         `json:"artifact" yaml:"artifact"`
+	Dependencies      []string                       `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	Inputs            []packageformat.Input          `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	GeneratedOutputs  packageformat.GeneratedOutputs `json:"generatedOutputs,omitempty" yaml:"generatedOutputs,omitempty"`
+	InputBindings     map[string]string              `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
+	HostInputBindings map[string]map[string]string   `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
+	LocalPatches      []string                       `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
+	ManifestPath      string                         `json:"manifestPath" yaml:"manifestPath"`
+	RootPath          string                         `json:"rootPath" yaml:"rootPath"`
+	Steps             []RenderedStep                 `json:"steps" yaml:"steps"`
 }
 
 type RenderedStep struct {

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type ReleaseChannelDocumentSpec struct {
 	Channel          ReleaseChannel             `json:"channel" yaml:"channel"`
 	TargetRevision   string                     `json:"targetRevision" yaml:"targetRevision"`
 	BOMPath          string                     `json:"bomPath" yaml:"bomPath"`
+	BOMDigest        string                     `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
 	PromotionHistory []DistributionPromotionRef `json:"promotionHistory,omitempty" yaml:"promotionHistory,omitempty"`
 }
 
@@ -58,9 +60,11 @@ type ReleaseChannelDocument struct {
 }
 
 type ResolvedReleaseChannel struct {
-	Channel *ReleaseChannelDocument
-	BOM     *BOM
-	BOMPath string
+	Channel       *ReleaseChannelDocument
+	BOM           *BOM
+	BOMPath       string
+	BOMDigest     string
+	ChannelSource string
 }
 
 type PromoteReleaseChannelOptions struct {
@@ -88,18 +92,50 @@ type PromoteReleaseChannelResult struct {
 }
 
 type DistributionHealthProofSpec struct {
-	Line           string                     `json:"line" yaml:"line"`
-	TargetRevision string                     `json:"targetRevision" yaml:"targetRevision"`
-	Passed         bool                       `json:"passed" yaml:"passed"`
-	Summary        string                     `json:"summary,omitempty" yaml:"summary,omitempty"`
-	CollectedAt    string                     `json:"collectedAt,omitempty" yaml:"collectedAt,omitempty"`
-	Signals        []DistributionHealthSignal `json:"signals,omitempty" yaml:"signals,omitempty"`
+	Line           string                           `json:"line" yaml:"line"`
+	TargetRevision string                           `json:"targetRevision" yaml:"targetRevision"`
+	Passed         bool                             `json:"passed" yaml:"passed"`
+	Summary        string                           `json:"summary,omitempty" yaml:"summary,omitempty"`
+	CollectedAt    string                           `json:"collectedAt,omitempty" yaml:"collectedAt,omitempty"`
+	Thresholds     DistributionHealthThresholds     `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+	SignalSummary  *DistributionHealthSignalSummary `json:"signalSummary,omitempty" yaml:"signalSummary,omitempty"`
+	Signals        []DistributionHealthSignal       `json:"signals,omitempty" yaml:"signals,omitempty"`
+}
+
+type DistributionHealthThresholds struct {
+	RequiredSignals  []string `json:"requiredSignals,omitempty" yaml:"requiredSignals,omitempty"`
+	MinPassedSignals int      `json:"minPassedSignals,omitempty" yaml:"minPassedSignals,omitempty"`
+}
+
+type DistributionHealthSignalSummary struct {
+	TotalSignals           int `json:"totalSignals" yaml:"totalSignals"`
+	PassedSignals          int `json:"passedSignals" yaml:"passedSignals"`
+	FailedSignals          int `json:"failedSignals" yaml:"failedSignals"`
+	RequiredSignals        int `json:"requiredSignals,omitempty" yaml:"requiredSignals,omitempty"`
+	PassedRequiredSignals  int `json:"passedRequiredSignals,omitempty" yaml:"passedRequiredSignals,omitempty"`
+	FailedRequiredSignals  int `json:"failedRequiredSignals,omitempty" yaml:"failedRequiredSignals,omitempty"`
+	MissingRequiredSignals int `json:"missingRequiredSignals,omitempty" yaml:"missingRequiredSignals,omitempty"`
+	MinPassedSignals       int `json:"minPassedSignals,omitempty" yaml:"minPassedSignals,omitempty"`
 }
 
 type DistributionHealthSignal struct {
-	Name    string `json:"name" yaml:"name"`
-	Passed  bool   `json:"passed" yaml:"passed"`
-	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+	Name        string `json:"name" yaml:"name"`
+	Passed      bool   `json:"passed" yaml:"passed"`
+	Required    bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
+	EvidenceRef string `json:"evidenceRef,omitempty" yaml:"evidenceRef,omitempty"`
+	Message     string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+type DistributionHealthProofEvaluation struct {
+	Passed                 bool
+	HasThresholds          bool
+	MinPassedSignals       int
+	SignalSummary          DistributionHealthSignalSummary
+	RequiredSignals        []string
+	FailedSignals          []string
+	FailedRequiredSignals  []string
+	MissingRequiredSignals []string
 }
 
 type DistributionHealthProof struct {
@@ -166,6 +202,11 @@ func (c ReleaseChannelDocument) Validate() error {
 	}
 	if strings.TrimSpace(c.Spec.BOMPath) == "" {
 		return fmt.Errorf("spec.bomPath cannot be empty")
+	}
+	if digestValue := strings.TrimSpace(c.Spec.BOMDigest); digestValue != "" {
+		if _, err := digest.Parse(digestValue); err != nil {
+			return fmt.Errorf("spec.bomDigest: invalid digest %q: %w", digestValue, err)
+		}
 	}
 	for i, promotion := range c.Spec.PromotionHistory {
 		if err := promotion.Validate(); err != nil {
@@ -244,12 +285,116 @@ func (p DistributionHealthProof) Validate() error {
 			return fmt.Errorf("spec.collectedAt must be RFC3339: %w", err)
 		}
 	}
+	if p.Spec.Thresholds.MinPassedSignals < 0 {
+		return fmt.Errorf("spec.thresholds.minPassedSignals must be non-negative")
+	}
+	seenRequired := make(map[string]struct{}, len(p.Spec.Thresholds.RequiredSignals))
+	for i, name := range p.Spec.Thresholds.RequiredSignals {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("spec.thresholds.requiredSignals[%d] cannot be empty", i)
+		}
+		if _, ok := seenRequired[name]; ok {
+			return fmt.Errorf("spec.thresholds.requiredSignals[%d]: duplicate signal %q", i, name)
+		}
+		seenRequired[name] = struct{}{}
+	}
 	for i, signal := range p.Spec.Signals {
 		if strings.TrimSpace(signal.Name) == "" {
 			return fmt.Errorf("spec.signals[%d].name cannot be empty", i)
 		}
 	}
 	return nil
+}
+
+func (p *DistributionHealthProof) Normalize() {
+	if p == nil {
+		return
+	}
+	evaluation := EvaluateDistributionHealthProof(p)
+	p.Spec.Passed = evaluation.Passed
+	summary := evaluation.SignalSummary
+	p.Spec.SignalSummary = &summary
+}
+
+func EvaluateDistributionHealthProof(proof *DistributionHealthProof) DistributionHealthProofEvaluation {
+	if proof == nil {
+		return DistributionHealthProofEvaluation{}
+	}
+	requiredSet := make(map[string]struct{}, len(proof.Spec.Thresholds.RequiredSignals))
+	for _, name := range proof.Spec.Thresholds.RequiredSignals {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		requiredSet[name] = struct{}{}
+	}
+
+	signalByName := make(map[string]DistributionHealthSignal, len(proof.Spec.Signals))
+	evaluation := DistributionHealthProofEvaluation{
+		HasThresholds:    len(requiredSet) > 0 || proof.Spec.Thresholds.MinPassedSignals > 0,
+		MinPassedSignals: proof.Spec.Thresholds.MinPassedSignals,
+	}
+	for _, signal := range proof.Spec.Signals {
+		name := strings.TrimSpace(signal.Name)
+		if name == "" {
+			continue
+		}
+		signal.Name = name
+		if signal.Required {
+			requiredSet[name] = struct{}{}
+		}
+		signalByName[name] = signal
+		evaluation.SignalSummary.TotalSignals++
+		if signal.Passed {
+			evaluation.SignalSummary.PassedSignals++
+		} else {
+			evaluation.SignalSummary.FailedSignals++
+			evaluation.FailedSignals = append(evaluation.FailedSignals, name)
+		}
+	}
+
+	evaluation.RequiredSignals = sortedHealthSignalNames(requiredSet)
+	for _, name := range evaluation.RequiredSignals {
+		signal, ok := signalByName[name]
+		evaluation.SignalSummary.RequiredSignals++
+		switch {
+		case !ok:
+			evaluation.SignalSummary.MissingRequiredSignals++
+			evaluation.MissingRequiredSignals = append(evaluation.MissingRequiredSignals, name)
+		case signal.Passed:
+			evaluation.SignalSummary.PassedRequiredSignals++
+		default:
+			evaluation.SignalSummary.FailedRequiredSignals++
+			evaluation.FailedRequiredSignals = append(evaluation.FailedRequiredSignals, name)
+		}
+	}
+
+	minPassed := evaluation.MinPassedSignals
+	if minPassed == 0 && !evaluation.HasThresholds {
+		minPassed = len(proof.Spec.Signals)
+	}
+	evaluation.SignalSummary.MinPassedSignals = minPassed
+	evaluation.Passed = len(proof.Spec.Signals) > 0 &&
+		evaluation.SignalSummary.PassedSignals >= minPassed &&
+		len(evaluation.FailedRequiredSignals) == 0 &&
+		len(evaluation.MissingRequiredSignals) == 0
+	if !evaluation.HasThresholds && len(evaluation.FailedSignals) > 0 {
+		evaluation.Passed = false
+	}
+	return evaluation
+}
+
+func sortedHealthSignalNames(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func LoadReleaseChannelFile(path string) (*ReleaseChannelDocument, error) {
@@ -297,22 +442,59 @@ func ResolveReleaseChannelFile(path string) (*ResolvedReleaseChannel, error) {
 	if !filepath.IsAbs(bomPath) {
 		bomPath = filepath.Join(filepath.Dir(path), bomPath)
 	}
-	doc, err := LoadFile(bomPath)
+	data, err := os.ReadFile(bomPath)
+	if err != nil {
+		return nil, fmt.Errorf("read bom %q: %w", bomPath, err)
+	}
+	bomDigest := digest.Canonical.FromBytes(data).String()
+	if err := verifyReleaseChannelBOMDigest(channel, bomDigest); err != nil {
+		return nil, err
+	}
+	doc, err := LoadBytes(data, bomPath)
 	if err != nil {
 		return nil, err
 	}
-	if doc.Metadata.Name != channel.Distribution() {
-		return nil, fmt.Errorf("release channel %q distribution %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), doc.Metadata.Name)
-	}
-	if doc.Spec.Revision != channel.Spec.TargetRevision {
-		return nil, fmt.Errorf("release channel %q targetRevision %q does not match BOM spec.revision %q", channel.Metadata.Name, channel.Spec.TargetRevision, doc.Spec.Revision)
+	if err := validateReleaseChannelBOM(channel, doc); err != nil {
+		return nil, err
 	}
 	doc.SetRuntimeChannel(channel.Spec.Channel)
 	return &ResolvedReleaseChannel{
-		Channel: channel,
-		BOM:     doc,
-		BOMPath: bomPath,
+		Channel:       channel,
+		BOM:           doc,
+		BOMPath:       bomPath,
+		BOMDigest:     bomDigest,
+		ChannelSource: path,
 	}, nil
+}
+
+func validateReleaseChannelBOM(channel *ReleaseChannelDocument, doc *BOM) error {
+	if channel == nil {
+		return fmt.Errorf("release channel cannot be nil")
+	}
+	if doc == nil {
+		return fmt.Errorf("BOM cannot be nil")
+	}
+	if doc.Metadata.Name != channel.Distribution() {
+		return fmt.Errorf("release channel %q distribution %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), doc.Metadata.Name)
+	}
+	if doc.Spec.Revision != channel.Spec.TargetRevision {
+		return fmt.Errorf("release channel %q targetRevision %q does not match BOM spec.revision %q", channel.Metadata.Name, channel.Spec.TargetRevision, doc.Spec.Revision)
+	}
+	return nil
+}
+
+func verifyReleaseChannelBOMDigest(channel *ReleaseChannelDocument, actual string) error {
+	if channel == nil {
+		return fmt.Errorf("release channel cannot be nil")
+	}
+	expected := strings.TrimSpace(channel.Spec.BOMDigest)
+	if expected == "" {
+		return nil
+	}
+	if actual != expected {
+		return fmt.Errorf("release channel %q BOM digest mismatch: expected %s, got %s", channel.Metadata.Name, expected, actual)
+	}
+	return nil
 }
 
 func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteReleaseChannelResult, error) {
@@ -337,7 +519,12 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 	if err != nil {
 		return nil, err
 	}
-	targetBOM, err := LoadFile(targetBOMPath)
+	targetBOMData, err := os.ReadFile(targetBOMPath)
+	if err != nil {
+		return nil, fmt.Errorf("read target BOM %q: %w", targetBOMPath, err)
+	}
+	targetBOMDigest := digest.Canonical.FromBytes(targetBOMData).String()
+	targetBOM, err := LoadBytes(targetBOMData, targetBOMPath)
 	if err != nil {
 		return nil, err
 	}
@@ -363,6 +550,7 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
 	channel.Spec.BOMPath = targetBOMPathForChannel
+	channel.Spec.BOMDigest = targetBOMDigest
 	channel.Normalize()
 
 	approvedAt := opts.ApprovedAt
@@ -440,16 +628,32 @@ func distributionPromotionHealthProofSummary(proof *DistributionHealthProof) pro
 	if proof == nil {
 		return promotionpolicy.HealthProofSummary{}
 	}
-	failedSignals := make([]string, 0)
-	for _, signal := range proof.Spec.Signals {
-		if !signal.Passed {
-			failedSignals = append(failedSignals, signal.Name)
+	evaluation := EvaluateDistributionHealthProof(proof)
+	failedSignals := evaluation.FailedSignals
+	optionalFailedSignals := []string(nil)
+	if evaluation.HasThresholds {
+		failedSignals = evaluation.FailedRequiredSignals
+		requiredSet := make(map[string]struct{}, len(evaluation.RequiredSignals))
+		for _, name := range evaluation.RequiredSignals {
+			requiredSet[name] = struct{}{}
+		}
+		for _, name := range evaluation.FailedSignals {
+			if _, required := requiredSet[name]; !required {
+				optionalFailedSignals = append(optionalFailedSignals, name)
+			}
 		}
 	}
 	return promotionpolicy.HealthProofSummary{
-		Provided:      true,
-		Passed:        proof.Spec.Passed,
-		FailedSignals: failedSignals,
+		Provided:               true,
+		Passed:                 proof.Spec.Passed && evaluation.Passed,
+		TotalSignals:           evaluation.SignalSummary.TotalSignals,
+		PassedSignals:          evaluation.SignalSummary.PassedSignals,
+		FailedSignals:          failedSignals,
+		OptionalFailedSignals:  optionalFailedSignals,
+		RequiredSignals:        evaluation.RequiredSignals,
+		FailedRequiredSignals:  evaluation.FailedRequiredSignals,
+		MissingRequiredSignals: evaluation.MissingRequiredSignals,
+		MinPassedSignals:       evaluation.SignalSummary.MinPassedSignals,
 	}
 }
 
@@ -488,12 +692,31 @@ func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*Distribu
 	if len(proof.Spec.Signals) == 0 {
 		return nil, "", fmt.Errorf("distribution health proof %q has no health signals", proof.Metadata.Name)
 	}
-	for _, signal := range proof.Spec.Signals {
-		if !signal.Passed {
-			return nil, "", fmt.Errorf("distribution health proof %q signal %q did not pass", proof.Metadata.Name, signal.Name)
-		}
+	evaluation := EvaluateDistributionHealthProof(proof)
+	if !evaluation.Passed {
+		return nil, "", fmt.Errorf("distribution health proof %q did not satisfy evidence thresholds: %s", proof.Metadata.Name, distributionHealthProofFailureSummary(evaluation))
 	}
 	return proof, digest, nil
+}
+
+func distributionHealthProofFailureSummary(evaluation DistributionHealthProofEvaluation) string {
+	parts := make([]string, 0, 4)
+	if len(evaluation.FailedRequiredSignals) > 0 {
+		parts = append(parts, "failed required signal(s): "+strings.Join(evaluation.FailedRequiredSignals, ", "))
+	}
+	if len(evaluation.MissingRequiredSignals) > 0 {
+		parts = append(parts, "missing required signal(s): "+strings.Join(evaluation.MissingRequiredSignals, ", "))
+	}
+	if len(evaluation.FailedSignals) > 0 && !evaluation.HasThresholds {
+		parts = append(parts, "failed signal(s): "+strings.Join(evaluation.FailedSignals, ", "))
+	}
+	if evaluation.SignalSummary.PassedSignals < evaluation.SignalSummary.MinPassedSignals {
+		parts = append(parts, fmt.Sprintf("passed %d/%d signal(s)", evaluation.SignalSummary.PassedSignals, evaluation.SignalSummary.MinPassedSignals))
+	}
+	if len(parts) == 0 {
+		return "proof did not pass"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func releaseChannelRelativePath(channelPath, path string) string {

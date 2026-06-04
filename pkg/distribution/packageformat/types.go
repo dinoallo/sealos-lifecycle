@@ -118,16 +118,37 @@ type Hook struct {
 	TimeoutSeconds int32           `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
+type GeneratedOutputs struct {
+	HostPaths []GeneratedHostPathOutput `json:"hostPaths,omitempty" yaml:"hostPaths,omitempty"`
+}
+
+type GeneratedHostPathOutput struct {
+	Name                 string            `json:"name,omitempty" yaml:"name,omitempty"`
+	HostPath             string            `json:"hostPath" yaml:"hostPath"`
+	Tool                 string            `json:"tool" yaml:"tool"`
+	Hook                 string            `json:"hook,omitempty" yaml:"hook,omitempty"`
+	APIVersion           string            `json:"apiVersion" yaml:"apiVersion"`
+	Kind                 string            `json:"kind" yaml:"kind"`
+	Namespace            string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	ObjectName           string            `json:"objectName" yaml:"objectName"`
+	ContainerName        string            `json:"containerName,omitempty" yaml:"containerName,omitempty"`
+	ExpectedImage        string            `json:"expectedImage,omitempty" yaml:"expectedImage,omitempty"`
+	ExpectedCommand      string            `json:"expectedCommand,omitempty" yaml:"expectedCommand,omitempty"`
+	ExpectedArgs         map[string]string `json:"expectedArgs,omitempty" yaml:"expectedArgs,omitempty"`
+	ExpectedVolumeMounts []string          `json:"expectedVolumeMounts,omitempty" yaml:"expectedVolumeMounts,omitempty"`
+}
+
 type Spec struct {
-	Component        string        `json:"component" yaml:"component"`
-	Version          string        `json:"version" yaml:"version"`
-	Class            PackageClass  `json:"class" yaml:"class"`
-	Dependencies     []Dependency  `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Compatibility    Compatibility `json:"compatibility,omitempty" yaml:"compatibility,omitempty"`
-	Inputs           []Input       `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Contents         []Content     `json:"contents" yaml:"contents"`
-	Hooks            []Hook        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
-	LocalPatchPolicy string        `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
+	Component        string           `json:"component" yaml:"component"`
+	Version          string           `json:"version" yaml:"version"`
+	Class            PackageClass     `json:"class" yaml:"class"`
+	Dependencies     []Dependency     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	Compatibility    Compatibility    `json:"compatibility,omitempty" yaml:"compatibility,omitempty"`
+	Inputs           []Input          `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Contents         []Content        `json:"contents" yaml:"contents"`
+	Hooks            []Hook           `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+	GeneratedOutputs GeneratedOutputs `json:"generatedOutputs,omitempty" yaml:"generatedOutputs,omitempty"`
+	LocalPatchPolicy string           `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
 }
 
 type ComponentPackage struct {
@@ -250,6 +271,17 @@ func (s Spec) Validate() error {
 		hookNames[hook.Name] = struct{}{}
 	}
 
+	generatedHostPaths := make(map[string]struct{}, len(s.GeneratedOutputs.HostPaths))
+	for i, output := range s.GeneratedOutputs.HostPaths {
+		if err := output.Validate(); err != nil {
+			return fmt.Errorf("generatedOutputs.hostPaths[%d]: %w", i, err)
+		}
+		if _, ok := generatedHostPaths[output.HostPath]; ok {
+			return fmt.Errorf("generatedOutputs.hostPaths[%d]: duplicate hostPath %q", i, output.HostPath)
+		}
+		generatedHostPaths[output.HostPath] = struct{}{}
+	}
+
 	switch s.Class {
 	case ClassRootfs:
 		if !hasRootfsContent {
@@ -261,6 +293,35 @@ func (s Spec) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+func (o GeneratedHostPathOutput) Validate() error {
+	if strings.TrimSpace(o.HostPath) == "" {
+		return fmt.Errorf("hostPath cannot be empty")
+	}
+	if !strings.HasPrefix(o.HostPath, "/") {
+		return fmt.Errorf("hostPath must be absolute, got %q", o.HostPath)
+	}
+	cleaned := path.Clean(o.HostPath)
+	if cleaned == "." || cleaned == "/" {
+		return fmt.Errorf("hostPath must name a file, got %q", o.HostPath)
+	}
+	if cleaned != o.HostPath {
+		return fmt.Errorf("hostPath must be clean, got %q", o.HostPath)
+	}
+	if strings.TrimSpace(o.Tool) == "" {
+		return fmt.Errorf("tool cannot be empty")
+	}
+	if strings.TrimSpace(o.APIVersion) == "" {
+		return fmt.Errorf("apiVersion cannot be empty")
+	}
+	if strings.TrimSpace(o.Kind) == "" {
+		return fmt.Errorf("kind cannot be empty")
+	}
+	if strings.TrimSpace(o.ObjectName) == "" {
+		return fmt.Errorf("objectName cannot be empty")
+	}
 	return nil
 }
 

@@ -57,6 +57,12 @@ func TestPersistSuccessfulApply(t *testing.T) {
 	if got, want := doc.Status.LastSuccessfulRevision.DesiredStateDigest, doc.Spec.DesiredStateDigest; got != want {
 		t.Fatalf("lastSuccessfulRevision.desiredStateDigest = %q, want %q", got, want)
 	}
+	if got, want := len(doc.Status.SuccessfulRevisions), 1; got != want {
+		t.Fatalf("len(status.successfulRevisions) = %d, want %d", got, want)
+	}
+	if got, want := doc.Status.SuccessfulRevisions[0].DesiredStateDigest, doc.Spec.DesiredStateDigest; got != want {
+		t.Fatalf("successfulRevisions[0].desiredStateDigest = %q, want %q", got, want)
+	}
 
 	path := AppliedRevisionPath("cluster-a")
 	if _, err := os.Stat(path); err != nil {
@@ -116,6 +122,142 @@ func TestPersistRenderedState(t *testing.T) {
 	}
 	if got, want := doc.Status.Conditions[0].Reason, "DesiredStateRendered"; got != want {
 		t.Fatalf("status.conditions[0].reason = %q, want %q", got, want)
+	}
+}
+
+func TestPersistSuccessfulApplyRecordsBoundedCrossBOMHistory(t *testing.T) {
+	previousRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRoot
+	})
+
+	for i := 0; i < maxSuccessfulRevisionHistory+2; i++ {
+		ref := BOMReference{
+			Name:     "default-platform",
+			Revision: "rev-" + string(rune('a'+i)),
+			Channel:  "stable",
+			Digest:   digestForTest(hexByteForTest(i)),
+		}
+		if i%2 == 1 {
+			ref.Name = "edge-platform"
+		}
+		_, err := PersistSuccessfulApply(
+			"cluster-a",
+			ref,
+			digestForTest(hexByteForTest(i+1)),
+			digestForTest(hexByteForTest(i+2)),
+			"local-rev",
+		)
+		if err != nil {
+			t.Fatalf("PersistSuccessfulApply(%d) error = %v", i, err)
+		}
+	}
+
+	doc, err := LoadAppliedRevision("cluster-a")
+	if err != nil {
+		t.Fatalf("LoadAppliedRevision() error = %v", err)
+	}
+	if got, want := len(doc.Status.SuccessfulRevisions), maxSuccessfulRevisionHistory; got != want {
+		t.Fatalf("len(status.successfulRevisions) = %d, want %d", got, want)
+	}
+	if got, want := doc.Status.SuccessfulRevisions[0].BOM.Revision, "rev-l"; got != want {
+		t.Fatalf("successfulRevisions[0].bom.revision = %q, want %q", got, want)
+	}
+	if got, want := doc.Status.SuccessfulRevisions[1].BOM.Name, "default-platform"; got != want {
+		t.Fatalf("successfulRevisions[1].bom.name = %q, want cross-BOM history entry %q", got, want)
+	}
+
+	ref := doc.Status.SuccessfulRevisions[0].BOM
+	if _, err := PersistSuccessfulApply("cluster-a", ref, doc.Status.SuccessfulRevisions[0].DesiredStateDigest, doc.Status.SuccessfulRevisions[0].LocalRepoRevision, doc.Status.SuccessfulRevisions[0].LocalPatchRevision); err != nil {
+		t.Fatalf("PersistSuccessfulApply(duplicate latest) error = %v", err)
+	}
+	doc, err = LoadAppliedRevision("cluster-a")
+	if err != nil {
+		t.Fatalf("LoadAppliedRevision() after duplicate error = %v", err)
+	}
+	if got, want := len(doc.Status.SuccessfulRevisions), maxSuccessfulRevisionHistory; got != want {
+		t.Fatalf("len(status.successfulRevisions) after duplicate = %d, want %d", got, want)
+	}
+}
+
+func TestPersistRenderedStateWithTarget(t *testing.T) {
+	previousRoot := constants.DefaultRuntimeRootDir
+	constants.DefaultRuntimeRootDir = t.TempDir()
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRoot
+	})
+
+	ref := BOMReference{
+		Name:     "default-platform",
+		Revision: "rev-20240423",
+		Channel:  "stable",
+		Digest:   "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+	}
+	requested := &RequestedTarget{
+		Kind:                 TargetKindReleaseChannelLookup,
+		ReleaseSource:        "https://release.sealos.example",
+		ReleaseChannelPath:   "https://release.sealos.example/v1/distributions/default-platform/channels/stable",
+		DistributionLine:     "default-platform",
+		Channel:              "stable",
+		ReleaseChannelDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+	}
+	resolved := &ResolvedTarget{
+		BOM: ref,
+		ReleaseChannel: &ReleaseChannelReference{
+			DistributionLine: "default-platform",
+			Channel:          "stable",
+			TargetRevision:   "rev-20240423",
+			Source:           requested.ReleaseChannelPath,
+			Digest:           requested.ReleaseChannelDigest,
+		},
+	}
+
+	doc, err := PersistRenderedStateWithOptions(
+		"cluster-a",
+		ref,
+		"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"local-rev-1",
+		PersistRevisionOptions{
+			RequestedTarget: requested,
+			ResolvedTarget:  resolved,
+		},
+	)
+	if err != nil {
+		t.Fatalf("PersistRenderedStateWithOptions() error = %v", err)
+	}
+	if doc.Spec.RequestedTarget == nil {
+		t.Fatal("spec.requestedTarget = nil, want value")
+	}
+	if got, want := doc.Spec.RequestedTarget.Kind, TargetKindReleaseChannelLookup; got != want {
+		t.Fatalf("spec.requestedTarget.kind = %q, want %q", got, want)
+	}
+	if doc.Spec.ResolvedTarget == nil {
+		t.Fatal("spec.resolvedTarget = nil, want value")
+	}
+	if got, want := doc.Spec.ResolvedTarget.BOM.Revision, ref.Revision; got != want {
+		t.Fatalf("spec.resolvedTarget.bom.revision = %q, want %q", got, want)
+	}
+
+	doc, err = MarkSuccessfulApply("cluster-a")
+	if err != nil {
+		t.Fatalf("MarkSuccessfulApply() error = %v", err)
+	}
+	if doc.Status.LastSuccessfulRevision == nil {
+		t.Fatal("status.lastSuccessfulRevision = nil, want value")
+	}
+	if doc.Status.LastSuccessfulRevision.RequestedTarget == nil {
+		t.Fatal("lastSuccessfulRevision.requestedTarget = nil, want value")
+	}
+	if got, want := doc.Status.LastSuccessfulRevision.RequestedTarget.ReleaseSource, requested.ReleaseSource; got != want {
+		t.Fatalf("lastSuccessfulRevision.requestedTarget.releaseSource = %q, want %q", got, want)
+	}
+	if doc.Status.LastSuccessfulRevision.ResolvedTarget == nil {
+		t.Fatal("lastSuccessfulRevision.resolvedTarget = nil, want value")
+	}
+	if got, want := doc.Status.LastSuccessfulRevision.ResolvedTarget.BOM.Digest, ref.Digest; got != want {
+		t.Fatalf("lastSuccessfulRevision.resolvedTarget.bom.digest = %q, want %q", got, want)
 	}
 }
 
@@ -255,6 +397,23 @@ func TestLoadAppliedRevisionMissingFile(t *testing.T) {
 	if _, err := LoadAppliedRevision("cluster-a"); err == nil {
 		t.Fatal("LoadAppliedRevision() error = nil, want error")
 	}
+}
+
+func digestForTest(fill byte) string {
+	return "sha256:" + string(bytesRepeat(fill, 64))
+}
+
+func hexByteForTest(offset int) byte {
+	const hex = "0123456789abcdef"
+	return hex[offset%len(hex)]
+}
+
+func bytesRepeat(fill byte, n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = fill
+	}
+	return out
 }
 
 func TestPersistObservedState(t *testing.T) {

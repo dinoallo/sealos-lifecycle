@@ -27,6 +27,7 @@ import (
 
 	"github.com/labring/sealos/pkg/clusterfile"
 	"github.com/labring/sealos/pkg/constants"
+	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/compare"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
@@ -192,7 +193,38 @@ func syncRenderInputStatusForBundle(bundle *hydrate.Bundle) syncRenderInputStatu
 	}
 
 	var changes []syncRenderInputChange
-	if strings.TrimSpace(provenance.ReleaseChannelPath) != "" || strings.TrimSpace(provenance.ReleaseChannelDigest) != "" {
+	if strings.TrimSpace(provenance.ReleaseSource) != "" {
+		resolved, err := bom.ResolveReleaseChannelLookup(bom.ReleaseChannelLookupOptions{
+			DistributionLine: provenance.DistributionLine,
+			Channel:          bom.ReleaseChannel(provenance.ReleaseChannel),
+			Source:           provenance.ReleaseSource,
+		})
+		switch {
+		case err != nil:
+			changes = append(changes, syncRenderInputChange{
+				Name:     "releaseLookup",
+				Path:     provenance.ReleaseSource,
+				Expected: provenance.BOMDigest,
+				Reason:   err.Error(),
+			})
+		case strings.TrimSpace(resolved.BOMDigest) != strings.TrimSpace(provenance.BOMDigest):
+			changes = append(changes, syncRenderInputChange{
+				Name:     "releaseLookup",
+				Path:     provenance.ReleaseSource,
+				Expected: provenance.BOMDigest,
+				Current:  resolved.BOMDigest,
+				Reason:   "resolved BOM digest mismatch",
+			})
+		case resolved.BOM.Spec.Revision != bundle.Spec.Revision:
+			changes = append(changes, syncRenderInputChange{
+				Name:     "releaseLookup",
+				Path:     provenance.ReleaseSource,
+				Expected: bundle.Spec.Revision,
+				Current:  resolved.BOM.Spec.Revision,
+				Reason:   "resolved BOM revision mismatch",
+			})
+		}
+	} else if strings.TrimSpace(provenance.ReleaseChannelPath) != "" || strings.TrimSpace(provenance.ReleaseChannelDigest) != "" {
 		switch {
 		case strings.TrimSpace(provenance.ReleaseChannelPath) == "" || strings.TrimSpace(provenance.ReleaseChannelDigest) == "":
 			changes = append(changes, syncRenderInputChange{
@@ -221,27 +253,29 @@ func syncRenderInputStatusForBundle(bundle *hydrate.Bundle) syncRenderInputStatu
 		}
 	}
 
-	if strings.TrimSpace(provenance.BOMPath) == "" || strings.TrimSpace(provenance.BOMDigest) == "" {
-		changes = append(changes, syncRenderInputChange{
-			Name:   "bom",
-			Path:   provenance.BOMPath,
-			Reason: "missing BOM provenance",
-		})
-	} else if data, err := os.ReadFile(provenance.BOMPath); err != nil {
-		changes = append(changes, syncRenderInputChange{
-			Name:     "bom",
-			Path:     provenance.BOMPath,
-			Expected: provenance.BOMDigest,
-			Reason:   err.Error(),
-		})
-	} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.BOMDigest {
-		changes = append(changes, syncRenderInputChange{
-			Name:     "bom",
-			Path:     provenance.BOMPath,
-			Expected: provenance.BOMDigest,
-			Current:  current,
-			Reason:   "digest mismatch",
-		})
+	if strings.TrimSpace(provenance.ReleaseSource) == "" {
+		if strings.TrimSpace(provenance.BOMPath) == "" || strings.TrimSpace(provenance.BOMDigest) == "" {
+			changes = append(changes, syncRenderInputChange{
+				Name:   "bom",
+				Path:   provenance.BOMPath,
+				Reason: "missing BOM provenance",
+			})
+		} else if data, err := os.ReadFile(provenance.BOMPath); err != nil {
+			changes = append(changes, syncRenderInputChange{
+				Name:     "bom",
+				Path:     provenance.BOMPath,
+				Expected: provenance.BOMDigest,
+				Reason:   err.Error(),
+			})
+		} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.BOMDigest {
+			changes = append(changes, syncRenderInputChange{
+				Name:     "bom",
+				Path:     provenance.BOMPath,
+				Expected: provenance.BOMDigest,
+				Current:  current,
+				Reason:   "digest mismatch",
+			})
+		}
 	}
 
 	if strings.TrimSpace(provenance.LocalRepoPath) != "" {
@@ -324,7 +358,13 @@ func syncTopologyRefreshCommand(clusterName string, provenance *hydrate.RenderPr
 		bomPath = provenance.BOMPath
 	}
 	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
-	if provenance != nil && strings.TrimSpace(provenance.ReleaseChannelPath) != "" {
+	if provenance != nil && strings.TrimSpace(provenance.ReleaseSource) != "" {
+		args = append(args,
+			"--release-source", provenance.ReleaseSource,
+			"--release-line", provenance.DistributionLine,
+			"--channel", provenance.ReleaseChannel,
+		)
+	} else if provenance != nil && strings.TrimSpace(provenance.ReleaseChannelPath) != "" {
 		args = append(args, "--release-channel", provenance.ReleaseChannelPath)
 	} else {
 		args = append(args, "--file", bomPath)
