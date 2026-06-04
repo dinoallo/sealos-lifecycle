@@ -50,6 +50,9 @@ The new package format should preserve compatibility with this behavior while ma
 - Replacing the existing image transport. OCI remains the transport.
 - Encoding every runtime policy or promotion rule into the package manifest.
 - Solving local patch packaging in the same format on day one.
+- Providing a package-direct cluster install flow. Packages are consumed through
+  BOM resolution, hydration, and rendered bundles; package authoring commands do
+  not bypass that release boundary.
 
 ## Packaging Unit
 

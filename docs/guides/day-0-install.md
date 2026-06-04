@@ -401,6 +401,14 @@ installable only when those local package directories already contain full real
 payloads. Ordinary installers should consume already-published, digest-pinned
 packages through a BOM or `ReleaseChannel`.
 
+The product does not expose a package-direct install path. Commands such as
+`sealos sync package pull` or `--package-source` are package authoring and
+renderer development tools. They do not replace the Day 0 release contract:
+operators still select a BOM or `ReleaseChannel`, render a bundle, run
+preflight, and apply that bundle. Keeping install execution behind the
+BOM/bundle boundary is what preserves dependency ordering, local input binding,
+render provenance, drift ownership, and rollback history.
+
 ## Completion Criteria
 
 Day 0 is complete when:

@@ -389,6 +389,13 @@ $SEALOS sync render \
 已经包含完整真实 payload 时，它才具备可安装性。普通安装用户应该通过 BOM 或
 `ReleaseChannel` 消费已经发布并 digest-pinned 的 packages。
 
+产品形态不提供 package-direct install 路径。`sealos sync package pull` 或
+`--package-source` 这类能力是 package authoring 和 renderer 开发工具，不替代
+Day 0 release contract：operator 仍然必须选择 BOM 或 `ReleaseChannel`，render
+bundle，执行 preflight，然后 apply 这个 bundle。把安装执行收敛在 BOM/bundle
+边界之后，才能保留依赖排序、本地输入绑定、render provenance、drift ownership
+和 rollback history。
+
 ## 完成标准
 
 Day 0 完成的标准是：
