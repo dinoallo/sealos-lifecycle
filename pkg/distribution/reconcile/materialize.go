@@ -28,7 +28,6 @@ import (
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
-	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/state"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
@@ -209,36 +208,12 @@ func attachLocalBindings(plan *hydrate.Plan, bomRoot string, sources hydrate.Sou
 	if plan == nil {
 		return nil
 	}
-	plan.LocalPatchPolicy = ownership.DefaultLocalPatchPolicyDocument().Clone()
-	plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBuiltInDefault
-
-	repoPolicySelected := false
-	if repo != nil {
-		if localPatchPolicy := repo.LocalPatchPolicy(); localPatchPolicy != nil {
-			plan.LocalPatchPolicy = localPatchPolicy
-			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceLocalRepo
-			repoPolicySelected = true
-		}
+	selection, err := hydrate.SelectLocalPatchPolicy(plan, bomRoot, sources, repo)
+	if err != nil {
+		return err
 	}
-	if !repoPolicySelected {
-		bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
-		if err != nil {
-			return err
-		}
-		if bomPolicy != nil {
-			plan.LocalPatchPolicy = bomPolicy
-			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
-		} else {
-			packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
-			if err != nil {
-				return err
-			}
-			if packagePolicy != nil {
-				plan.LocalPatchPolicy = packagePolicy
-				plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
-			}
-		}
-	}
+	plan.LocalPatchPolicy = selection.Document.Clone()
+	plan.LocalPatchPolicySource = selection.Source
 	if repo == nil {
 		return nil
 	}

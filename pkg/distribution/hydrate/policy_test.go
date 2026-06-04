@@ -220,6 +220,85 @@ func TestLoadPackageLocalPatchPolicyRejectsMultipleBeforeSourceLookup(t *testing
 	}
 }
 
+func TestSelectLocalPatchPolicyReportsCandidatesAndPrecedence(t *testing.T) {
+	t.Parallel()
+
+	bomRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(bomRoot, "policy"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(bom policy) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bomRoot, "policy", ownership.LocalPatchPolicyFileName), testLocalPatchPolicyYAML("bom-policy", "data"), 0o644); err != nil {
+		t.Fatalf("WriteFile(bom policy) error = %v", err)
+	}
+
+	packageRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(packageRoot, "policy"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(package policy) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "policy", ownership.LocalPatchPolicyFileName), testLocalPatchPolicyYAML("package-policy", "data"), 0o644); err != nil {
+		t.Fatalf("WriteFile(package policy) error = %v", err)
+	}
+
+	plan := &Plan{
+		BOMLocalPatchPolicy: "policy/local-patch-policy.yaml",
+		Components: []ComponentPlan{
+			{Name: "runtime", LocalPatchPolicy: "policy/local-patch-policy.yaml"},
+		},
+	}
+	selection, err := SelectLocalPatchPolicy(plan, bomRoot, SourceMap{"runtime": packageRoot}, nil)
+	if err != nil {
+		t.Fatalf("SelectLocalPatchPolicy() error = %v", err)
+	}
+	if got, want := selection.Source, ownership.LocalPatchPolicySourceBOM; got != want {
+		t.Fatalf("selection.Source = %q, want %q", got, want)
+	}
+	if got, want := selection.Path, "policy/local-patch-policy.yaml"; got != want {
+		t.Fatalf("selection.Path = %q, want %q", got, want)
+	}
+	if got, want := selection.Name, "bom-policy"; got != want {
+		t.Fatalf("selection.Name = %q, want %q", got, want)
+	}
+	if !hasPolicyCandidate(selection.Candidates, ownership.LocalPatchPolicySourceBOM, "policy/local-patch-policy.yaml", "", true) {
+		t.Fatalf("selection.Candidates missing selected BOM candidate: %#v", selection.Candidates)
+	}
+	if !hasPolicyCandidate(selection.Candidates, ownership.LocalPatchPolicySourcePackage, "policy/local-patch-policy.yaml", "runtime", false) {
+		t.Fatalf("selection.Candidates missing unselected package candidate: %#v", selection.Candidates)
+	}
+}
+
+func TestSelectLocalPatchPolicyUsesBuiltInDefaultWhenNoExternalSource(t *testing.T) {
+	t.Parallel()
+
+	selection, err := SelectLocalPatchPolicy(&Plan{}, "", nil, nil)
+	if err != nil {
+		t.Fatalf("SelectLocalPatchPolicy() error = %v", err)
+	}
+	if got, want := selection.Source, ownership.LocalPatchPolicySourceBuiltInDefault; got != want {
+		t.Fatalf("selection.Source = %q, want %q", got, want)
+	}
+	if got, want := selection.Path, "builtInDefault"; got != want {
+		t.Fatalf("selection.Path = %q, want %q", got, want)
+	}
+	if got, want := selection.Name, ownership.DefaultLocalPatchPolicyName; got != want {
+		t.Fatalf("selection.Name = %q, want %q", got, want)
+	}
+	if !hasPolicyCandidate(selection.Candidates, ownership.LocalPatchPolicySourceBuiltInDefault, "builtInDefault", "", true) {
+		t.Fatalf("selection.Candidates missing selected built-in default: %#v", selection.Candidates)
+	}
+}
+
+func hasPolicyCandidate(candidates []LocalPatchPolicyCandidate, source ownership.LocalPatchPolicySource, path, component string, selected bool) bool {
+	for _, candidate := range candidates {
+		if candidate.Source == source &&
+			candidate.Path == path &&
+			candidate.Component == component &&
+			candidate.Selected == selected {
+			return true
+		}
+	}
+	return false
+}
+
 func testLocalPatchPolicyYAML(name string, allowedPrefixes ...string) []byte {
 	prefixLines := make([]string, 0, len(allowedPrefixes))
 	for _, prefix := range allowedPrefixes {

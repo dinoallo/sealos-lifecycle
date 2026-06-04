@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/constants"
+	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
@@ -235,8 +236,17 @@ spec:
 	if got, want := out.LocalPolicySource, "package"; got != want {
 		t.Fatalf("localPolicySource = %q, want %q", got, want)
 	}
-	if got, want := out.LocalPolicy, "package"; got != want {
+	if got, want := out.LocalPolicy, "policy/local-patch-policy.yaml"; got != want {
 		t.Fatalf("localPolicy = %q, want %q", got, want)
+	}
+	if got, want := out.LocalPolicyName, "package-local-patch-policy"; got != want {
+		t.Fatalf("localPolicyName = %q, want %q", got, want)
+	}
+	if got, want := out.LocalPolicyScope, "clusterLocal"; got != want {
+		t.Fatalf("localPolicyScope = %q, want %q", got, want)
+	}
+	if !syncValidateHasSelectedPolicyCandidate(out.LocalPolicyCandidates, "package", "policy/local-patch-policy.yaml", "runtime") {
+		t.Fatalf("localPolicyCandidates missing selected package policy: %#v", out.LocalPolicyCandidates)
 	}
 }
 
@@ -307,8 +317,17 @@ spec:
 	if got, want := out.LocalPolicySource, "bom"; got != want {
 		t.Fatalf("localPolicySource = %q, want %q", got, want)
 	}
-	if got, want := out.LocalPolicy, "bom"; got != want {
+	if got, want := out.LocalPolicy, "policy/local-patch-policy.yaml"; got != want {
 		t.Fatalf("localPolicy = %q, want %q", got, want)
+	}
+	if got, want := out.LocalPolicyName, "bom-local-patch-policy"; got != want {
+		t.Fatalf("localPolicyName = %q, want %q", got, want)
+	}
+	if got, want := out.LocalPolicyScope, "clusterLocal"; got != want {
+		t.Fatalf("localPolicyScope = %q, want %q", got, want)
+	}
+	if !syncValidateHasSelectedPolicyCandidate(out.LocalPolicyCandidates, "bom", "policy/local-patch-policy.yaml", "") {
+		t.Fatalf("localPolicyCandidates missing selected BOM policy: %#v", out.LocalPolicyCandidates)
 	}
 }
 
@@ -385,18 +404,24 @@ spec:
         - data
 `)+"\n")
 
-	policy, source, policyPath, err := syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, nil)
+	selection, err := syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, nil)
 	if err != nil {
 		t.Fatalf("syncEffectiveLocalPatchPolicy() error = %v", err)
 	}
-	if got, want := string(source), "bom"; got != want {
+	if got, want := string(selection.Source), "bom"; got != want {
 		t.Fatalf("source = %q, want %q", got, want)
 	}
-	if got, want := policyPath, "bom"; got != want {
+	if got, want := selection.Path, "policy/local-patch-policy.yaml"; got != want {
 		t.Fatalf("policyPath = %q, want %q", got, want)
 	}
-	if got, want := policy.EffectiveName(), "bom-local-patch-policy"; got != want {
+	if got, want := selection.Document.EffectiveName(), "bom-local-patch-policy"; got != want {
 		t.Fatalf("policy.EffectiveName() = %q, want %q", got, want)
+	}
+	if !syncValidateHasSelectedPolicyCandidate(selection.Candidates, "bom", "policy/local-patch-policy.yaml", "") {
+		t.Fatalf("selection.Candidates missing selected BOM policy: %#v", selection.Candidates)
+	}
+	if !syncValidateHasPolicyCandidate(selection.Candidates, "package", "policy/local-patch-policy.yaml", "runtime", false) {
+		t.Fatalf("selection.Candidates missing unselected package policy: %#v", selection.Candidates)
 	}
 
 	writeSyncPolicyFile(t, localRepoRoot, strings.TrimSpace(`
@@ -433,18 +458,27 @@ spec:
 		t.Fatalf("localrepo.Load() error = %v", err)
 	}
 
-	policy, source, policyPath, err = syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, repo)
+	selection, err = syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, repo)
 	if err != nil {
 		t.Fatalf("syncEffectiveLocalPatchPolicy() error = %v", err)
 	}
-	if got, want := string(source), "localRepo"; got != want {
+	if got, want := string(selection.Source), "localRepo"; got != want {
 		t.Fatalf("source = %q, want %q", got, want)
 	}
-	if got, want := policyPath, "policy/local-patch-policy.yaml"; got != want {
+	if got, want := selection.Path, "policy/local-patch-policy.yaml"; got != want {
 		t.Fatalf("policyPath = %q, want %q", got, want)
 	}
-	if got, want := policy.EffectiveName(), "repo-local-patch-policy"; got != want {
+	if got, want := selection.Document.EffectiveName(), "repo-local-patch-policy"; got != want {
 		t.Fatalf("policy.EffectiveName() = %q, want %q", got, want)
+	}
+	if !syncValidateHasSelectedPolicyCandidate(selection.Candidates, "localRepo", "policy/local-patch-policy.yaml", "") {
+		t.Fatalf("selection.Candidates missing selected localRepo policy: %#v", selection.Candidates)
+	}
+	if !syncValidateHasPolicyCandidate(selection.Candidates, "bom", "policy/local-patch-policy.yaml", "", false) {
+		t.Fatalf("selection.Candidates missing unselected BOM policy: %#v", selection.Candidates)
+	}
+	if !syncValidateHasPolicyCandidate(selection.Candidates, "package", "policy/local-patch-policy.yaml", "runtime", false) {
+		t.Fatalf("selection.Candidates missing unselected package policy: %#v", selection.Candidates)
 	}
 }
 
@@ -588,6 +622,22 @@ spec:
 func syncValidateHasIssueCode(issues []syncValidateIssue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func syncValidateHasSelectedPolicyCandidate(candidates []hydrate.LocalPatchPolicyCandidate, source, path, component string) bool {
+	return syncValidateHasPolicyCandidate(candidates, source, path, component, true)
+}
+
+func syncValidateHasPolicyCandidate(candidates []hydrate.LocalPatchPolicyCandidate, source, path, component string, selected bool) bool {
+	for _, candidate := range candidates {
+		if string(candidate.Source) == source &&
+			candidate.Path == path &&
+			candidate.Component == component &&
+			candidate.Selected == selected {
 			return true
 		}
 	}

@@ -28,7 +28,6 @@ import (
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
-	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
@@ -69,21 +68,24 @@ type syncValidatePackageOutput struct {
 }
 
 type syncValidateOutput struct {
-	Passed             bool                        `json:"passed" yaml:"passed"`
-	ClusterName        string                      `json:"clusterName" yaml:"clusterName"`
-	BOMPath            string                      `json:"bomPath" yaml:"bomPath"`
-	ReleaseChannelPath string                      `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
-	ReleaseSource      string                      `json:"releaseSource,omitempty" yaml:"releaseSource,omitempty"`
-	ReleaseLine        string                      `json:"releaseLine,omitempty" yaml:"releaseLine,omitempty"`
-	Channel            string                      `json:"channel,omitempty" yaml:"channel,omitempty"`
-	LocalRepo          string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	ExecutionTopology  hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
-	Summary            syncValidateSummary         `json:"summary" yaml:"summary"`
-	Packages           []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
-	Issues             []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
-	LocalPolicy        string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
-	LocalPolicySource  string                      `json:"localPolicySource,omitempty" yaml:"localPolicySource,omitempty"`
-	LocalRepoRev       string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
+	Passed                bool                                `json:"passed" yaml:"passed"`
+	ClusterName           string                              `json:"clusterName" yaml:"clusterName"`
+	BOMPath               string                              `json:"bomPath" yaml:"bomPath"`
+	ReleaseChannelPath    string                              `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
+	ReleaseSource         string                              `json:"releaseSource,omitempty" yaml:"releaseSource,omitempty"`
+	ReleaseLine           string                              `json:"releaseLine,omitempty" yaml:"releaseLine,omitempty"`
+	Channel               string                              `json:"channel,omitempty" yaml:"channel,omitempty"`
+	LocalRepo             string                              `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
+	ExecutionTopology     hydrate.ExecutionTopology           `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
+	Summary               syncValidateSummary                 `json:"summary" yaml:"summary"`
+	Packages              []syncValidatePackageOutput         `json:"packages,omitempty" yaml:"packages,omitempty"`
+	Issues                []syncValidateIssue                 `json:"issues,omitempty" yaml:"issues,omitempty"`
+	LocalPolicy           string                              `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
+	LocalPolicySource     string                              `json:"localPolicySource,omitempty" yaml:"localPolicySource,omitempty"`
+	LocalPolicyName       string                              `json:"localPolicyName,omitempty" yaml:"localPolicyName,omitempty"`
+	LocalPolicyScope      string                              `json:"localPolicyScope,omitempty" yaml:"localPolicyScope,omitempty"`
+	LocalPolicyCandidates []hydrate.LocalPatchPolicyCandidate `json:"localPolicyCandidates,omitempty" yaml:"localPolicyCandidates,omitempty"`
+	LocalRepoRev          string                              `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
 }
 
 type syncValidateAccumulator struct {
@@ -459,17 +461,20 @@ func (a *syncValidateAccumulator) validateSecretBearingFile(componentName, path 
 }
 
 func (a *syncValidateAccumulator) validateLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, sources hydrate.SourceProvider, repo *localrepo.Repo) {
-	policyDoc, source, policyPath, err := syncEffectiveLocalPatchPolicy(doc, resolved, a.localPolicyBOMRoot, sources, repo)
+	selection, err := syncEffectiveLocalPatchPolicy(doc, resolved, a.localPolicyBOMRoot, sources, repo)
 	if err != nil {
 		a.error("localPatchPolicyInvalid", "", "", err.Error())
 		return
 	}
-	a.out.LocalPolicySource = string(source)
-	a.out.LocalPolicy = policyPath
+	a.out.LocalPolicySource = string(selection.Source)
+	a.out.LocalPolicy = selection.Path
+	a.out.LocalPolicyName = selection.Name
+	a.out.LocalPolicyScope = string(selection.Scope)
+	a.out.LocalPolicyCandidates = selection.Candidates
 	if repo == nil {
 		return
 	}
-	compatibility, err := localrepo.EvaluatePatchCompatibility(repo, policyDoc.Spec)
+	compatibility, err := localrepo.EvaluatePatchCompatibility(repo, selection.Document.Spec)
 	if err != nil {
 		a.error("localPatchPolicyInvalid", "", repo.LocalPatchPolicyRelativePath(), err.Error())
 		return
@@ -479,44 +484,16 @@ func (a *syncValidateAccumulator) validateLocalPatchPolicy(doc *bom.BOM, resolve
 	}
 }
 
-func syncEffectiveLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, bomRoot string, sources hydrate.SourceProvider, repo *localrepo.Repo) (*ownership.LocalPatchPolicyDocument, ownership.LocalPatchPolicySource, string, error) {
-	policyDoc := ownership.DefaultLocalPatchPolicyDocument().Clone()
-	source := ownership.LocalPatchPolicySourceBuiltInDefault
-	policyPath := string(source)
-
-	if repo != nil {
-		if localPolicy := repo.LocalPatchPolicy(); localPolicy != nil {
-			return localPolicy, ownership.LocalPatchPolicySourceLocalRepo, repo.LocalPatchPolicyRelativePath(), nil
-		}
-	}
-
+func syncEffectiveLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, bomRoot string, sources hydrate.SourceProvider, repo *localrepo.Repo) (*hydrate.LocalPatchPolicySelection, error) {
+	var plan *hydrate.Plan
 	if doc != nil && len(resolved) > 0 {
-		plan, err := hydrate.BuildPlanFromResolved(doc, resolved)
+		var err error
+		plan, err = hydrate.BuildPlanFromResolved(doc, resolved)
 		if err != nil {
-			return nil, "", "", err
-		}
-		bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
-		if err != nil {
-			return nil, "", "", err
-		}
-		if bomPolicy != nil {
-			policyDoc = bomPolicy
-			source = ownership.LocalPatchPolicySourceBOM
-			policyPath = string(source)
-		} else {
-			packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
-			if err != nil {
-				return nil, "", "", err
-			}
-			if packagePolicy != nil {
-				policyDoc = packagePolicy
-				source = ownership.LocalPatchPolicySourcePackage
-				policyPath = string(source)
-			}
+			return nil, err
 		}
 	}
-
-	return policyDoc, source, policyPath, nil
+	return hydrate.SelectLocalPatchPolicy(plan, bomRoot, sources, repo)
 }
 
 func syncValidatePatchCount(repo *localrepo.Repo, doc *bom.BOM) int {
