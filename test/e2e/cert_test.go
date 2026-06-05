@@ -55,8 +55,12 @@ func defineSealosCertSpec(kubernetesVersion string) {
 		err = fakeClient.Cluster.Reset()
 		utils.CheckErr(err, fmt.Sprintf("failed to reset cluster for single: %v", err))
 	})
-	It(fmt.Sprintf("sealos cert suit %s", kubernetesVersion), func() {
-		images := []string{fmt.Sprintf("labring/kubernetes:%s", kubernetesVersion), "labring/helm:v3.8.2", "labring/calico:v3.24.1"}
+	It("sealos cert suit "+kubernetesVersion, func() {
+		images := []string{
+			"labring/kubernetes:" + kubernetesVersion,
+			"labring/helm:v3.8.2",
+			"labring/calico:v3.24.1",
+		}
 		err = fakeClient.Cluster.Run(images...)
 		utils.CheckErr(err, fmt.Sprintf("failed to Run new cluster for single: %v", err))
 		err = fakeClient.Cert.AddDomain("test.sealoshub.io")
