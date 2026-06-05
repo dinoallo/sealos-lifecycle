@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/poc/minimal-single-node/publish-oci.sh \
+          sudo scripts/poc/minimal-single-node/publish-oci.sh \
             --sealos-bin ./bin/linux_amd64/sealos \
             --registry-prefix "localhost:${REGISTRY_PORT}/${CLUSTER_NAME}" \
             --workdir "${WORKDIR}/oci" \
