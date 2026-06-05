@@ -310,6 +310,10 @@ operator holds, or `phase=RollbackHold` after rollback to the last successful
 revision. `kubectl describe distributiontarget ...` also shows the emitted
 events for the latest transition.
 
+For fleet-level target aggregation, rollout progress, health evidence,
+promotion gates, and failure archives, use
+[Controller fleet observability](./controller-fleet-observability.md).
+
 ## Current Boundaries
 
 The controller has a durable reconcile state machine for each target, but the
