@@ -99,7 +99,7 @@ jobs:
           set -a
           . "${WORKDIR}/publish.env"
           set +a
-          ./bin/linux_amd64/sealos sync local-repo init \
+          sudo ./bin/linux_amd64/sealos sync local-repo init \
             --runtime-root "${WORKDIR}/runtime" \
             --cluster "${CLUSTER_NAME}" \
             --release-source "${release_source}" \
@@ -107,23 +107,23 @@ jobs:
             --channel "${release_channel}" \
             --output-dir "${WORKDIR}/local-repo" \
             --overwrite >/dev/null
-          install -D -m 0644 \
+          sudo install -D -m 0644 \
             scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
             "${WORKDIR}/local-repo/inputs/containerd/containerd-config.toml"
-          install -D -m 0644 \
+          sudo install -D -m 0644 \
             scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
             "${WORKDIR}/local-repo/inputs/kubernetes/kubeadm-cluster-config.yaml"
-          install -D -m 0644 \
+          sudo install -D -m 0644 \
             scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
             "${WORKDIR}/local-repo/inputs/cilium/cilium-values.yaml"
-          ./bin/linux_amd64/sealos sync validate \
+          sudo ./bin/linux_amd64/sealos sync validate \
             --runtime-root "${WORKDIR}/runtime" \
             --cluster "${CLUSTER_NAME}" \
             --release-source "${release_source}" \
             --release-line "${release_line}" \
             --channel "${release_channel}" \
             --local-repo "${WORKDIR}/local-repo" >/dev/null
-          scripts/poc/minimal-single-node/render.sh \
+          sudo scripts/poc/minimal-single-node/render.sh \
             --sealos-bin ./bin/linux_amd64/sealos \
             --cluster "${CLUSTER_NAME}" \
             --runtime-root "${WORKDIR}/runtime" \
