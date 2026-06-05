@@ -250,9 +250,167 @@ func newSyncCmd() *cobra.Command {
 	cmd.AddCommand(newSyncPolicyReportCmd())
 	cmd.AddCommand(newSyncPolicyGateCmd())
 	cmd.AddCommand(newSyncHealthProofCmd())
+	cmd.AddCommand(newSyncDeriveCmd())
 	cmd.AddCommand(newSyncPromoteCmd())
 	cmd.AddCommand(newSyncReleaseMetadataCmd())
 	return cmd
+}
+
+func newSyncDeriveCmd() *cobra.Command {
+	var flags struct {
+		sourceBOM    string
+		outputRoot   string
+		line         string
+		revision     string
+		channel      string
+		channelName  string
+		labels       []string
+		replacements []string
+		output       string
+	}
+
+	cmd := &cobra.Command{
+		Use:          "derive",
+		Short:        "Create a derived distribution BOM and ReleaseChannel from an existing BOM",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			labels, err := parseSyncKeyValueFlags(flags.labels, "--label")
+			if err != nil {
+				return err
+			}
+			replacements, err := parseSyncArtifactReplacementFlags(flags.replacements)
+			if err != nil {
+				return err
+			}
+			result, err := bom.DeriveDistributionFile(bom.DeriveDistributionOptions{
+				SourceBOMPath: flags.sourceBOM,
+				OutputRoot:    flags.outputRoot,
+				Line:          flags.line,
+				Revision:      flags.revision,
+				Channel:       bom.ReleaseChannel(strings.TrimSpace(flags.channel)),
+				ChannelName:   flags.channelName,
+				Labels:        labels,
+				Replacements:  replacements,
+			})
+			if err != nil {
+				return err
+			}
+			out := syncDeriveOutput{
+				SourceBOMPath:      result.SourceBOMPath,
+				SourceLine:         result.SourceLine,
+				SourceRevision:     result.SourceRevision,
+				OutputRoot:         result.OutputRoot,
+				Line:               result.BOM.Metadata.Name,
+				Revision:           result.BOM.Spec.Revision,
+				Channel:            string(result.Channel.Spec.Channel),
+				BOMPath:            result.BOMPath,
+				BOMDigest:          result.BOMDigest,
+				ReleaseChannelPath: result.ChannelPath,
+				ReleaseChannel:     result.Channel,
+				Replacements:       result.Replacements,
+			}
+			return writeSyncOutput(cmd, out, flags.output, "derived distribution result")
+		},
+	}
+	cmd.Flags().StringVar(&flags.sourceBOM, "source-bom", "", "path to the source BOM to clone")
+	cmd.Flags().StringVar(&flags.outputRoot, "output-root", "", "release source root where derived BOM and channel documents are written")
+	cmd.Flags().StringVar(&flags.line, "line", "", "derived distribution line written to metadata.name")
+	cmd.Flags().StringVar(&flags.revision, "revision", "", "derived BOM revision written to spec.revision")
+	cmd.Flags().StringVar(&flags.channel, "channel", string(bom.ChannelAlpha), "release channel object to write for the derived revision: alpha, beta, or stable")
+	cmd.Flags().StringVar(&flags.channelName, "channel-name", "", "optional ReleaseChannel metadata.name; defaults to <line>-<channel>")
+	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "metadata label override on the derived BOM, as key=value; repeatable")
+	cmd.Flags().StringArrayVar(&flags.replacements, "replace-artifact", nil, "package artifact replacement as package,key=value,...; keys: artifactName,image,digest,version,sourcePath,sourceDigest; repeatable")
+	addSyncOutputFlag(cmd, &flags.output)
+	for _, name := range []string{"source-bom", "output-root", "line", "revision"} {
+		if err := cmd.MarkFlagRequired(name); err != nil {
+			panic(err)
+		}
+	}
+	return cmd
+}
+
+type syncDeriveOutput struct {
+	SourceBOMPath      string                          `json:"sourceBOMPath" yaml:"sourceBOMPath"`
+	SourceLine         string                          `json:"sourceLine" yaml:"sourceLine"`
+	SourceRevision     string                          `json:"sourceRevision" yaml:"sourceRevision"`
+	OutputRoot         string                          `json:"outputRoot" yaml:"outputRoot"`
+	Line               string                          `json:"line" yaml:"line"`
+	Revision           string                          `json:"revision" yaml:"revision"`
+	Channel            string                          `json:"channel" yaml:"channel"`
+	BOMPath            string                          `json:"bomPath" yaml:"bomPath"`
+	BOMDigest          string                          `json:"bomDigest" yaml:"bomDigest"`
+	ReleaseChannelPath string                          `json:"releaseChannelPath" yaml:"releaseChannelPath"`
+	ReleaseChannel     *bom.ReleaseChannelDocument     `json:"releaseChannel" yaml:"releaseChannel"`
+	Replacements       []bom.ArtifactReplacementResult `json:"replacements,omitempty" yaml:"replacements,omitempty"`
+}
+
+func parseSyncKeyValueFlags(values []string, flagName string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	parsed := make(map[string]string, len(values))
+	for _, value := range values {
+		key, itemValue, ok := strings.Cut(value, "=")
+		key = strings.TrimSpace(key)
+		itemValue = strings.TrimSpace(itemValue)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("%s value %q must use key=value", flagName, value)
+		}
+		parsed[key] = itemValue
+	}
+	return parsed, nil
+}
+
+func parseSyncArtifactReplacementFlags(values []string) ([]bom.ArtifactReplacement, error) {
+	replacements := make([]bom.ArtifactReplacement, 0, len(values))
+	for i, value := range values {
+		replacement, err := parseSyncArtifactReplacementFlag(value)
+		if err != nil {
+			return nil, fmt.Errorf("--replace-artifact[%d]: %w", i, err)
+		}
+		replacements = append(replacements, replacement)
+	}
+	return replacements, nil
+}
+
+func parseSyncArtifactReplacementFlag(value string) (bom.ArtifactReplacement, error) {
+	parts := strings.Split(value, ",")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return bom.ArtifactReplacement{}, fmt.Errorf("package name cannot be empty")
+	}
+	replacement := bom.ArtifactReplacement{
+		PackageName: strings.TrimSpace(parts[0]),
+	}
+	for _, part := range parts[1:] {
+		key, partValue, ok := strings.Cut(part, "=")
+		key = strings.TrimSpace(key)
+		partValue = strings.TrimSpace(partValue)
+		if !ok || key == "" {
+			return bom.ArtifactReplacement{}, fmt.Errorf("entry %q must use key=value", part)
+		}
+		switch key {
+		case "artifactName":
+			replacement.ArtifactName = partValue
+		case "image":
+			replacement.Image = partValue
+		case "digest":
+			replacement.Digest = partValue
+		case "version":
+			replacement.Version = partValue
+		case "sourcePath":
+			replacement.SourcePath = partValue
+		case "sourceDigest":
+			replacement.SourceDigest = partValue
+		default:
+			return bom.ArtifactReplacement{}, fmt.Errorf("unsupported key %q", key)
+		}
+	}
+	if replacement.ArtifactName == "" && replacement.Image == "" && replacement.Digest == "" &&
+		replacement.Version == "" && replacement.SourcePath == "" && replacement.SourceDigest == "" {
+		return bom.ArtifactReplacement{}, fmt.Errorf("at least one replacement field is required")
+	}
+	return replacement, nil
 }
 
 func newSyncPromoteCmd() *cobra.Command {

@@ -621,6 +621,129 @@ func TestSyncPromoteCmd(t *testing.T) {
 	}
 }
 
+func TestSyncDeriveCmd(t *testing.T) {
+	root := t.TempDir()
+	sourceBOMPath := filepath.Join(root, "source", "bom.yaml")
+	sourceBOM := testSyncBOM()
+	if err := yamlutil.MarshalFile(sourceBOMPath, sourceBOM); err != nil {
+		t.Fatalf("MarshalFile(sourceBOM) error = %v", err)
+	}
+	outputRoot := filepath.Join(root, "release-source")
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"derive",
+		"--source-bom", sourceBOMPath,
+		"--output-root", outputRoot,
+		"--line", "corp-platform",
+		"--revision", "rev-corp-001",
+		"--channel", string(bom.ChannelBeta),
+		"--label", "distribution.sealos.io/profile=corp",
+		"--replace-artifact", "kubernetes,artifactName=corp-kubernetes-rootfs,image=registry.example.io/corp/kubernetes-rootfs:v1.30.3-corp.1,digest=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd,version=v1.30.3-corp.1,sourcePath=packages/infra/kubernetes/corp,sourceDigest=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+
+	var out syncDeriveOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.SourceBOMPath, sourceBOMPath; got != want {
+		t.Fatalf("sourceBOMPath = %q, want %q", got, want)
+	}
+	if got, want := out.SourceLine, "default-platform"; got != want {
+		t.Fatalf("sourceLine = %q, want %q", got, want)
+	}
+	if got, want := out.SourceRevision, "rev-20240423"; got != want {
+		t.Fatalf("sourceRevision = %q, want %q", got, want)
+	}
+	if got, want := out.Line, "corp-platform"; got != want {
+		t.Fatalf("line = %q, want %q", got, want)
+	}
+	if got, want := out.Revision, "rev-corp-001"; got != want {
+		t.Fatalf("revision = %q, want %q", got, want)
+	}
+	if got, want := out.Channel, string(bom.ChannelBeta); got != want {
+		t.Fatalf("channel = %q, want %q", got, want)
+	}
+	if got, want := out.BOMPath, filepath.Join(outputRoot, "releases", "corp-platform", "rev-corp-001", "bom.yaml"); got != want {
+		t.Fatalf("bomPath = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(out.BOMDigest, "sha256:") {
+		t.Fatalf("bomDigest = %q, want sha256 digest", out.BOMDigest)
+	}
+	if got, want := out.ReleaseChannelPath, filepath.Join(outputRoot, "channels", "corp-platform", "beta.yaml"); got != want {
+		t.Fatalf("releaseChannelPath = %q, want %q", got, want)
+	}
+	if got, want := len(out.Replacements), 1; got != want {
+		t.Fatalf("len(replacements) = %d, want %d", got, want)
+	}
+	if got, want := out.Replacements[0].After.Image, "registry.example.io/corp/kubernetes-rootfs:v1.30.3-corp.1"; got != want {
+		t.Fatalf("replacement after.image = %q, want %q", got, want)
+	}
+
+	derived, err := bom.LoadFile(out.BOMPath)
+	if err != nil {
+		t.Fatalf("LoadFile(derived) error = %v", err)
+	}
+	if got, want := derived.Metadata.Labels["distribution.sealos.io/derived-from-line"], "default-platform"; got != want {
+		t.Fatalf("derived-from-line label = %q, want %q", got, want)
+	}
+	if got, want := derived.Metadata.Labels["distribution.sealos.io/profile"], "corp"; got != want {
+		t.Fatalf("profile label = %q, want %q", got, want)
+	}
+	if got, want := derived.Spec.Packages[0].Artifact.Name, "corp-kubernetes-rootfs"; got != want {
+		t.Fatalf("derived artifact name = %q, want %q", got, want)
+	}
+	if got, want := derived.Spec.Packages[0].Version, "v1.30.3-corp.1"; got != want {
+		t.Fatalf("derived package version = %q, want %q", got, want)
+	}
+	if got, want := derived.Spec.Packages[0].Source.Path, "packages/infra/kubernetes/corp"; got != want {
+		t.Fatalf("derived source path = %q, want %q", got, want)
+	}
+
+	channel, err := bom.LoadReleaseChannelFile(out.ReleaseChannelPath)
+	if err != nil {
+		t.Fatalf("LoadReleaseChannelFile() error = %v", err)
+	}
+	if got, want := channel.Spec.BOMPath, "../../releases/corp-platform/rev-corp-001/bom.yaml"; got != want {
+		t.Fatalf("channel bomPath = %q, want %q", got, want)
+	}
+	if got, want := channel.Spec.BOMDigest, out.BOMDigest; got != want {
+		t.Fatalf("channel bomDigest = %q, want %q", got, want)
+	}
+}
+
+func TestSyncDeriveCmdRejectsInvalidReplacement(t *testing.T) {
+	root := t.TempDir()
+	sourceBOMPath := filepath.Join(root, "source", "bom.yaml")
+	if err := yamlutil.MarshalFile(sourceBOMPath, testSyncBOM()); err != nil {
+		t.Fatalf("MarshalFile(sourceBOM) error = %v", err)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"derive",
+		"--source-bom", sourceBOMPath,
+		"--output-root", filepath.Join(root, "release-source"),
+		"--line", "corp-platform",
+		"--revision", "rev-corp-001",
+		"--replace-artifact", "kubernetes,unknown=value",
+	})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatalf("Execute() error = nil, want invalid replacement error; output=%s", buf.String())
+	}
+}
+
 func TestSyncPromoteCmdRejectsFailedHealthProof(t *testing.T) {
 	root := t.TempDir()
 	channelPath := filepath.Join(root, "channels", "stable.yaml")

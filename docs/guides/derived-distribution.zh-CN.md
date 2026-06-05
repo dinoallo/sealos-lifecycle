@@ -256,7 +256,44 @@ registry namespace。
 关键点是：派生发行版引用的必须是不可变 package revision，而不是 live cluster
 上某次人工改动后的状态。
 
-### Step 6：让集群跟随新的 BOM
+### Step 6：生成派生 release object
+
+使用 `sealos sync derive` 可以从上游 BOM 克隆出派生 BOM，分配新的 line 和
+revision metadata，只改写指定 package 的 artifact reference，并为新发行线写出
+digest-pinned `ReleaseChannel`：
+
+```bash
+sealos sync derive \
+  --source-bom scripts/poc/minimal-single-node/bom.yaml \
+  --output-root /srv/sealos-release-source \
+  --line corp-minimal-single-node \
+  --revision rev-corp-001 \
+  --channel beta \
+  --label distribution.sealos.io/profile=corp \
+  --replace-artifact 'cilium,artifactName=cilium-cni,image=registry.example.io/corp/cilium-cni:v1.15.0-corp.1,digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc,version=v1.15.0-corp.1'
+```
+
+命令会写出：
+
+- `releases/<line>/<revision>/bom.yaml`
+- `channels/<line>/<channel>.yaml`
+
+派生 BOM 会记录 `distribution.sealos.io/derived-from-line` 和
+`distribution.sealos.io/derived-from-revision` labels，未变化 package 继续复用上游
+digest，并在写出 channel 前校验最终 BOM。channel 会记录派生 BOM digest，因此
+下游 `--release-source` 和 `--release-channel` 消费者解析到的是不可变目标。
+
+`--replace-artifact` 可以重复传入。每个值以 package name 开头，后面是逗号分隔的
+key/value：
+
+```text
+package,artifactName=...,image=...,digest=...,version=...,sourcePath=...,sourceDigest=...
+```
+
+目前只接受 `artifactName`、`image`、`digest`、`version`、`sourcePath` 和
+`sourceDigest`。这让命令专注于 release object 派生，而不是任意 BOM 编辑。
+
+### Step 7：让集群跟随新的 BOM
 
 一旦 derived BOM 准备好，目标集群就应该停止跟随原来的上游发行线，转而以这份
 derived BOM 作为目标 baseline。
@@ -264,7 +301,7 @@ derived BOM 作为目标 baseline。
 也就是说，从设计语义上看，它已经不是“同一条发行线上的特例集群”，而是
 “跟随另一条显式发行线的集群”。
 
-### Step 7：后续变更仍然走 revision object
+### Step 8：后续变更仍然走 revision object
 
 fork 完以后，后续演进仍然应该通过 revision object 来做：
 
@@ -327,24 +364,20 @@ fork 发行线不代表从此拒绝所有上游变化。
 
 ## 当前仓库的边界
 
-这份文档描述的是设计上支持的 workflow，但当前仓库还没有一个完全产品化的
-“一键把集群 fork 成新发行版”的命令。
+`sealos sync derive` 已经把 release-object 部分产品化：克隆 BOM、改写选定 package
+artifact reference、分配新的 line/revision metadata，并写出 digest-pinned 本地
+`ReleaseChannel`。
 
-今天仓库已经具备的是：
+它刻意不做：
 
-- digest-pinned BOM
-- OCI component package build/push 命令
-- 消费 BOM 的 render/apply 路径
-- ownership、promotion、review 的设计指导
+- 从 drift 过的 live cluster 推断 replacement
+- 自动 build 或 push package artifact
+- 把 derived line promotion 到上游 `Stable`
+- 在它写出的本地 BOM 和 channel 文件之外创建长期 release-service 状态
 
-还没有具备的是一个一等公民 CLI，可以自动：
-
-- clone 一份 BOM
-- 只改动变化过的 artifact reference
-- 分配新的 release metadata
-- 把 derived line 持久化成受管的 release object
-
-所以当前阶段，fork 更像一种受约束的文档化 artifact workflow，而不是内建单命令。
+如果需要额外门禁，应在派生 release object 周围继续使用
+`sealos sync package build`、`sealos sync package push`、health proof 和 promotion
+workflow。
 
 ## 结论
 

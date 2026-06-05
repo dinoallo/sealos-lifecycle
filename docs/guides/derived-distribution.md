@@ -275,7 +275,46 @@ normally:
 The key point is that a derived distribution should point at immutable package
 revisions, not at mutable in-cluster state.
 
-### Step 6: Point The Cluster At The Derived BOM
+### Step 6: Generate The Derived Release Objects
+
+Use `sealos sync derive` to clone the upstream BOM, assign the derived line and
+revision metadata, rewrite only the changed artifact references, and write a
+digest-pinned `ReleaseChannel` object for the new line:
+
+```bash
+sealos sync derive \
+  --source-bom scripts/poc/minimal-single-node/bom.yaml \
+  --output-root /srv/sealos-release-source \
+  --line corp-minimal-single-node \
+  --revision rev-corp-001 \
+  --channel beta \
+  --label distribution.sealos.io/profile=corp \
+  --replace-artifact 'cilium,artifactName=cilium-cni,image=registry.example.io/corp/cilium-cni:v1.15.0-corp.1,digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc,version=v1.15.0-corp.1'
+```
+
+The command writes:
+
+- `releases/<line>/<revision>/bom.yaml`
+- `channels/<line>/<channel>.yaml`
+
+The derived BOM records `distribution.sealos.io/derived-from-line` and
+`distribution.sealos.io/derived-from-revision` labels, reuses unchanged package
+digests, and validates the final BOM before writing the channel pointer. The
+channel stores the derived BOM digest, so downstream `--release-source` and
+`--release-channel` consumers resolve an immutable target.
+
+`--replace-artifact` is repeatable. Each value starts with the package name and
+then comma-separated key/value pairs:
+
+```text
+package,artifactName=...,image=...,digest=...,version=...,sourcePath=...,sourceDigest=...
+```
+
+Only `artifactName`, `image`, `digest`, `version`, `sourcePath`, and
+`sourceDigest` are accepted. This keeps the command focused on release-object
+derivation rather than arbitrary BOM editing.
+
+### Step 7: Point The Cluster At The Derived BOM
 
 Once the derived BOM exists, the affected cluster should stop following the old
 upstream line and start reconciling to the derived BOM instead.
@@ -284,7 +323,7 @@ Conceptually, this means the cluster now has a different target baseline
 revision. It is no longer just “the same cluster with a few exceptional local
 changes.”
 
-### Step 7: Keep Future Changes Explicit
+### Step 8: Keep Future Changes Explicit
 
 After the fork, new changes should still happen through revision objects:
 
@@ -355,26 +394,21 @@ If the derived line later proves broadly useful, it may become:
 
 ## Current Repo Limits
 
-This walkthrough describes the design-supported workflow, but the current repo
-does not yet provide a fully productized “fork this cluster into a new
-distribution” command.
+`sealos sync derive` productizes the release-object part of the workflow:
+cloning a BOM, rewriting selected package artifact references, assigning the new
+line/revision metadata, and writing a digest-pinned local `ReleaseChannel`.
 
-Today the repo gives you:
+It intentionally does not:
 
-- digest-pinned BOMs
-- OCI component package build and push commands
-- render/apply paths that consume a BOM
-- design guidance for ownership, promotion, and review
+- infer replacements from a drifted live cluster
+- build or push package artifacts for you
+- promote the derived line into upstream `Stable`
+- create long-running release-service state beyond the local BOM and channel
+  files it writes
 
-What it does not yet give you is a first-class CLI that automatically:
-
-- clones a BOM
-- rewrites only the changed artifact references
-- assigns new release metadata
-- persists the derived line as a managed release object
-
-So today, the fork is a disciplined document-and-artifact workflow rather than a
-single built-in command.
+Use `sealos sync package build`, `sealos sync package push`, health proof, and
+promotion workflows around the derived release objects when those gates are
+needed.
 
 ## Bottom Line
 
