@@ -40,7 +40,7 @@ jobs:
     env:
       GO_VERSION: ${{ inputs.go_version }}
       CLUSTER_NAME: ${{ inputs.cluster_name }}
-      WORKDIR: ${{ runner.temp }}/day0-bootstrap
+      WORKDIR: $RUNNER_TEMP/day0-bootstrap
       REGISTRY_PORT: "5065"
     steps:
       - name: Checkout
