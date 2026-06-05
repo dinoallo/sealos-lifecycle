@@ -238,6 +238,49 @@ artifact:
 共享环境或生产环境应该使用 TLS 和正式 registry policy。这里的 insecure registry
 配置只用于本地开发验证。
 
+## Package Cache、Retention 和离线运行
+
+当 `sync render`、`sync validate` 或 agent 在没有本地 `--package-source` override
+的情况下消费 BOM package artifact 时，Sealos 会把每个 OCI package 拉到集群运行时
+package cache：
+
+```text
+<runtime-root>/clusters/<cluster>/etc/distribution/package-cache/
+  sha256/<digest>/
+  ref/<sanitized-reference>/
+```
+
+digest-pinned BOM 引用会使用 `sha256/<digest>/` 路径。生产环境应优先使用这种形态，
+因为 cache key 是不可变的，rendered bundle 也会记录已解析的 BOM 和 package
+digests。
+
+运维入口是 cache 命令：
+
+```bash
+sealos sync package cache list --cluster my-cluster
+sealos sync package cache gc --cluster my-cluster --max-age 168h --dry-run
+sealos sync package cache gc --cluster my-cluster --max-age 720h --include-valid
+```
+
+`cache list` 会报告有效和无效的 package cache entry、component metadata、entry
+大小和 cache 路径。`cache gc` 默认只清理超过 `--max-age` 的无效 entry；有效 package
+entry 默认保留，只有显式传 `--include-valid` 才会按 TTL 删除。这个默认值用于保护
+rollback 和 re-render workflow 依赖的 last known good package set。
+
+registry outage 和 offline mirror 规则：
+
+- BOM package reference 必须 digest-pinned，不要把 mutable tag 当成恢复依据。
+- 计划内离线窗口前，先在 registry 可访问时对目标 BOM 做 render 或 validate，预热
+  package cache。
+- 在新 revision apply 并验证成功前，保留 last successful rendered bundle 和 package
+  cache。
+- registry outage 时，优先使用已预热 cache 或显式 `--package-source` package 目录
+  render，不要临时改 BOM 规避问题。
+- offline mirror 场景下，把相同 package digest 推到 mirror registry，确认 mirrored
+  digest 与原 digest 一致后再改 BOM image host。
+- 先运行 `cache gc --dry-run`；只有确认被删除 entry 不再被 active BOM revision、
+  rollback target 或 derived line 引用时，才使用 `--include-valid`。
+
 ## 关于 `baseArtifacts`
 
 BOM schema 里还有 `spec.baseArtifacts`，但当前 PoC 和大多数现有文档都围绕

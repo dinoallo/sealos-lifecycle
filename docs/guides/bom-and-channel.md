@@ -245,6 +245,54 @@ artifact:
 Use TLS and a real registry policy for shared or production environments. The
 insecure registry config above is intended only for local development.
 
+## Package Cache, Retention, And Offline Operation
+
+When `sync render`, `sync validate`, or the agent consumes BOM package artifacts
+without a local `--package-source` override, Sealos pulls each OCI package into
+the cluster runtime package cache:
+
+```text
+<runtime-root>/clusters/<cluster>/etc/distribution/package-cache/
+  sha256/<digest>/
+  ref/<sanitized-reference>/
+```
+
+Digest-pinned BOM references use the `sha256/<digest>/` path. This is the
+preferred shape for production because the cache key is immutable and the
+rendered bundle records the resolved BOM and package digests.
+
+Use the cache commands as the operational entry point:
+
+```bash
+sealos sync package cache list --cluster my-cluster
+sealos sync package cache gc --cluster my-cluster --max-age 168h --dry-run
+sealos sync package cache gc --cluster my-cluster --max-age 720h --include-valid
+```
+
+`cache list` reports valid and invalid package cache entries, component
+metadata, entry sizes, and cache paths. `cache gc` always allows invalid entries
+to be removed when they are older than `--max-age`; valid package entries are
+kept by default and are only removed when `--include-valid` is set. This default
+protects the last known good package set used by rollback and re-render
+workflows.
+
+Registry outage and offline mirror rules:
+
+- Keep BOM package references digest-pinned. Do not rely on mutable tags for
+  recovery.
+- Warm the package cache before planned offline windows by rendering or
+  validating the target BOM while the registry is reachable.
+- Keep the last successful rendered bundle and package cache until a newer
+  revision has been applied and validated.
+- During a registry outage, prefer rendering from the warmed cache or from
+  explicit `--package-source` package directories instead of changing the BOM.
+- For offline mirrors, push the same package digests to the mirror registry and
+  update the BOM image host only after verifying the mirrored digest matches the
+  original digest.
+- Run `cache gc --dry-run` first; use `--include-valid` only after confirming
+  the removed entries are no longer referenced by active BOM revisions,
+  rollback targets, or derived lines.
+
 ## About `baseArtifacts`
 
 The BOM schema also includes `spec.baseArtifacts`, but the current PoC and the

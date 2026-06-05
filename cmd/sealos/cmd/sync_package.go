@@ -33,6 +33,7 @@ import (
 	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/distribution/ocipackage"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"github.com/labring/sealos/pkg/distribution/reconcile"
 )
 
 type syncPackageCommandRunner func(args []string, stderr io.Writer) error
@@ -83,6 +84,32 @@ type syncPackagePullOutput struct {
 	PackageClass     string `json:"packageClass" yaml:"packageClass"`
 }
 
+type syncPackageCacheListOutput struct {
+	CacheRoot string                  `json:"cacheRoot" yaml:"cacheRoot"`
+	Entries   []ocipackage.CacheEntry `json:"entries" yaml:"entries"`
+	Summary   syncPackageCacheSummary `json:"summary" yaml:"summary"`
+}
+
+type syncPackageCacheGCOutput struct {
+	CacheRoot    string                  `json:"cacheRoot" yaml:"cacheRoot"`
+	DryRun       bool                    `json:"dryRun" yaml:"dryRun"`
+	MaxAge       string                  `json:"maxAge" yaml:"maxAge"`
+	IncludeValid bool                    `json:"includeValid" yaml:"includeValid"`
+	Removed      []ocipackage.CacheEntry `json:"removed" yaml:"removed"`
+	Kept         []ocipackage.CacheEntry `json:"kept" yaml:"kept"`
+	Summary      syncPackageCacheSummary `json:"summary" yaml:"summary"`
+}
+
+type syncPackageCacheSummary struct {
+	Entries      int   `json:"entries" yaml:"entries"`
+	Valid        int   `json:"valid" yaml:"valid"`
+	Invalid      int   `json:"invalid" yaml:"invalid"`
+	Removed      int   `json:"removed,omitempty" yaml:"removed,omitempty"`
+	Kept         int   `json:"kept,omitempty" yaml:"kept,omitempty"`
+	SizeBytes    int64 `json:"sizeBytes" yaml:"sizeBytes"`
+	RemovedBytes int64 `json:"removedBytes,omitempty" yaml:"removedBytes,omitempty"`
+}
+
 func newSyncPackageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "package",
@@ -93,6 +120,118 @@ func newSyncPackageCmd() *cobra.Command {
 	cmd.AddCommand(newSyncPackageBuildCmd())
 	cmd.AddCommand(newSyncPackagePushCmd())
 	cmd.AddCommand(newSyncPackagePullCmd())
+	cmd.AddCommand(newSyncPackageCacheCmd())
+	return cmd
+}
+
+func newSyncPackageCacheCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Inspect and garbage-collect cached OCI component packages",
+		Args:  cobra.NoArgs,
+	}
+	cmd.AddCommand(newSyncPackageCacheListCmd())
+	cmd.AddCommand(newSyncPackageCacheGCCmd())
+	return cmd
+}
+
+func newSyncPackageCacheListCmd() *cobra.Command {
+	var flags struct {
+		clusterName string
+		cacheRoot   string
+		output      string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List cached OCI component packages and invalid cache entries",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cacheRoot := syncPackageCacheRoot(flags.clusterName, flags.cacheRoot)
+			entries, err := (&ocipackage.Cache{Root: cacheRoot}).List()
+			if err != nil {
+				return err
+			}
+			out := syncPackageCacheListOutput{
+				CacheRoot: cacheRoot,
+				Entries:   entries,
+				Summary:   syncPackageCacheSummaryForEntries(entries, nil),
+			}
+			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
+				{"cache_root", out.CacheRoot},
+				{"entries", strconv.Itoa(out.Summary.Entries)},
+				{"valid", strconv.Itoa(out.Summary.Valid)},
+				{"invalid", strconv.Itoa(out.Summary.Invalid)},
+				{"size_bytes", strconv.FormatInt(out.Summary.SizeBytes, 10)},
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "cluster name whose runtime package cache should be inspected")
+	cmd.Flags().StringVar(&flags.cacheRoot, "cache-root", "", "explicit package cache root; overrides --cluster")
+	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
+	return cmd
+}
+
+func newSyncPackageCacheGCCmd() *cobra.Command {
+	var flags struct {
+		clusterName  string
+		cacheRoot    string
+		maxAge       string
+		includeValid bool
+		dryRun       bool
+		output       string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "gc",
+		Short: "Garbage-collect invalid or old cached OCI component packages",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			maxAge, err := time.ParseDuration(flags.maxAge)
+			if err != nil {
+				return fmt.Errorf("parse --max-age: %w", err)
+			}
+			cacheRoot := syncPackageCacheRoot(flags.clusterName, flags.cacheRoot)
+			result, err := (&ocipackage.Cache{Root: cacheRoot}).GC(ocipackage.CacheGCOptions{
+				MaxAge:       maxAge,
+				IncludeValid: flags.includeValid,
+				DryRun:       flags.dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			out := syncPackageCacheGCOutput{
+				CacheRoot:    cacheRoot,
+				DryRun:       result.DryRun,
+				MaxAge:       result.MaxAge,
+				IncludeValid: result.IncludeValid,
+				Removed:      result.Removed,
+				Kept:         result.Kept,
+				Summary:      syncPackageCacheSummaryForEntries(result.Entries, result.Removed),
+			}
+			out.Summary.Removed = len(result.Removed)
+			out.Summary.Kept = len(result.Kept)
+			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
+				{"cache_root", out.CacheRoot},
+				{"dry_run", strconv.FormatBool(out.DryRun)},
+				{"max_age", out.MaxAge},
+				{"include_valid", strconv.FormatBool(out.IncludeValid)},
+				{"entries", strconv.Itoa(out.Summary.Entries)},
+				{"valid", strconv.Itoa(out.Summary.Valid)},
+				{"invalid", strconv.Itoa(out.Summary.Invalid)},
+				{"removed", strconv.Itoa(out.Summary.Removed)},
+				{"kept", strconv.Itoa(out.Summary.Kept)},
+				{"size_bytes", strconv.FormatInt(out.Summary.SizeBytes, 10)},
+				{"removed_bytes", strconv.FormatInt(out.Summary.RemovedBytes, 10)},
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "cluster name whose runtime package cache should be garbage-collected")
+	cmd.Flags().StringVar(&flags.cacheRoot, "cache-root", "", "explicit package cache root; overrides --cluster")
+	cmd.Flags().StringVar(&flags.maxAge, "max-age", "168h", "minimum cache entry age before removal")
+	cmd.Flags().BoolVar(&flags.includeValid, "include-valid", false, "allow valid cached packages older than --max-age to be removed")
+	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "report removable entries without deleting them")
+	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	return cmd
 }
 
@@ -430,6 +569,35 @@ func defaultSyncPackageCommandRunner(args []string, stderr io.Writer) error {
 	command.Stdout = stderr
 	command.Stderr = stderr
 	return command.Run()
+}
+
+func syncPackageCacheRoot(clusterName, cacheRoot string) string {
+	if strings.TrimSpace(cacheRoot) != "" {
+		return strings.TrimSpace(cacheRoot)
+	}
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		clusterName = "default"
+	}
+	return filepath.Join(reconcile.DistributionRootPath(clusterName), "package-cache")
+}
+
+func syncPackageCacheSummaryForEntries(entries, removed []ocipackage.CacheEntry) syncPackageCacheSummary {
+	summary := syncPackageCacheSummary{
+		Entries: len(entries),
+	}
+	for _, entry := range entries {
+		if entry.Valid {
+			summary.Valid++
+		} else {
+			summary.Invalid++
+		}
+		summary.SizeBytes += entry.SizeBytes
+	}
+	for _, entry := range removed {
+		summary.RemovedBytes += entry.SizeBytes
+	}
+	return summary
 }
 
 func syncPackageSubcommandArgs(cmd *cobra.Command, args []string) ([]string, error) {

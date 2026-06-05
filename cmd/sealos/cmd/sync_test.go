@@ -744,6 +744,88 @@ func TestSyncDeriveCmdRejectsInvalidReplacement(t *testing.T) {
 	}
 }
 
+func TestSyncPackageCacheListAndGC(t *testing.T) {
+	cacheRoot := filepath.Join(t.TempDir(), "package-cache")
+	validPath := filepath.Join(cacheRoot, "sha256", "2222222222222222222222222222222222222222222222222222222222222222")
+	writeSyncTestPackage(t, validPath)
+	invalidPath := filepath.Join(cacheRoot, "ref", "stale")
+	writeSyncTestFile(t, filepath.Join(invalidPath, "README"), "invalid cache entry\n", 0o644)
+	oldTime := time.Now().Add(-48 * time.Hour)
+	for _, path := range []string{validPath, invalidPath} {
+		if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+			t.Fatalf("Chtimes(%q) error = %v", path, err)
+		}
+	}
+
+	listBuf := bytes.NewBuffer(nil)
+	listCmd := newSyncCmd()
+	listCmd.SetOut(listBuf)
+	listCmd.SetErr(listBuf)
+	listCmd.SetArgs([]string{
+		"package", "cache", "list",
+		"--cache-root", cacheRoot,
+	})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("cache list Execute() error = %v\noutput=%s", err, listBuf.String())
+	}
+	var listOut syncPackageCacheListOutput
+	if err := yaml.Unmarshal(listBuf.Bytes(), &listOut); err != nil {
+		t.Fatalf("Unmarshal(cache list) error = %v\noutput=%s", err, listBuf.String())
+	}
+	if got, want := listOut.Summary.Entries, 2; got != want {
+		t.Fatalf("cache list entries = %d, want %d", got, want)
+	}
+	if got, want := listOut.Summary.Valid, 1; got != want {
+		t.Fatalf("cache list valid = %d, want %d", got, want)
+	}
+	if got, want := listOut.Summary.Invalid, 1; got != want {
+		t.Fatalf("cache list invalid = %d, want %d", got, want)
+	}
+
+	gcBuf := bytes.NewBuffer(nil)
+	gcCmd := newSyncCmd()
+	gcCmd.SetOut(gcBuf)
+	gcCmd.SetErr(gcBuf)
+	gcCmd.SetArgs([]string{
+		"package", "cache", "gc",
+		"--cache-root", cacheRoot,
+		"--max-age", "24h",
+	})
+	if err := gcCmd.Execute(); err != nil {
+		t.Fatalf("cache gc Execute() error = %v\noutput=%s", err, gcBuf.String())
+	}
+	var gcOut syncPackageCacheGCOutput
+	if err := yaml.Unmarshal(gcBuf.Bytes(), &gcOut); err != nil {
+		t.Fatalf("Unmarshal(cache gc) error = %v\noutput=%s", err, gcBuf.String())
+	}
+	if got, want := gcOut.Summary.Removed, 1; got != want {
+		t.Fatalf("cache gc removed = %d, want %d", got, want)
+	}
+	if _, err := os.Stat(invalidPath); !os.IsNotExist(err) {
+		t.Fatalf("invalid cache entry still exists or stat failed: %v", err)
+	}
+	if _, err := os.Stat(validPath); err != nil {
+		t.Fatalf("valid cache entry removed without include-valid: %v", err)
+	}
+
+	gcValidBuf := bytes.NewBuffer(nil)
+	gcValidCmd := newSyncCmd()
+	gcValidCmd.SetOut(gcValidBuf)
+	gcValidCmd.SetErr(gcValidBuf)
+	gcValidCmd.SetArgs([]string{
+		"package", "cache", "gc",
+		"--cache-root", cacheRoot,
+		"--max-age", "24h",
+		"--include-valid",
+	})
+	if err := gcValidCmd.Execute(); err != nil {
+		t.Fatalf("cache gc include-valid Execute() error = %v\noutput=%s", err, gcValidBuf.String())
+	}
+	if _, err := os.Stat(validPath); !os.IsNotExist(err) {
+		t.Fatalf("valid cache entry still exists or stat failed: %v", err)
+	}
+}
+
 func TestSyncPromoteCmdRejectsFailedHealthProof(t *testing.T) {
 	root := t.TempDir()
 	channelPath := filepath.Join(root, "channels", "stable.yaml")
