@@ -85,30 +85,58 @@ exit 0
 	t.Setenv("PATH", filepath.Join(tmpDir, "bin")+":"+os.Getenv("PATH"))
 	t.Setenv("TEST_LOG", logPath)
 
-	writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "preflight.sh"), `#!/bin/sh
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "preflight.sh"),
+		`#!/bin/sh
 [ ! -f "$HOST_ROOT/usr/bin/containerd" ] || exit 1
 echo "containerd-preflight" >>"$TEST_LOG"
-`)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "bootstrap.sh"), `#!/bin/sh
+`,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "bootstrap.sh"),
+		`#!/bin/sh
 echo "containerd-bootstrap" >>"$TEST_LOG"
-`)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "healthcheck.sh"), `#!/bin/sh
+`,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "healthcheck.sh"),
+		`#!/bin/sh
 echo "containerd-health" >>"$TEST_LOG"
-`)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "preflight.sh"), `#!/bin/sh
+`,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "preflight.sh"),
+		`#!/bin/sh
 [ -f "$HOST_ROOT/usr/bin/kubelet" ] || exit 1
 [ -f "$HOST_ROOT/etc/kubernetes/kubeadm.yaml" ] || exit 1
 echo "kubernetes-preflight" >>"$TEST_LOG"
-`)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"), `#!/bin/sh
+`,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"),
+		`#!/bin/sh
 echo "kubernetes-bootstrap" >>"$TEST_LOG"
-`)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"), `#!/bin/sh
+`,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"),
+		`#!/bin/sh
 echo "kubernetes-healthcheck" >>"$TEST_LOG"
-`)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"), `#!/bin/sh
+`,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"),
+		`#!/bin/sh
 echo "cilium-health" >>"$TEST_LOG"
-`)
+`,
+	)
 
 	for _, rel := range []string{
 		filepath.Join("usr", "bin", "containerd"),
@@ -116,21 +144,96 @@ echo "cilium-health" >>"$TEST_LOG"
 		filepath.Join("usr", "bin", "containerd-shim-runc-v2"),
 		filepath.Join("usr", "bin", "runc"),
 	} {
-		writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", rel), "#!/bin/sh\nexit 0\n", 0o755)
+		writeFile(
+			t,
+			filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", rel),
+			"#!/bin/sh\nexit 0\n",
+			0o755,
+		)
 	}
-	writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "files", "etc", "containerd", "config.toml"), "version = 2\n", 0o644)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"containerd",
+			"files",
+			"files",
+			"etc",
+			"containerd",
+			"config.toml",
+		),
+		"version = 2\n",
+		0o644,
+	)
 	for _, rel := range []string{
 		filepath.Join("usr", "bin", "kubeadm"),
 		filepath.Join("usr", "bin", "kubelet"),
 		filepath.Join("usr", "bin", "kubectl"),
 	} {
-		writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", rel), "#!/bin/sh\nexit 0\n", 0o755)
+		writeFile(
+			t,
+			filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", rel),
+			"#!/bin/sh\nexit 0\n",
+			0o755,
+		)
 	}
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml"), "apiVersion: kubeadm.k8s.io/v1beta3\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "sysctl.d", "99-kubernetes.conf"), "net.ipv4.ip_forward = 1\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap", "rbac.yaml"), "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: kube-system\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "local-resources", "grafana-admin-secret.yaml"), "apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n  namespace: default\nstringData:\n  username: admin\n  password: passw0rd\n", 0o644)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"files",
+			"etc",
+			"kubernetes",
+			"kubeadm.yaml",
+		),
+		"apiVersion: kubeadm.k8s.io/v1beta3\n",
+		0o644,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"files",
+			"etc",
+			"sysctl.d",
+			"99-kubernetes.conf",
+		),
+		"net.ipv4.ip_forward = 1\n",
+		0o644,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"manifests",
+			"bootstrap",
+			"rbac.yaml",
+		),
+		"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: kube-system\n",
+		0o644,
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"),
+		"apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n",
+		0o644,
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "local-resources", "grafana-admin-secret.yaml"),
+		"apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n  namespace: default\nstringData:\n  username: admin\n  password: passw0rd\n",
+		0o644,
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -383,13 +486,59 @@ echo "cilium-health" >>"$TEST_LOG"
 	if indexOf(logText, "kubernetes-preflight") > indexOf(logText, "kubernetes-bootstrap") {
 		t.Fatalf("preflight ran after bootstrap\nfull log:\n%s", logText)
 	}
-	if indexOf(logText, "kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(bundleDir, "local-resources", "grafana-admin-secret.yaml")) > indexOf(logText, "kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap")) {
-		t.Fatalf("local resource apply happened after bootstrap manifest apply\nfull log:\n%s", logText)
+	if indexOf(
+		logText,
+		"kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(
+			bundleDir,
+			"local-resources",
+			"grafana-admin-secret.yaml",
+		),
+	) > indexOf(
+		logText,
+		"kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"manifests",
+			"bootstrap",
+		),
+	) {
+		t.Fatalf(
+			"local resource apply happened after bootstrap manifest apply\nfull log:\n%s",
+			logText,
+		)
 	}
-	if indexOf(logText, "kubernetes-bootstrap") > indexOf(logText, "kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap")) {
+	if indexOf(
+		logText,
+		"kubernetes-bootstrap",
+	) > indexOf(
+		logText,
+		"kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"manifests",
+			"bootstrap",
+		),
+	) {
 		t.Fatalf("bootstrap manifest apply happened before bootstrap hook\nfull log:\n%s", logText)
 	}
-	if indexOf(logText, "kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap")) > indexOf(logText, "kubernetes-healthcheck") {
+	if indexOf(
+		logText,
+		"kubectl --kubeconfig "+kubeconfigPath+" apply -f "+filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"manifests",
+			"bootstrap",
+		),
+	) > indexOf(
+		logText,
+		"kubernetes-healthcheck",
+	) {
 		t.Fatalf("kubernetes healthcheck ran before manifest apply\nfull log:\n%s", logText)
 	}
 }
@@ -429,7 +578,12 @@ func TestApplyRequiresRenderedState(t *testing.T) {
 			},
 		},
 	}
-	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n", 0o644)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"),
+		"apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n",
+		0o644,
+	)
 	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
 		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
@@ -485,10 +639,19 @@ exit 0
 		{IPS: []string{"10.0.0.11:22"}, Roles: []string{v1beta1.NODE}},
 	})
 
-	writeExecutable(t, filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"), `#!/bin/sh
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"),
+		`#!/bin/sh
 exit 0
-`)
-	writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n", 0o644)
+`,
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"),
+		"apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: cilium\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: cilium-operator\n",
+		0o644,
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -566,9 +729,22 @@ exit 0
 	}
 	logText := string(data)
 	if strings.Contains(logText, "taint nodes") {
-		t.Fatalf("multi-node cluster should not untaint nodes during prepare\nfull log:\n%s", logText)
+		t.Fatalf(
+			"multi-node cluster should not untaint nodes during prepare\nfull log:\n%s",
+			logText,
+		)
 	}
-	if !strings.Contains(logText, "apply -f "+filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml")) {
+	if !strings.Contains(
+		logText,
+		"apply -f "+filepath.Join(
+			bundleDir,
+			"components",
+			"cilium",
+			"files",
+			"manifests",
+			"cilium.yaml",
+		),
+	) {
 		t.Fatalf("log missing manifest apply\nfull log:\n%s", logText)
 	}
 }
@@ -589,8 +765,31 @@ func TestApplyRejectsIncompletePreparedHostBundle(t *testing.T) {
 		{
 			name: "missing runtime binary",
 			setup: func(t *testing.T, bundleDir string) {
-				writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
-				writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", "README"), "placeholder\n", 0o644)
+				writeExecutable(
+					t,
+					filepath.Join(
+						bundleDir,
+						"components",
+						"containerd",
+						"files",
+						"hooks",
+						"preflight.sh",
+					),
+					"#!/bin/sh\nexit 0\n",
+				)
+				writeFile(
+					t,
+					filepath.Join(
+						bundleDir,
+						"components",
+						"containerd",
+						"files",
+						"rootfs",
+						"README",
+					),
+					"placeholder\n",
+					0o644,
+				)
 			},
 			bundle: &hydrate.Bundle{
 				APIVersion: distribution.APIVersion,
@@ -637,9 +836,32 @@ func TestApplyRejectsIncompletePreparedHostBundle(t *testing.T) {
 					filepath.Join("usr", "bin", "containerd-shim-runc-v2"),
 					filepath.Join("usr", "bin", "runc"),
 				} {
-					writeFile(t, filepath.Join(bundleDir, "components", "containerd", "files", "rootfs", rel), "#!/bin/sh\nexit 0\n", 0o755)
+					writeFile(
+						t,
+						filepath.Join(
+							bundleDir,
+							"components",
+							"containerd",
+							"files",
+							"rootfs",
+							rel,
+						),
+						"#!/bin/sh\nexit 0\n",
+						0o755,
+					)
 				}
-				writeExecutable(t, filepath.Join(bundleDir, "components", "containerd", "files", "hooks", "preflight.sh"), "#!/bin/sh\n# placeholder\nexit 0\n")
+				writeExecutable(
+					t,
+					filepath.Join(
+						bundleDir,
+						"components",
+						"containerd",
+						"files",
+						"hooks",
+						"preflight.sh",
+					),
+					"#!/bin/sh\n# placeholder\nexit 0\n",
+				)
 			},
 			bundle: &hydrate.Bundle{
 				APIVersion: distribution.APIVersion,
@@ -680,8 +902,31 @@ func TestApplyRejectsIncompletePreparedHostBundle(t *testing.T) {
 		{
 			name: "invalid cilium manifest payload",
 			setup: func(t *testing.T, bundleDir string) {
-				writeExecutable(t, filepath.Join(bundleDir, "components", "cilium", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
-				writeFile(t, filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n", 0o644)
+				writeExecutable(
+					t,
+					filepath.Join(
+						bundleDir,
+						"components",
+						"cilium",
+						"files",
+						"hooks",
+						"healthcheck.sh",
+					),
+					"#!/bin/sh\nexit 0\n",
+				)
+				writeFile(
+					t,
+					filepath.Join(
+						bundleDir,
+						"components",
+						"cilium",
+						"files",
+						"manifests",
+						"cilium.yaml",
+					),
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n",
+					0o644,
+				)
 			},
 			bundle: &hydrate.Bundle{
 				APIVersion: distribution.APIVersion,
@@ -798,11 +1043,42 @@ exit 0
 	t.Setenv("PATH", filepath.Join(tmpDir, "bin")+":"+os.Getenv("PATH"))
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "files", "etc", "demo", "config.yaml"), "enabled: true\n", 0o644)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"runtime",
+			"files",
+			"files",
+			"etc",
+			"demo",
+			"config.yaml",
+		),
+		"enabled: true\n",
+		0o644,
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -881,10 +1157,16 @@ exit 0
 	if got, want := len(fakeRemote.copyOps), 2; got != want {
 		t.Fatalf("len(copyOps) = %d, want %d", got, want)
 	}
-	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.10:22"), "\n"); !strings.Contains(got, "TARGET_IS_FIRST_MASTER='true'") {
+	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.10:22"), "\n"); !strings.Contains(
+		got,
+		"TARGET_IS_FIRST_MASTER='true'",
+	) {
 		t.Fatalf("first master command stream missing TARGET_IS_FIRST_MASTER\ncommands:\n%s", got)
 	}
-	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); strings.Contains(got, "configure.sh") {
+	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); strings.Contains(
+		got,
+		"configure.sh",
+	) {
 		t.Fatalf("configure hook should not run on non-first-master\ncommands:\n%s", got)
 	}
 	for _, host := range []string{"10.0.0.10:22", "10.0.0.11:22"} {
@@ -949,8 +1231,26 @@ func TestApplyUsesBundleExecutionTopologySnapshotWithClusterfileRemoteExecutor(t
 
 	tmpDir := t.TempDir()
 	bundleDir := filepath.Join(tmpDir, "bundle")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "runtime"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\necho health\n")
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"runtime",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"runtime",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"),
+		"#!/bin/sh\necho health\n",
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -1010,7 +1310,10 @@ func TestApplyUsesBundleExecutionTopologySnapshotWithClusterfileRemoteExecutor(t
 	if !loadTopologyCalled {
 		t.Fatal("loadApplyExecutionTopology was not called for remote executor credentials")
 	}
-	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); !strings.Contains(got, "healthcheck.sh") {
+	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); !strings.Contains(
+		got,
+		"healthcheck.sh",
+	) {
 		t.Fatalf("remote command stream missing healthcheck hook\ncommands:\n%s", got)
 	}
 	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.99:22"), "\n"); got != "" {
@@ -1066,12 +1369,47 @@ exit 1
 	t.Setenv("CLUSTER_HOOK_LOG", hookLog)
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "files", "etc", "demo", "config.yaml"), "enabled: true\n", 0o644)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "bootstrap-all.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure-first.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "install-cluster.sh"), "#!/bin/sh\nprintf 'cluster:%s:%s\\n' \"$TARGET_HOST\" \"$HOST_ROOT\" >>\"$CLUSTER_HOOK_LOG\"\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "health-all.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"runtime",
+			"files",
+			"files",
+			"etc",
+			"demo",
+			"config.yaml",
+		),
+		"enabled: true\n",
+		0o644,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "bootstrap-all.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure-first.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "install-cluster.sh"),
+		"#!/bin/sh\nprintf 'cluster:%s:%s\\n' \"$TARGET_HOST\" \"$HOST_ROOT\" >>\"$CLUSTER_HOOK_LOG\"\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "health-all.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -1165,17 +1503,29 @@ exit 1
 		commands := strings.Join(fakeRemote.commandsForHost(host), "\n")
 		for _, marker := range []string{"bootstrap-all.sh", "health-all.sh"} {
 			if !strings.Contains(commands, marker) {
-				t.Fatalf("host %q command stream missing allNodes hook %q\ncommands:\n%s", host, marker, commands)
+				t.Fatalf(
+					"host %q command stream missing allNodes hook %q\ncommands:\n%s",
+					host,
+					marker,
+					commands,
+				)
 			}
 		}
 		if host == "10.0.0.10:22" {
 			if !strings.Contains(commands, "configure-first.sh") {
-				t.Fatalf("first master command stream missing firstMaster hook\ncommands:\n%s", commands)
+				t.Fatalf(
+					"first master command stream missing firstMaster hook\ncommands:\n%s",
+					commands,
+				)
 			}
 			continue
 		}
 		if strings.Contains(commands, "configure-first.sh") {
-			t.Fatalf("non-first-master %q command stream included firstMaster hook\ncommands:\n%s", host, commands)
+			t.Fatalf(
+				"non-first-master %q command stream included firstMaster hook\ncommands:\n%s",
+				host,
+				commands,
+			)
 		}
 	}
 	data, err := os.ReadFile(hookLog)
@@ -1230,11 +1580,53 @@ exit 0
 	t.Setenv("PATH", filepath.Join(tmpDir, "bin")+":"+os.Getenv("PATH"))
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "bootstrap.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "files", "etc", "demo", "config.yaml"), "clusterName: default\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "host-inputs", "10.0.0.11", "files", "etc", "demo", "config.yaml"), "clusterName: host-11\n", 0o644)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "bootstrap.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"runtime",
+			"files",
+			"files",
+			"etc",
+			"demo",
+			"config.yaml",
+		),
+		"clusterName: default\n",
+		0o644,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"runtime",
+			"host-inputs",
+			"10.0.0.11",
+			"files",
+			"etc",
+			"demo",
+			"config.yaml",
+		),
+		"clusterName: host-11\n",
+		0o644,
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -1320,16 +1712,30 @@ exit 0
 	host10Commands := strings.Join(fakeRemote.commandsForHost("10.0.0.10:22"), "\n")
 	host11Commands := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n")
 	if !strings.Contains(host10Commands, "files/files/etc/demo/config.yaml") {
-		t.Fatalf("default host command stream missing default input path\ncommands:\n%s", host10Commands)
+		t.Fatalf(
+			"default host command stream missing default input path\ncommands:\n%s",
+			host10Commands,
+		)
 	}
 	if strings.Contains(host10Commands, "host-inputs/10.0.0.11/files/etc/demo/config.yaml") {
-		t.Fatalf("default host command stream unexpectedly used host-scoped input path\ncommands:\n%s", host10Commands)
+		t.Fatalf(
+			"default host command stream unexpectedly used host-scoped input path\ncommands:\n%s",
+			host10Commands,
+		)
 	}
 	if !strings.Contains(host11Commands, "host-inputs/10.0.0.11/files/etc/demo/config.yaml") {
-		t.Fatalf("host-scoped command stream missing host-specific input path\ncommands:\n%s", host11Commands)
+		t.Fatalf(
+			"host-scoped command stream missing host-specific input path\ncommands:\n%s",
+			host11Commands,
+		)
 	}
-	if !strings.Contains(host10Commands, "/etc/demo/config.yaml") || !strings.Contains(host11Commands, "/etc/demo/config.yaml") {
-		t.Fatalf("expected both hosts to target /etc/demo/config.yaml\nhost10:\n%s\nhost11:\n%s", host10Commands, host11Commands)
+	if !strings.Contains(host10Commands, "/etc/demo/config.yaml") ||
+		!strings.Contains(host11Commands, "/etc/demo/config.yaml") {
+		t.Fatalf(
+			"expected both hosts to target /etc/demo/config.yaml\nhost10:\n%s\nhost11:\n%s",
+			host10Commands,
+			host11Commands,
+		)
 	}
 }
 
@@ -1375,12 +1781,76 @@ func TestApplyGeneratesPerHostKubeadmJoinConfigsForMultiNodeBootstrap(t *testing
 	}
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubeadm"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubectl"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml"), "apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\nclusterName: demo\n", 0o644)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"kubeadm",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"kubelet",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"kubectl",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"files",
+			"etc",
+			"kubernetes",
+			"kubeadm.yaml",
+		),
+		"apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\nclusterName: demo\n",
+		0o644,
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -1451,10 +1921,17 @@ func TestApplyGeneratesPerHostKubeadmJoinConfigsForMultiNodeBootstrap(t *testing
 
 	firstMasterCommands := strings.Join(fakeRemote.commandsForHost("10.0.0.10:22"), "\n")
 	if count := strings.Count(firstMasterCommands, "bootstrap.sh"); count != 1 {
-		t.Fatalf("first master bootstrap count = %d, want 1\ncommands:\n%s", count, firstMasterCommands)
+		t.Fatalf(
+			"first master bootstrap count = %d, want 1\ncommands:\n%s",
+			count,
+			firstMasterCommands,
+		)
 	}
 	if !strings.Contains(firstMasterCommands, "kubeadm token create --print-join-command") {
-		t.Fatalf("first master command stream missing join metadata generation\ncommands:\n%s", firstMasterCommands)
+		t.Fatalf(
+			"first master command stream missing join metadata generation\ncommands:\n%s",
+			firstMasterCommands,
+		)
 	}
 
 	if got, want := len(fakeRemote.copyOps), 6; got != want {
@@ -1463,7 +1940,8 @@ func TestApplyGeneratesPerHostKubeadmJoinConfigsForMultiNodeBootstrap(t *testing
 	var joinMasterConfig, joinWorkerConfig string
 	foundClusterConfigUpload := false
 	for _, op := range fakeRemote.copyOps {
-		if op.host == "10.0.0.10:22" && strings.HasPrefix(op.dst, "/tmp/sealos-kubeadm-cluster-config-") {
+		if op.host == "10.0.0.10:22" &&
+			strings.HasPrefix(op.dst, "/tmp/sealos-kubeadm-cluster-config-") {
 			foundClusterConfigUpload = true
 		}
 		if op.dst != "/etc/kubernetes/kubeadm.yaml" {
@@ -1476,10 +1954,17 @@ func TestApplyGeneratesPerHostKubeadmJoinConfigsForMultiNodeBootstrap(t *testing
 			joinWorkerConfig = string(op.data)
 		}
 	}
-	if !strings.Contains(joinMasterConfig, "kind: JoinConfiguration") || !strings.Contains(joinMasterConfig, "certificateKey: 11223344556677889900aabbccddeeff") || !strings.Contains(joinMasterConfig, "advertiseAddress: 10.0.0.11") {
-		t.Fatalf("join master config did not include expected control-plane fields:\n%s", joinMasterConfig)
+	if !strings.Contains(joinMasterConfig, "kind: JoinConfiguration") ||
+		!strings.Contains(joinMasterConfig, "certificateKey: 11223344556677889900aabbccddeeff") ||
+		!strings.Contains(joinMasterConfig, "advertiseAddress: 10.0.0.11") {
+		t.Fatalf(
+			"join master config did not include expected control-plane fields:\n%s",
+			joinMasterConfig,
+		)
 	}
-	if !strings.Contains(joinWorkerConfig, "kind: JoinConfiguration") || strings.Contains(joinWorkerConfig, "certificateKey:") || !strings.Contains(joinWorkerConfig, "token: abcdef.0123456789abcdef") {
+	if !strings.Contains(joinWorkerConfig, "kind: JoinConfiguration") ||
+		strings.Contains(joinWorkerConfig, "certificateKey:") ||
+		!strings.Contains(joinWorkerConfig, "token: abcdef.0123456789abcdef") {
 		t.Fatalf("join worker config did not include expected worker fields:\n%s", joinWorkerConfig)
 	}
 	if !foundClusterConfigUpload {
@@ -1488,7 +1973,10 @@ func TestApplyGeneratesPerHostKubeadmJoinConfigsForMultiNodeBootstrap(t *testing
 
 	masterJoinCommands := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n")
 	if strings.Count(masterJoinCommands, "bootstrap.sh") != 1 {
-		t.Fatalf("expected one bootstrap invocation on second master\ncommands:\n%s", masterJoinCommands)
+		t.Fatalf(
+			"expected one bootstrap invocation on second master\ncommands:\n%s",
+			masterJoinCommands,
+		)
 	}
 	workerJoinCommands := strings.Join(fakeRemote.commandsForHost("10.0.0.12:22"), "\n")
 	if strings.Count(workerJoinCommands, "bootstrap.sh") != 1 {
@@ -1575,13 +2063,90 @@ exit 0
 	t.Setenv("PATH", filepath.Join(tmpDir, "bin")+":"+os.Getenv("PATH"))
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubeadm"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubectl"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml"), "apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\nclusterName: demo\n", 0o644)
-	writeFile(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "manifests", "bootstrap", "namespace.yaml"), "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: demo\n", 0o644)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "healthcheck.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"kubeadm",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"kubelet",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"rootfs",
+			"usr",
+			"bin",
+			"kubectl",
+		),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"files",
+			"etc",
+			"kubernetes",
+			"kubeadm.yaml",
+		),
+		"apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\nclusterName: demo\n",
+		0o644,
+	)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"kubernetes",
+			"files",
+			"manifests",
+			"bootstrap",
+			"namespace.yaml",
+		),
+		"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: demo\n",
+		0o644,
+	)
 
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
@@ -1667,7 +2232,8 @@ exit 0
 	if got, want := fakeRemote.fetchOps[0].src, "/etc/kubernetes/admin.conf"; got != want {
 		t.Fatalf("fetch src = %q, want %q", got, want)
 	}
-	if data, err := os.ReadFile(kubeconfigPath); err != nil || !strings.Contains(string(data), "kind: Config") {
+	if data, err := os.ReadFile(kubeconfigPath); err != nil ||
+		!strings.Contains(string(data), "kind: Config") {
 		t.Fatalf("fetched kubeconfig = %q, err = %v", string(data), err)
 	}
 	kubectlCalls, err := os.ReadFile(kubectlLog)
@@ -1818,7 +2384,9 @@ func TestRolloutHostBatches(t *testing.T) {
 	}
 
 	executor.rollout = RolloutStrategy{BatchSize: 2, Canary: RolloutCanary{BatchSize: 3}}
-	batches = executor.rolloutHostBatches([]string{"host-a", "host-b", "host-c", "host-d", "host-e"})
+	batches = executor.rolloutHostBatches(
+		[]string{"host-a", "host-b", "host-c", "host-d", "host-e"},
+	)
 	if got, want := len(batches), 2; got != want {
 		t.Fatalf("canary len(batches) = %d, want %d", got, want)
 	}
@@ -1842,10 +2410,13 @@ func TestRolloutPauseAfterCanary(t *testing.T) {
 		stderr: io.Discard,
 	}
 	var visited []string
-	err := executor.forEachHostBatch([]string{"host-a", "host-b", "host-c"}, func(batch []string) error {
-		visited = append(visited, batch...)
-		return nil
-	})
+	err := executor.forEachHostBatch(
+		[]string{"host-a", "host-b", "host-c"},
+		func(batch []string) error {
+			visited = append(visited, batch...)
+			return nil
+		},
+	)
 	if !IsRolloutPaused(err) {
 		t.Fatalf("forEachHostBatch() error = %v, want rollout paused", err)
 	}
@@ -1881,8 +2452,17 @@ func TestApplyRolloutBatchSizeLogsHostWaves(t *testing.T) {
 	}
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindHydratedBundle,
@@ -1976,9 +2556,22 @@ func TestApplyRolloutBatchSizeCompletesHostWaveBeforeNext(t *testing.T) {
 	}
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "preflight.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindHydratedBundle,
@@ -2051,10 +2644,16 @@ func TestApplyRolloutBatchSizeCompletesHostWaveBeforeNext(t *testing.T) {
 		}
 	}
 	if firstConfigure < 0 || secondPreflight < 0 {
-		t.Fatalf("missing expected rollout hook commands\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+		t.Fatalf(
+			"missing expected rollout hook commands\ncommands:\n%s",
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
 	if !(firstConfigure < secondPreflight) {
-		t.Fatalf("second rollout wave started before first wave completed configure\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+		t.Fatalf(
+			"second rollout wave started before first wave completed configure\ncommands:\n%s",
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
 }
 
@@ -2085,9 +2684,22 @@ func TestApplyRolloutHealthGateRunsHealthAfterEachHostWave(t *testing.T) {
 	}
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "healthcheck.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindHydratedBundle,
@@ -2168,10 +2780,16 @@ func TestApplyRolloutHealthGateRunsHealthAfterEachHostWave(t *testing.T) {
 		}
 	}
 	if firstConfigure < 0 || firstHealth < 0 || secondConfigure < 0 || secondHealth < 0 {
-		t.Fatalf("missing expected health-gated rollout hooks\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+		t.Fatalf(
+			"missing expected health-gated rollout hooks\ncommands:\n%s",
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
 	if !(firstConfigure < firstHealth && firstHealth < secondConfigure && secondConfigure < secondHealth) {
-		t.Fatalf("health-gated rollout order is wrong\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+		t.Fatalf(
+			"health-gated rollout order is wrong\ncommands:\n%s",
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
 }
 
@@ -2202,26 +2820,40 @@ func TestApplyRolloutCanaryPauseStopsBeforeLaterHosts(t *testing.T) {
 	}
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
-	bundle := rolloutRuntimeBundle("rollout-canary-pause-runtime", "rev-1", []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"}, []hydrate.RenderedStep{
-		{
-			Name:        "runtime-rootfs",
-			Kind:        hydrate.StepContent,
-			BundlePath:  "components/runtime/files/rootfs",
-			SourcePath:  "rootfs/",
-			ContentType: packageformat.ContentRootfs,
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	bundle := rolloutRuntimeBundle(
+		"rollout-canary-pause-runtime",
+		"rev-1",
+		[]string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"},
+		[]hydrate.RenderedStep{
+			{
+				Name:        "runtime-rootfs",
+				Kind:        hydrate.StepContent,
+				BundlePath:  "components/runtime/files/rootfs",
+				SourcePath:  "rootfs/",
+				ContentType: packageformat.ContentRootfs,
+			},
+			{
+				Name:           "configure",
+				Kind:           hydrate.StepHook,
+				BundlePath:     "components/runtime/files/hooks/configure.sh",
+				SourcePath:     "hooks/configure.sh",
+				HookPhase:      packageformat.PhaseConfigure,
+				Target:         packageformat.TargetAllNodes,
+				TimeoutSeconds: 5,
+			},
 		},
-		{
-			Name:           "configure",
-			Kind:           hydrate.StepHook,
-			BundlePath:     "components/runtime/files/hooks/configure.sh",
-			SourcePath:     "hooks/configure.sh",
-			HookPhase:      packageformat.PhaseConfigure,
-			Target:         packageformat.TargetAllNodes,
-			TimeoutSeconds: 5,
-		},
-	})
+	)
 	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
 		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
@@ -2241,8 +2873,14 @@ func TestApplyRolloutCanaryPauseStopsBeforeLaterHosts(t *testing.T) {
 	if !IsRolloutPaused(err) {
 		t.Fatalf("Apply() error = %v, want rollout paused", err)
 	}
-	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); strings.Contains(got, "configure.sh") {
-		t.Fatalf("non-canary host was configured before pause\ncommands:\n%s", strings.Join(fakeRemote.allCommands(), "\n"))
+	if got := strings.Join(fakeRemote.commandsForHost("10.0.0.11:22"), "\n"); strings.Contains(
+		got,
+		"configure.sh",
+	) {
+		t.Fatalf(
+			"non-canary host was configured before pause\ncommands:\n%s",
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
 	if !strings.Contains(stderr.String(), "running rollout batch 1/2 (canary)") {
 		t.Fatalf("canary batch log missing\nlog:\n%s", stderr.String())
@@ -2276,8 +2914,17 @@ func TestApplyRolloutBatchSizeDoesNotRepeatScopedHooks(t *testing.T) {
 	}
 
 	bundleDir := filepath.Join(t.TempDir(), "bundle")
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure-first.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure-first.sh"),
+		"#!/bin/sh\nexit 0\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
 	bundle := &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindHydratedBundle,
@@ -2332,15 +2979,27 @@ func TestApplyRolloutBatchSizeDoesNotRepeatScopedHooks(t *testing.T) {
 	}
 
 	for _, host := range []string{"10.0.0.10:22", "10.0.0.11:22", "10.0.0.12:22"} {
-		count := strings.Count(strings.Join(fakeRemote.commandsForHost(host), "\n"), "configure-first.sh")
+		count := strings.Count(
+			strings.Join(fakeRemote.commandsForHost(host), "\n"),
+			"configure-first.sh",
+		)
 		if host == "10.0.0.10:22" {
 			if count != 1 {
-				t.Fatalf("first master configure-first hook count = %d, want 1\ncommands:\n%s", count, strings.Join(fakeRemote.allCommands(), "\n"))
+				t.Fatalf(
+					"first master configure-first hook count = %d, want 1\ncommands:\n%s",
+					count,
+					strings.Join(fakeRemote.allCommands(), "\n"),
+				)
 			}
 			continue
 		}
 		if count != 0 {
-			t.Fatalf("non-first-master %q configure-first hook count = %d, want 0\ncommands:\n%s", host, count, strings.Join(fakeRemote.allCommands(), "\n"))
+			t.Fatalf(
+				"non-first-master %q configure-first hook count = %d, want 0\ncommands:\n%s",
+				host,
+				count,
+				strings.Join(fakeRemote.allCommands(), "\n"),
+			)
 		}
 	}
 }
@@ -2384,7 +3043,13 @@ exit 0
 
 	previousBundleDir := filepath.Join(tmpDir, "previous-bundle")
 	previousBundle := localRuntimeBundle("rollback-runtime", "rev-1")
-	writeLocalRuntimeBundle(t, previousBundleDir, previousBundle, "previous\n", "#!/bin/sh\nexit 0\n")
+	writeLocalRuntimeBundle(
+		t,
+		previousBundleDir,
+		previousBundle,
+		"previous\n",
+		"#!/bin/sh\nexit 0\n",
+	)
 	previousDigest, err := hydrate.DigestBundle(previousBundleDir)
 	if err != nil {
 		t.Fatalf("DigestBundle(previous) error = %v", err)
@@ -2487,11 +3152,19 @@ exit 0
 	if got, want := loaded.Spec.BOM.Name, "previous-platform"; got != want {
 		t.Fatalf("loaded.spec.bom.name = %q, want %q", got, want)
 	}
-	if loaded.Spec.RequestedTarget == nil || loaded.Spec.RequestedTarget.DistributionLine != "previous-platform" {
-		t.Fatalf("loaded.spec.requestedTarget = %#v, want previous target", loaded.Spec.RequestedTarget)
+	if loaded.Spec.RequestedTarget == nil ||
+		loaded.Spec.RequestedTarget.DistributionLine != "previous-platform" {
+		t.Fatalf(
+			"loaded.spec.requestedTarget = %#v, want previous target",
+			loaded.Spec.RequestedTarget,
+		)
 	}
-	if loaded.Spec.ResolvedTarget == nil || loaded.Spec.ResolvedTarget.BOM.Name != "previous-platform" {
-		t.Fatalf("loaded.spec.resolvedTarget = %#v, want previous resolved target", loaded.Spec.ResolvedTarget)
+	if loaded.Spec.ResolvedTarget == nil ||
+		loaded.Spec.ResolvedTarget.BOM.Name != "previous-platform" {
+		t.Fatalf(
+			"loaded.spec.resolvedTarget = %#v, want previous resolved target",
+			loaded.Spec.ResolvedTarget,
+		)
 	}
 	if got := len(loaded.Status.SuccessfulRevisions); got < 1 {
 		t.Fatalf("len(status.successfulRevisions) = %d, want rollback history", got)
@@ -2540,7 +3213,12 @@ func TestApplyRolloutRollbackUsesLastSuccessfulBundleTopology(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	previousBundleDir := filepath.Join(tmpDir, "previous-bundle")
-	previousBundle := rollbackTopologyRuntimeBundle("rollback-topology-runtime", "rev-1", previousHost, "restore-old.sh")
+	previousBundle := rollbackTopologyRuntimeBundle(
+		"rollback-topology-runtime",
+		"rev-1",
+		previousHost,
+		"restore-old.sh",
+	)
 	writeRollbackTopologyRuntimeBundle(t, previousBundleDir, previousBundle, "restore-old.sh")
 	previousDigest, err := hydrate.DigestBundle(previousBundleDir)
 	if err != nil {
@@ -2572,7 +3250,12 @@ func TestApplyRolloutRollbackUsesLastSuccessfulBundleTopology(t *testing.T) {
 	}
 
 	nextBundleDir := filepath.Join(tmpDir, "next-bundle")
-	nextBundle := rollbackTopologyRuntimeBundle("rollback-topology-runtime", "rev-2", currentHost, "fail-new.sh")
+	nextBundle := rollbackTopologyRuntimeBundle(
+		"rollback-topology-runtime",
+		"rev-2",
+		currentHost,
+		"fail-new.sh",
+	)
 	writeRollbackTopologyRuntimeBundle(t, nextBundleDir, nextBundle, "fail-new.sh")
 	if err := mirrorBundle(nextBundleDir, CurrentBundlePath(clusterName)); err != nil {
 		t.Fatalf("mirror next bundle error = %v", err)
@@ -2589,15 +3272,33 @@ func TestApplyRolloutRollbackUsesLastSuccessfulBundleTopology(t *testing.T) {
 	if !IsRolloutRolledBack(err) {
 		t.Fatalf("Apply() error = %v, want rollback error", err)
 	}
-	if got := strings.Join(fakeRemote.commandsForHost(previousHost), "\n"); !strings.Contains(got, "restore-old.sh") {
-		t.Fatalf("rollback did not use previous bundle host %q\ncommands:\n%s", previousHost, strings.Join(fakeRemote.allCommands(), "\n"))
+	if got := strings.Join(fakeRemote.commandsForHost(previousHost), "\n"); !strings.Contains(
+		got,
+		"restore-old.sh",
+	) {
+		t.Fatalf(
+			"rollback did not use previous bundle host %q\ncommands:\n%s",
+			previousHost,
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
-	if got := strings.Join(fakeRemote.commandsForHost(currentHost), "\n"); strings.Contains(got, "restore-old.sh") {
-		t.Fatalf("rollback reused failed revision host %q\ncommands:\n%s", currentHost, strings.Join(fakeRemote.allCommands(), "\n"))
+	if got := strings.Join(fakeRemote.commandsForHost(currentHost), "\n"); strings.Contains(
+		got,
+		"restore-old.sh",
+	) {
+		t.Fatalf(
+			"rollback reused failed revision host %q\ncommands:\n%s",
+			currentHost,
+			strings.Join(fakeRemote.allCommands(), "\n"),
+		)
 	}
 }
 
-func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, bundle *hydrate.Bundle) {
+func persistRenderedStateForBundle(
+	t *testing.T,
+	clusterName, bundleDir string,
+	bundle *hydrate.Bundle,
+) {
 	t.Helper()
 
 	bundleDigest, err := hydrate.DigestBundle(bundleDir)
@@ -2620,7 +3321,11 @@ func persistRenderedStateForBundle(t *testing.T, clusterName, bundleDir string, 
 	}
 }
 
-func rolloutRuntimeBundle(name, revision string, hosts []string, steps []hydrate.RenderedStep) *hydrate.Bundle {
+func rolloutRuntimeBundle(
+	name, revision string,
+	hosts []string,
+	steps []hydrate.RenderedStep,
+) *hydrate.Bundle {
 	return &hydrate.Bundle{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindHydratedBundle,
@@ -2665,10 +3370,33 @@ func localRuntimeBundle(name, revision string) *hydrate.Bundle {
 	})
 }
 
-func writeLocalRuntimeBundle(t *testing.T, bundleDir string, bundle *hydrate.Bundle, versionContent, configureHook string) {
+func writeLocalRuntimeBundle(
+	t *testing.T,
+	bundleDir string,
+	bundle *hydrate.Bundle,
+	versionContent, configureHook string,
+) {
 	t.Helper()
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "etc", "demo", "version"), versionContent, 0o644)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"), configureHook)
+	writeFile(
+		t,
+		filepath.Join(
+			bundleDir,
+			"components",
+			"runtime",
+			"files",
+			"rootfs",
+			"etc",
+			"demo",
+			"version",
+		),
+		versionContent,
+		0o644,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", "configure.sh"),
+		configureHook,
+	)
 	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
 		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
@@ -2695,10 +3423,24 @@ func rollbackTopologyRuntimeBundle(name, revision, host, hookName string) *hydra
 	})
 }
 
-func writeRollbackTopologyRuntimeBundle(t *testing.T, bundleDir string, bundle *hydrate.Bundle, hookName string) {
+func writeRollbackTopologyRuntimeBundle(
+	t *testing.T,
+	bundleDir string,
+	bundle *hydrate.Bundle,
+	hookName string,
+) {
 	t.Helper()
-	writeFile(t, filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeExecutable(t, filepath.Join(bundleDir, "components", "runtime", "files", "hooks", hookName), "#!/bin/sh\nexit 0\n")
+	writeFile(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "rootfs", "usr", "bin", "demo"),
+		"#!/bin/sh\nexit 0\n",
+		0o755,
+	)
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "runtime", "files", "hooks", hookName),
+		"#!/bin/sh\nexit 0\n",
+	)
 	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
 		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
@@ -2782,7 +3524,11 @@ func (f *fakeApplyRemoteExecutor) Fetch(host, src, dst string) error {
 	return os.WriteFile(dst, content, 0o644)
 }
 
-func (f *fakeApplyRemoteExecutor) CmdAsyncWithContext(_ context.Context, host string, cmds ...string) error {
+func (f *fakeApplyRemoteExecutor) CmdAsyncWithContext(
+	_ context.Context,
+	host string,
+	cmds ...string,
+) error {
 	for _, cmd := range cmds {
 		f.cmdOps = append(f.cmdOps, fakeRemoteCommand{host: host, cmd: cmd})
 		if err := f.errForCommand(host, cmd); err != nil {

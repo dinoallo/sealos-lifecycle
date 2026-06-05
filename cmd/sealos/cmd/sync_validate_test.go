@@ -22,13 +22,12 @@ import (
 	"strings"
 	"testing"
 
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
+	"sigs.k8s.io/yaml"
 )
 
 func TestSyncValidateCmdPassesWithLocalRepoBindings(t *testing.T) {
@@ -40,7 +39,15 @@ func TestSyncValidateCmdPassesWithLocalRepoBindings(t *testing.T) {
 	writeSyncValidateBOM(t, bomPath)
 	writeSyncTestPackage(t, packageRoot)
 	writeSyncLocalInput(t, localRepoRoot, "runtime", "runtime-config.yaml", "clusterName: local\n")
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, localrepo.ResourcesDirName, "secrets", "grafana-admin-credentials.yaml"), strings.TrimSpace(`
+	writeSyncTestFile(
+		t,
+		filepath.Join(
+			localRepoRoot,
+			localrepo.ResourcesDirName,
+			"secrets",
+			"grafana-admin-credentials.yaml",
+		),
+		strings.TrimSpace(`
 apiVersion: v1
 kind: Secret
 metadata:
@@ -50,7 +57,9 @@ type: Opaque
 stringData:
   username: admin
   password: passw0rd
-`)+"\n", 0o600)
+`)+"\n",
+		0o600,
+	)
 	writeSyncLocalPatch(t, localRepoRoot, "runtime", "settings.patch.yaml", strings.TrimSpace(`
 apiVersion: v1
 kind: ConfigMap
@@ -114,7 +123,15 @@ func TestSyncValidateCmdReportsConformanceIssues(t *testing.T) {
 
 	writeSyncValidateBOM(t, bomPath)
 	writeSyncValidatePackageWithRequiredInput(t, packageRoot)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, localrepo.ResourcesDirName, "secrets", "grafana-admin-credentials.yaml"), strings.TrimSpace(`
+	writeSyncTestFile(
+		t,
+		filepath.Join(
+			localRepoRoot,
+			localrepo.ResourcesDirName,
+			"secrets",
+			"grafana-admin-credentials.yaml",
+		),
+		strings.TrimSpace(`
 apiVersion: v1
 kind: Secret
 metadata:
@@ -124,7 +141,9 @@ type: Opaque
 stringData:
   username: admin
   password: passw0rd
-`)+"\n", 0o644)
+`)+"\n",
+		0o644,
+	)
 	writeSyncLocalPatch(t, localRepoRoot, "runtime", "image.patch.yaml", strings.TrimSpace(`
 apiVersion: apps/v1
 kind: Deployment
@@ -245,8 +264,15 @@ spec:
 	if got, want := out.LocalPolicyScope, "clusterLocal"; got != want {
 		t.Fatalf("localPolicyScope = %q, want %q", got, want)
 	}
-	if !syncValidateHasSelectedPolicyCandidate(out.LocalPolicyCandidates, "package", "policy/local-patch-policy.yaml", "runtime") {
-		t.Fatalf("localPolicyCandidates missing selected package policy: %#v", out.LocalPolicyCandidates)
+	if !syncValidateHasSelectedPolicyCandidate(
+		out.LocalPolicyCandidates,
+		"package",
+		"runtime",
+	) {
+		t.Fatalf(
+			"localPolicyCandidates missing selected package policy: %#v",
+			out.LocalPolicyCandidates,
+		)
 	}
 }
 
@@ -326,8 +352,15 @@ spec:
 	if got, want := out.LocalPolicyScope, "clusterLocal"; got != want {
 		t.Fatalf("localPolicyScope = %q, want %q", got, want)
 	}
-	if !syncValidateHasSelectedPolicyCandidate(out.LocalPolicyCandidates, "bom", "policy/local-patch-policy.yaml", "") {
-		t.Fatalf("localPolicyCandidates missing selected BOM policy: %#v", out.LocalPolicyCandidates)
+	if !syncValidateHasSelectedPolicyCandidate(
+		out.LocalPolicyCandidates,
+		"bom",
+		"",
+	) {
+		t.Fatalf(
+			"localPolicyCandidates missing selected BOM policy: %#v",
+			out.LocalPolicyCandidates,
+		)
 	}
 }
 
@@ -404,7 +437,13 @@ spec:
         - data
 `)+"\n")
 
-	selection, err := syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, nil)
+	selection, err := syncEffectiveLocalPatchPolicy(
+		bomDoc,
+		map[string]*packageformat.ComponentPackage{"runtime": pkg},
+		bomRoot,
+		nil,
+		nil,
+	)
 	if err != nil {
 		t.Fatalf("syncEffectiveLocalPatchPolicy() error = %v", err)
 	}
@@ -417,11 +456,23 @@ spec:
 	if got, want := selection.Document.EffectiveName(), "bom-local-patch-policy"; got != want {
 		t.Fatalf("policy.EffectiveName() = %q, want %q", got, want)
 	}
-	if !syncValidateHasSelectedPolicyCandidate(selection.Candidates, "bom", "policy/local-patch-policy.yaml", "") {
+	if !syncValidateHasSelectedPolicyCandidate(
+		selection.Candidates,
+		"bom",
+		"",
+	) {
 		t.Fatalf("selection.Candidates missing selected BOM policy: %#v", selection.Candidates)
 	}
-	if !syncValidateHasPolicyCandidate(selection.Candidates, "package", "policy/local-patch-policy.yaml", "runtime", false) {
-		t.Fatalf("selection.Candidates missing unselected package policy: %#v", selection.Candidates)
+	if !syncValidateHasPolicyCandidate(
+		selection.Candidates,
+		"package",
+		"runtime",
+		false,
+	) {
+		t.Fatalf(
+			"selection.Candidates missing unselected package policy: %#v",
+			selection.Candidates,
+		)
 	}
 
 	writeSyncPolicyFile(t, localRepoRoot, strings.TrimSpace(`
@@ -458,7 +509,13 @@ spec:
 		t.Fatalf("localrepo.Load() error = %v", err)
 	}
 
-	selection, err = syncEffectiveLocalPatchPolicy(bomDoc, map[string]*packageformat.ComponentPackage{"runtime": pkg}, bomRoot, nil, repo)
+	selection, err = syncEffectiveLocalPatchPolicy(
+		bomDoc,
+		map[string]*packageformat.ComponentPackage{"runtime": pkg},
+		bomRoot,
+		nil,
+		repo,
+	)
 	if err != nil {
 		t.Fatalf("syncEffectiveLocalPatchPolicy() error = %v", err)
 	}
@@ -471,14 +528,34 @@ spec:
 	if got, want := selection.Document.EffectiveName(), "repo-local-patch-policy"; got != want {
 		t.Fatalf("policy.EffectiveName() = %q, want %q", got, want)
 	}
-	if !syncValidateHasSelectedPolicyCandidate(selection.Candidates, "localRepo", "policy/local-patch-policy.yaml", "") {
-		t.Fatalf("selection.Candidates missing selected localRepo policy: %#v", selection.Candidates)
+	if !syncValidateHasSelectedPolicyCandidate(
+		selection.Candidates,
+		"localRepo",
+		"",
+	) {
+		t.Fatalf(
+			"selection.Candidates missing selected localRepo policy: %#v",
+			selection.Candidates,
+		)
 	}
-	if !syncValidateHasPolicyCandidate(selection.Candidates, "bom", "policy/local-patch-policy.yaml", "", false) {
+	if !syncValidateHasPolicyCandidate(
+		selection.Candidates,
+		"bom",
+		"",
+		false,
+	) {
 		t.Fatalf("selection.Candidates missing unselected BOM policy: %#v", selection.Candidates)
 	}
-	if !syncValidateHasPolicyCandidate(selection.Candidates, "package", "policy/local-patch-policy.yaml", "runtime", false) {
-		t.Fatalf("selection.Candidates missing unselected package policy: %#v", selection.Candidates)
+	if !syncValidateHasPolicyCandidate(
+		selection.Candidates,
+		"package",
+		"runtime",
+		false,
+	) {
+		t.Fatalf(
+			"selection.Candidates missing unselected package policy: %#v",
+			selection.Candidates,
+		)
 	}
 }
 
@@ -503,7 +580,19 @@ func TestSyncValidateCmdChecksTopologyHostInputs(t *testing.T) {
 		{IPS: []string{"10.0.0.12:22"}, Roles: []string{v1beta1.NODE}},
 	})
 	writeSyncLocalInput(t, localRepoRoot, "runtime", "runtime-config.yaml", "clusterName: local\n")
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, localrepo.InputsDirName, "runtime", "hosts", "10.0.0.13", "runtime-config.yaml"), "clusterName: stale\n", 0o644)
+	writeSyncTestFile(
+		t,
+		filepath.Join(
+			localRepoRoot,
+			localrepo.InputsDirName,
+			"runtime",
+			"hosts",
+			"10.0.0.13",
+			"runtime-config.yaml",
+		),
+		"clusterName: stale\n",
+		0o644,
+	)
 
 	buf := bytes.NewBuffer(nil)
 	cmd := newSyncCmd()
@@ -552,7 +641,12 @@ func writeSyncPackagePatchPolicy(t *testing.T, packageRoot, content string) {
 	if !strings.Contains(string(data), needle) {
 		t.Fatalf("package manifest missing %q", needle)
 	}
-	updated := strings.Replace(string(data), needle, "  localPatchPolicy: policy/local-patch-policy.yaml\n"+needle, 1)
+	updated := strings.Replace(
+		string(data),
+		needle,
+		"  localPatchPolicy: policy/local-patch-policy.yaml\n"+needle,
+		1,
+	)
 	if err := os.WriteFile(manifestPath, []byte(updated), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", manifestPath, err)
 	}
@@ -590,7 +684,10 @@ func writeSyncValidateBOM(t *testing.T, path string) {
 func writeSyncValidatePackageWithRequiredInput(t *testing.T, root string) {
 	t.Helper()
 
-	writeSyncTestFile(t, filepath.Join(root, "package.yaml"), `apiVersion: distribution.sealos.io/v1alpha1
+	writeSyncTestFile(
+		t,
+		filepath.Join(root, "package.yaml"),
+		`apiVersion: distribution.sealos.io/v1alpha1
 kind: ComponentPackage
 metadata:
   name: runtime-rootfs
@@ -614,7 +711,9 @@ spec:
       target: allNodes
       path: hooks/bootstrap.sh
       timeoutSeconds: 5
-`, 0o644)
+`,
+		0o644,
+	)
 	writeSyncTestFile(t, filepath.Join(root, "rootfs", "README"), "runtime rootfs\n", 0o644)
 	writeSyncTestFile(t, filepath.Join(root, "hooks", "bootstrap.sh"), "#!/bin/sh\nexit 0\n", 0o644)
 }
@@ -628,14 +727,26 @@ func syncValidateHasIssueCode(issues []syncValidateIssue, code string) bool {
 	return false
 }
 
-func syncValidateHasSelectedPolicyCandidate(candidates []hydrate.LocalPatchPolicyCandidate, source, path, component string) bool {
-	return syncValidateHasPolicyCandidate(candidates, source, path, component, true)
+func syncValidateHasSelectedPolicyCandidate(
+	candidates []hydrate.LocalPatchPolicyCandidate,
+	source, component string,
+) bool {
+	return syncValidateHasPolicyCandidate(
+		candidates,
+		source,
+		component,
+		true,
+	)
 }
 
-func syncValidateHasPolicyCandidate(candidates []hydrate.LocalPatchPolicyCandidate, source, path, component string, selected bool) bool {
+func syncValidateHasPolicyCandidate(
+	candidates []hydrate.LocalPatchPolicyCandidate,
+	source, component string,
+	selected bool,
+) bool {
 	for _, candidate := range candidates {
 		if string(candidate.Source) == source &&
-			candidate.Path == path &&
+			candidate.Path == "policy/local-patch-policy.yaml" &&
 			candidate.Component == component &&
 			candidate.Selected == selected {
 			return true

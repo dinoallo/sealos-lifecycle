@@ -29,11 +29,39 @@ func TestLoadAndBindingFor(t *testing.T) {
 
 	root := t.TempDir()
 	writeLocalInput(t, root, "cilium", "cilium-values.yaml", "hubble:\n  enabled: true\n")
-	writeLocalHostInput(t, root, "cilium", "10.0.0.11", "cilium-values.yaml", "hubble:\n  enabled: false\n")
-	writeLocalInput(t, root, "kubernetes", "kubeadm-config.yaml", "apiVersion: kubeadm.k8s.io/v1beta4\n")
-	writeLocalResource(t, root, filepath.Join("secrets", "grafana-admin-credentials.yaml"), "apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n")
-	writeLocalPatch(t, root, "cilium", "config/cilium-config.patch.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system\ndata:\n  enable-hubble: \"true\"\n")
-	writeLocalPatchPolicy(t, root, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: custom-local-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - data\n        - metadata.annotations\n")
+	writeLocalHostInput(
+		t,
+		root,
+		"cilium",
+		"10.0.0.11",
+		"cilium-values.yaml",
+		"hubble:\n  enabled: false\n",
+	)
+	writeLocalInput(
+		t,
+		root,
+		"kubernetes",
+		"kubeadm-config.yaml",
+		"apiVersion: kubeadm.k8s.io/v1beta4\n",
+	)
+	writeLocalResource(
+		t,
+		root,
+		filepath.Join("secrets", "grafana-admin-credentials.yaml"),
+		"apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n",
+	)
+	writeLocalPatch(
+		t,
+		root,
+		"cilium",
+		"config/cilium-config.patch.yaml",
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system\ndata:\n  enable-hubble: \"true\"\n",
+	)
+	writeLocalPatchPolicy(
+		t,
+		root,
+		"apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: custom-local-policy\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n        - data\n        - metadata.annotations\n",
+	)
 
 	repo, err := Load(root)
 	if err != nil {
@@ -147,7 +175,12 @@ func TestLoadKeepsOldSchemaNonBlocking(t *testing.T) {
 
 	root := t.TempDir()
 	writeLocalInput(t, root, "runtime", "runtime-config.yaml", "clusterName: poc\n")
-	writeLocalRepoFile(t, root, RepoFileName, "apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalRepo\nmetadata:\n  name: old\nspec:\n  bomName: old\n  revision: rev-1\n")
+	writeLocalRepoFile(
+		t,
+		root,
+		RepoFileName,
+		"apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalRepo\nmetadata:\n  name: old\nspec:\n  bomName: old\n  revision: rev-1\n",
+	)
 
 	repo, err := Load(root)
 	if err != nil {
@@ -224,7 +257,12 @@ func writeLocalPatch(t *testing.T, root, component, relativePath, content string
 func writeLocalPatchPolicy(t *testing.T, root, content string) {
 	t.Helper()
 
-	writeLocalRepoFile(t, root, filepath.ToSlash(filepath.Join(PolicyDirName, ownership.LocalPatchPolicyFileName)), content)
+	writeLocalRepoFile(
+		t,
+		root,
+		filepath.ToSlash(filepath.Join(PolicyDirName, ownership.LocalPatchPolicyFileName)),
+		content,
+	)
 }
 
 func writeLocalRepoSchema(t *testing.T, root string, repo *Repo) {
@@ -241,7 +279,11 @@ spec:
   bom: default-platform
   bomRevision: rev-1
 `)
-	writeLocalRepoFile(t, root, filepath.ToSlash(filepath.Join(RevisionsDirName, CurrentRevisionFileName)), `apiVersion: distribution.sealos.io/v1alpha1
+	writeLocalRepoFile(
+		t,
+		root,
+		filepath.ToSlash(filepath.Join(RevisionsDirName, CurrentRevisionFileName)),
+		`apiVersion: distribution.sealos.io/v1alpha1
 kind: LocalRepoRevision
 metadata:
   name: current
@@ -258,7 +300,8 @@ spec:
   audit:
     createdAt: "2026-06-03T00:00:00Z"
     command: sealos sync local-repo init
-`)
+`,
+	)
 }
 
 func writeLocalRepoFile(t *testing.T, root, relativePath, content string) {

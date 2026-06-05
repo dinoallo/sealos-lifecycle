@@ -21,15 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labring/sealos/pkg/distribution/agent"
+	"github.com/labring/sealos/pkg/distribution/reconcile"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/labring/sealos/pkg/distribution/agent"
-	"github.com/labring/sealos/pkg/distribution/reconcile"
 )
 
 func TestReconcilerUpdatesReadyStatus(t *testing.T) {
@@ -110,12 +109,25 @@ func TestReconcilerUpdatesReadyStatus(t *testing.T) {
 	if updated.Status.NextRetryTime != nil {
 		t.Fatalf("NextRetryTime = %s, want nil", updated.Status.NextRetryTime)
 	}
-	if updated.Status.LastDiagnostic == nil || updated.Status.LastDiagnostic.Reason != DistributionTargetReasonReconcileSucceeded {
+	if updated.Status.LastDiagnostic == nil ||
+		updated.Status.LastDiagnostic.Reason != DistributionTargetReasonReconcileSucceeded {
 		t.Fatalf("LastDiagnostic = %#v, want successful diagnostic", updated.Status.LastDiagnostic)
 	}
 	assertEvent(t, recorder.events, "Normal", DistributionTargetReasonReconcileSucceeded)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionTrue, DistributionTargetReasonReconcileSucceeded)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonReconcileSucceeded)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionReady,
+		metav1.ConditionTrue,
+		DistributionTargetReasonReconcileSucceeded,
+	)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionDegraded,
+		metav1.ConditionFalse,
+		DistributionTargetReasonReconcileSucceeded,
+	)
 }
 
 func TestReconcilerUsesReferencedRolloutPolicy(t *testing.T) {
@@ -233,8 +245,20 @@ func TestReconcilerMarksDegradedWhenRolloutPolicyMissing(t *testing.T) {
 	if got := updated.Status.RetryCount; got != 1 {
 		t.Fatalf("RetryCount = %d, want 1", got)
 	}
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonReconcileFailed)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionTrue, DistributionTargetReasonReconcileFailed)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionReady,
+		metav1.ConditionFalse,
+		DistributionTargetReasonReconcileFailed,
+	)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionDegraded,
+		metav1.ConditionTrue,
+		DistributionTargetReasonReconcileFailed,
+	)
 }
 
 func TestReconcilerUpdatesDegradedStatusOnRunnerError(t *testing.T) {
@@ -289,12 +313,25 @@ func TestReconcilerUpdatesDegradedStatusOnRunnerError(t *testing.T) {
 	if updated.Status.NextRetryTime == nil {
 		t.Fatal("NextRetryTime = nil, want retry timestamp")
 	}
-	if updated.Status.LastDiagnostic == nil || updated.Status.LastDiagnostic.Reason != DistributionTargetReasonReconcileFailed {
+	if updated.Status.LastDiagnostic == nil ||
+		updated.Status.LastDiagnostic.Reason != DistributionTargetReasonReconcileFailed {
 		t.Fatalf("LastDiagnostic = %#v, want failed diagnostic", updated.Status.LastDiagnostic)
 	}
 	assertEvent(t, recorder.events, "Warning", DistributionTargetReasonReconcileFailed)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonReconcileFailed)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionTrue, DistributionTargetReasonReconcileFailed)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionReady,
+		metav1.ConditionFalse,
+		DistributionTargetReasonReconcileFailed,
+	)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionDegraded,
+		metav1.ConditionTrue,
+		DistributionTargetReasonReconcileFailed,
+	)
 }
 
 func TestReconcilerMarksPartialFailureWhenRunnerReturnsResultAndError(t *testing.T) {
@@ -355,12 +392,25 @@ func TestReconcilerMarksPartialFailureWhenRunnerReturnsResultAndError(t *testing
 	if updated.Status.LastResult == nil || updated.Status.LastResult.Revision != "rev-partial" {
 		t.Fatalf("LastResult = %#v, want partial result revision", updated.Status.LastResult)
 	}
-	if updated.Status.LastDiagnostic == nil || updated.Status.LastDiagnostic.Reason != DistributionTargetReasonReconcilePartial {
+	if updated.Status.LastDiagnostic == nil ||
+		updated.Status.LastDiagnostic.Reason != DistributionTargetReasonReconcilePartial {
 		t.Fatalf("LastDiagnostic = %#v, want partial diagnostic", updated.Status.LastDiagnostic)
 	}
 	assertEvent(t, recorder.events, "Warning", DistributionTargetReasonReconcilePartial)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonReconcilePartial)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionTrue, DistributionTargetReasonReconcilePartial)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionReady,
+		metav1.ConditionFalse,
+		DistributionTargetReasonReconcilePartial,
+	)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionDegraded,
+		metav1.ConditionTrue,
+		DistributionTargetReasonReconcilePartial,
+	)
 }
 
 func TestReconcilerMarksPausedRolloutWithoutDegraded(t *testing.T) {
@@ -415,8 +465,20 @@ func TestReconcilerMarksPausedRolloutWithoutDegraded(t *testing.T) {
 		t.Fatalf("NextRetryTime = %s, want nil", updated.Status.NextRetryTime)
 	}
 	assertEvent(t, recorder.events, "Normal", DistributionTargetReasonRolloutPaused)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonRolloutPaused)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonRolloutPaused)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionReady,
+		metav1.ConditionFalse,
+		DistributionTargetReasonRolloutPaused,
+	)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionDegraded,
+		metav1.ConditionFalse,
+		DistributionTargetReasonRolloutPaused,
+	)
 }
 
 func TestReconcilerMarksRolledBackRolloutWithoutDegraded(t *testing.T) {
@@ -471,8 +533,20 @@ func TestReconcilerMarksRolledBackRolloutWithoutDegraded(t *testing.T) {
 		t.Fatalf("NextRetryTime = %s, want nil", updated.Status.NextRetryTime)
 	}
 	assertEvent(t, recorder.events, "Warning", DistributionTargetReasonRolloutRolledBack)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionReady, metav1.ConditionFalse, DistributionTargetReasonRolloutRolledBack)
-	assertCondition(t, updated.Status.Conditions, DistributionTargetConditionDegraded, metav1.ConditionFalse, DistributionTargetReasonRolloutRolledBack)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionReady,
+		metav1.ConditionFalse,
+		DistributionTargetReasonRolloutRolledBack,
+	)
+	assertCondition(
+		t,
+		updated.Status.Conditions,
+		DistributionTargetConditionDegraded,
+		metav1.ConditionFalse,
+		DistributionTargetReasonRolloutRolledBack,
+	)
 }
 
 func TestReconcilerIgnoresMissingTarget(t *testing.T) {
@@ -528,9 +602,12 @@ func TestTargetsForRolloutPolicy(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(targets...).
 		Build()
-	requests := (&Reconciler{Client: cl}).targetsForRolloutPolicy(context.Background(), &DistributionRolloutPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "steady", Namespace: "sealos-system"},
-	})
+	requests := (&Reconciler{Client: cl}).targetsForRolloutPolicy(
+		context.Background(),
+		&DistributionRolloutPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "steady", Namespace: "sealos-system"},
+		},
+	)
 
 	if got, want := len(requests), 1; got != want {
 		t.Fatalf("len(requests) = %d, want %d: %#v", got, want, requests)
@@ -582,14 +659,27 @@ func assertEvent(t *testing.T, events []recordedEvent, eventType, reason string)
 	t.Fatalf("event %s/%s not found in %#v", eventType, reason, events)
 }
 
-func assertCondition(t *testing.T, conditions []metav1.Condition, conditionType string, status metav1.ConditionStatus, reason string) {
+func assertCondition(
+	t *testing.T,
+	conditions []metav1.Condition,
+	conditionType string,
+	status metav1.ConditionStatus,
+	reason string,
+) {
 	t.Helper()
 	for _, condition := range conditions {
 		if condition.Type != conditionType {
 			continue
 		}
 		if condition.Status != status || condition.Reason != reason {
-			t.Fatalf("condition %q = (%s, %s), want (%s, %s)", conditionType, condition.Status, condition.Reason, status, reason)
+			t.Fatalf(
+				"condition %q = (%s, %s), want (%s, %s)",
+				conditionType,
+				condition.Status,
+				condition.Reason,
+				status,
+				reason,
+			)
 		}
 		return
 	}

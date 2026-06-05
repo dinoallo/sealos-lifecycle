@@ -24,10 +24,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
-
-	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
 func TestSyncPackageBuildCmd(t *testing.T) {
@@ -85,7 +84,10 @@ func TestSyncPackageBuildCmd(t *testing.T) {
 	if !slices.Contains(invocations[0], "--save-image=false") {
 		t.Fatalf("build args = %v, want --save-image=false", invocations[0])
 	}
-	if got, want := invocations[1], []string{"inspect", "--type", "image", "localhost:5000/test/kubernetes-rootfs:v1.30.3"}; !slices.Equal(got, want) {
+	if got, want := invocations[1], []string{"inspect", "--type", "image", "localhost:5000/test/kubernetes-rootfs:v1.30.3"}; !slices.Equal(
+		got,
+		want,
+	) {
 		t.Fatalf("inspect args = %v, want %v", got, want)
 	}
 
@@ -205,7 +207,7 @@ func TestSyncPackagePushCmdWritesProvenanceWithoutLeakingCreds(t *testing.T) {
 	previousRunner := runSyncPackageSubcommand
 	runSyncPackageSubcommand = func(args []string, _ io.Writer) error {
 		pushArgs = slices.Clone(args)
-		for i := 0; i < len(args); i++ {
+		for i := range args {
 			if args[i] == "--digestfile" {
 				if err := os.WriteFile(args[i+1], []byte(digest+"\n"), 0o644); err != nil {
 					t.Fatalf("WriteFile() error = %v", err)
@@ -275,7 +277,7 @@ func TestSyncPackagePushCmdWritesProvenanceWithoutLeakingCreds(t *testing.T) {
 func TestSyncPackagePushCmdRejectsInvalidDigest(t *testing.T) {
 	previousRunner := runSyncPackageSubcommand
 	runSyncPackageSubcommand = func(args []string, _ io.Writer) error {
-		for i := 0; i < len(args); i++ {
+		for i := range args {
 			if args[i] == "--digestfile" {
 				if err := os.WriteFile(args[i+1], []byte("not-a-digest\n"), 0o644); err != nil {
 					t.Fatalf("WriteFile() error = %v", err)
@@ -336,7 +338,10 @@ func TestSyncPackagePushCmdFailureDiagnosticsRedactCreds(t *testing.T) {
 	if strings.Contains(err.Error(), creds) {
 		t.Fatalf("Execute() error leaked credentials: %v", err)
 	}
-	if !strings.Contains(err.Error(), "registry diagnostics: authfile=false cert-dir=false creds=true") {
+	if !strings.Contains(
+		err.Error(),
+		"registry diagnostics: authfile=false cert-dir=false creds=true",
+	) {
 		t.Fatalf("Execute() error = %v, want redacted registry diagnostics", err)
 	}
 }

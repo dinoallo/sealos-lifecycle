@@ -15,6 +15,7 @@
 package bom
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,10 +38,12 @@ type ReleaseChannelLookupOptions struct {
 	Source           string
 }
 
-func ResolveReleaseChannelLookup(opts ReleaseChannelLookupOptions) (*ResolvedReleaseChannel, error) {
+func ResolveReleaseChannelLookup(
+	opts ReleaseChannelLookupOptions,
+) (*ResolvedReleaseChannel, error) {
 	line := strings.TrimSpace(opts.DistributionLine)
 	if line == "" {
-		return nil, fmt.Errorf("distribution line cannot be empty")
+		return nil, errors.New("distribution line cannot be empty")
 	}
 	channel := opts.Channel
 	if err := channel.ValidateRequired(); err != nil {
@@ -48,7 +51,7 @@ func ResolveReleaseChannelLookup(opts ReleaseChannelLookupOptions) (*ResolvedRel
 	}
 	source := strings.TrimSpace(opts.Source)
 	if source == "" {
-		return nil, fmt.Errorf("release source cannot be empty")
+		return nil, errors.New("release source cannot be empty")
 	}
 
 	channelDoc, channelSubject, err := loadReleaseChannelFromSource(source, line, channel)
@@ -56,16 +59,34 @@ func ResolveReleaseChannelLookup(opts ReleaseChannelLookupOptions) (*ResolvedRel
 		return nil, err
 	}
 	if channelDoc.Distribution() != line {
-		return nil, fmt.Errorf("release lookup %s/%s resolved distribution %q", line, channel, channelDoc.Distribution())
+		return nil, fmt.Errorf(
+			"release lookup %s/%s resolved distribution %q",
+			line,
+			channel,
+			channelDoc.Distribution(),
+		)
 	}
 	if channelDoc.Spec.Channel != channel {
-		return nil, fmt.Errorf("release lookup %s/%s resolved channel %q", line, channel, channelDoc.Spec.Channel)
+		return nil, fmt.Errorf(
+			"release lookup %s/%s resolved channel %q",
+			line,
+			channel,
+			channelDoc.Spec.Channel,
+		)
 	}
 	if strings.TrimSpace(channelDoc.Spec.BOMDigest) == "" {
-		return nil, fmt.Errorf("release lookup %s/%s must resolve a digest-pinned BOM", line, channel)
+		return nil, fmt.Errorf(
+			"release lookup %s/%s must resolve a digest-pinned BOM",
+			line,
+			channel,
+		)
 	}
 
-	bomData, bomSubject, err := loadBOMDataFromReleaseSource(source, channelSubject, strings.TrimSpace(channelDoc.Spec.BOMPath))
+	bomData, bomSubject, err := loadBOMDataFromReleaseSource(
+		source,
+		channelSubject,
+		strings.TrimSpace(channelDoc.Spec.BOMPath),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -90,14 +111,20 @@ func ResolveReleaseChannelLookup(opts ReleaseChannelLookupOptions) (*ResolvedRel
 	}, nil
 }
 
-func loadReleaseChannelFromSource(source, line string, channel ReleaseChannel) (*ReleaseChannelDocument, string, error) {
+func loadReleaseChannelFromSource(
+	source, line string,
+	channel ReleaseChannel,
+) (*ReleaseChannelDocument, string, error) {
 	if isHTTPURL(source) {
 		return loadReleaseChannelFromHTTP(source, line, channel)
 	}
 	return loadReleaseChannelFromLocalSource(source, line, channel)
 }
 
-func loadReleaseChannelFromLocalSource(source, line string, channel ReleaseChannel) (*ReleaseChannelDocument, string, error) {
+func loadReleaseChannelFromLocalSource(
+	source, line string,
+	channel ReleaseChannel,
+) (*ReleaseChannelDocument, string, error) {
 	localSource := strings.TrimPrefix(source, "file://")
 	info, err := os.Stat(localSource)
 	if err != nil {
@@ -117,7 +144,12 @@ func loadReleaseChannelFromLocalSource(source, line string, channel ReleaseChann
 		doc, err := LoadReleaseChannelFile(candidate)
 		return doc, candidate, err
 	}
-	return nil, "", fmt.Errorf("release channel %s/%s not found under source %q", line, channel, source)
+	return nil, "", fmt.Errorf(
+		"release channel %s/%s not found under source %q",
+		line,
+		channel,
+		source,
+	)
 }
 
 func localReleaseChannelCandidates(root, line, channel string) []string {
@@ -133,7 +165,10 @@ func localReleaseChannelCandidates(root, line, channel string) []string {
 	return candidates
 }
 
-func loadReleaseChannelFromHTTP(source, line string, channel ReleaseChannel) (*ReleaseChannelDocument, string, error) {
+func loadReleaseChannelFromHTTP(
+	source, line string,
+	channel ReleaseChannel,
+) (*ReleaseChannelDocument, string, error) {
 	endpoint, err := releaseChannelLookupURL(source, line, string(channel))
 	if err != nil {
 		return nil, "", err
@@ -169,7 +204,7 @@ func releaseChannelLookupURL(source, line, channel string) (string, error) {
 
 func loadBOMDataFromReleaseSource(source, channelSubject, bomPath string) ([]byte, string, error) {
 	if bomPath == "" {
-		return nil, "", fmt.Errorf("spec.bomPath cannot be empty")
+		return nil, "", errors.New("spec.bomPath cannot be empty")
 	}
 	if isHTTPURL(bomPath) {
 		data, err := readHTTPDocument(bomPath)
@@ -192,7 +227,10 @@ func loadBOMDataFromReleaseSource(source, channelSubject, bomPath string) ([]byt
 		return data, localPath, nil
 	}
 	if strings.TrimSpace(channelSubject) != "" && !isHTTPURL(channelSubject) {
-		localPath = filepath.Join(filepath.Dir(strings.TrimPrefix(channelSubject, "file://")), localPath)
+		localPath = filepath.Join(
+			filepath.Dir(strings.TrimPrefix(channelSubject, "file://")),
+			localPath,
+		)
 	} else {
 		localSource := strings.TrimPrefix(source, "file://")
 		localPath = filepath.Join(localSource, localPath)

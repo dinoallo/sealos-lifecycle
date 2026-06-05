@@ -21,6 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labring/sealos/pkg/distribution/agent"
+	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"github.com/labring/sealos/pkg/distribution/reconcile"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,10 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/labring/sealos/pkg/distribution/agent"
-	"github.com/labring/sealos/pkg/distribution/packageformat"
-	"github.com/labring/sealos/pkg/distribution/reconcile"
 )
 
 type Defaults struct {
@@ -95,7 +94,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
-			r.recordEvent(&target, "Warning", DistributionTargetReasonRolloutRolledBack, err.Error())
+			r.recordEvent(
+				&target,
+				"Warning",
+				DistributionTargetReasonRolloutRolledBack,
+				err.Error(),
+			)
 			return ctrl.Result{}, nil
 		}
 		requeue := retryBackoff(&target)
@@ -120,11 +124,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err := r.Client.Status().Update(ctx, &target); err != nil {
 		return ctrl.Result{}, err
 	}
-	r.recordEvent(&target, "Normal", DistributionTargetReasonReconcileSucceeded, "distribution target reconciled")
+	r.recordEvent(
+		&target,
+		"Normal",
+		DistributionTargetReasonReconcileSucceeded,
+		"distribution target reconciled",
+	)
 	return ctrl.Result{RequeueAfter: requeueDuration(&target)}, nil
 }
 
-func (r *Reconciler) reconcileTarget(ctx context.Context, target *DistributionTarget) (*agent.Result, error) {
+func (r *Reconciler) reconcileTarget(
+	ctx context.Context,
+	target *DistributionTarget,
+) (*agent.Result, error) {
 	if err := target.Spec.Validate(); err != nil {
 		return nil, err
 	}
@@ -143,7 +155,10 @@ func (r *Reconciler) reconcileTarget(ctx context.Context, target *DistributionTa
 	return runner.Run(ctx, opts)
 }
 
-func (r *Reconciler) rolloutStrategyForTarget(ctx context.Context, target *DistributionTarget) (reconcile.RolloutStrategy, error) {
+func (r *Reconciler) rolloutStrategyForTarget(
+	ctx context.Context,
+	target *DistributionTarget,
+) (reconcile.RolloutStrategy, error) {
 	if target == nil {
 		return reconcile.RolloutStrategy{}, fmt.Errorf("distribution target cannot be nil")
 	}
@@ -153,10 +168,18 @@ func (r *Reconciler) rolloutStrategyForTarget(ctx context.Context, target *Distr
 	policyName := strings.TrimSpace(target.Spec.RolloutPolicyRef.Name)
 	var policy DistributionRolloutPolicy
 	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: target.Namespace, Name: policyName}, &policy); err != nil {
-		return reconcile.RolloutStrategy{}, fmt.Errorf("load rollout policy %q: %w", policyName, err)
+		return reconcile.RolloutStrategy{}, fmt.Errorf(
+			"load rollout policy %q: %w",
+			policyName,
+			err,
+		)
 	}
 	if err := policy.Spec.Validate(); err != nil {
-		return reconcile.RolloutStrategy{}, fmt.Errorf("validate rollout policy %q: %w", policyName, err)
+		return reconcile.RolloutStrategy{}, fmt.Errorf(
+			"validate rollout policy %q: %w",
+			policyName,
+			err,
+		)
 	}
 	return policy.Spec.Strategy, nil
 }
@@ -172,7 +195,10 @@ func (r *Reconciler) SetupWithManager(mgr manager.Manager) error {
 		Complete(r)
 }
 
-func (r *Reconciler) targetsForRolloutPolicy(ctx context.Context, object client.Object) []ctrl.Request {
+func (r *Reconciler) targetsForRolloutPolicy(
+	ctx context.Context,
+	object client.Object,
+) []ctrl.Request {
 	if r.Client == nil || object == nil {
 		return nil
 	}
@@ -183,10 +209,14 @@ func (r *Reconciler) targetsForRolloutPolicy(ctx context.Context, object client.
 	}
 	requests := make([]ctrl.Request, 0, len(targets.Items))
 	for _, target := range targets.Items {
-		if target.Spec.RolloutPolicyRef == nil || strings.TrimSpace(target.Spec.RolloutPolicyRef.Name) != object.GetName() {
+		if target.Spec.RolloutPolicyRef == nil ||
+			strings.TrimSpace(target.Spec.RolloutPolicyRef.Name) != object.GetName() {
 			continue
 		}
-		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&target)})
+		requests = append(
+			requests,
+			ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&target)},
+		)
 	}
 	return requests
 }
@@ -240,7 +270,13 @@ func (r *Reconciler) markSucceeded(target *DistributionTarget, now metav1.Time) 
 	})
 }
 
-func (r *Reconciler) markFailed(target *DistributionTarget, now metav1.Time, err error, partial bool, requeue time.Duration) {
+func (r *Reconciler) markFailed(
+	target *DistributionTarget,
+	now metav1.Time,
+	err error,
+	partial bool,
+	requeue time.Duration,
+) {
 	reason := DistributionTargetReasonReconcileFailed
 	target.Status.Phase = DistributionTargetPhaseRetrying
 	if partial {

@@ -18,9 +18,8 @@ import (
 	"fmt"
 	"os"
 
-	"sigs.k8s.io/yaml"
-
 	fileutil "github.com/labring/sealos/pkg/utils/file"
+	"sigs.k8s.io/yaml"
 )
 
 func LoadFile(path string) (*BOM, error) {

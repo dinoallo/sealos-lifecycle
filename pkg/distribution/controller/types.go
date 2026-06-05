@@ -15,17 +15,17 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	"github.com/labring/sealos/pkg/distribution"
 	"github.com/labring/sealos/pkg/distribution/agent"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
@@ -132,8 +132,8 @@ type DistributionTarget struct {
 // +kubebuilder:object:root=true
 
 type DistributionTargetList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `                     json:",inline"`
+	metav1.ListMeta `                     json:"metadata,omitempty"`
 	Items           []DistributionTarget `json:"items"`
 }
 
@@ -151,8 +151,8 @@ type DistributionRolloutPolicy struct {
 // +kubebuilder:object:root=true
 
 type DistributionRolloutPolicyList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `                            json:",inline"`
+	metav1.ListMeta `                            json:"metadata,omitempty"`
 	Items           []DistributionRolloutPolicy `json:"items"`
 }
 
@@ -362,13 +362,19 @@ func (s DistributionTargetSpec) Validate() error {
 		targets++
 	}
 	if targets == 0 {
-		return fmt.Errorf("one of spec.bomPath, spec.releaseChannelPath, or spec.releaseSource with spec.releaseLine and spec.channel is required")
+		return errors.New(
+			"one of spec.bomPath, spec.releaseChannelPath, or spec.releaseSource with spec.releaseLine and spec.channel is required",
+		)
 	}
 	if targets > 1 {
-		return fmt.Errorf("use only one target selector: spec.bomPath, spec.releaseChannelPath, or spec.releaseSource with spec.releaseLine and spec.channel")
+		return errors.New(
+			"use only one target selector: spec.bomPath, spec.releaseChannelPath, or spec.releaseSource with spec.releaseLine and spec.channel",
+		)
 	}
 	if lookupSelected && lookupFields != 3 {
-		return fmt.Errorf("spec.releaseSource, spec.releaseLine, and spec.channel must be set together")
+		return errors.New(
+			"spec.releaseSource, spec.releaseLine, and spec.channel must be set together",
+		)
 	}
 	if s.RolloutBatchSize < 0 {
 		return fmt.Errorf("spec.rolloutBatchSize cannot be negative")
@@ -380,7 +386,7 @@ func (s DistributionTargetSpec) Validate() error {
 		return fmt.Errorf("spec.requeueAfter cannot be negative")
 	}
 	if s.RetryBackoff != nil && s.RetryBackoff.Duration < 0 {
-		return fmt.Errorf("spec.retryBackoff cannot be negative")
+		return errors.New("spec.retryBackoff cannot be negative")
 	}
 	seen := make(map[string]struct{}, len(s.PackageSources))
 	for i, source := range s.PackageSources {
@@ -412,12 +418,17 @@ func (s DistributionTargetSpec) AgentOptions(defaults Defaults) (agent.Options, 
 		return agent.Options{}, err
 	}
 	if s.RolloutPolicyRef != nil {
-		return agent.Options{}, fmt.Errorf("spec.rolloutPolicyRef requires resolving a DistributionRolloutPolicy")
+		return agent.Options{}, errors.New(
+			"spec.rolloutPolicyRef requires resolving a DistributionRolloutPolicy",
+		)
 	}
 	return s.agentOptions(defaults, reconcile.RolloutStrategy{BatchSize: s.RolloutBatchSize})
 }
 
-func (s DistributionTargetSpec) AgentOptionsWithRollout(defaults Defaults, rollout reconcile.RolloutStrategy) (agent.Options, error) {
+func (s DistributionTargetSpec) AgentOptionsWithRollout(
+	defaults Defaults,
+	rollout reconcile.RolloutStrategy,
+) (agent.Options, error) {
 	if err := s.Validate(); err != nil {
 		return agent.Options{}, err
 	}
@@ -427,7 +438,10 @@ func (s DistributionTargetSpec) AgentOptionsWithRollout(defaults Defaults, rollo
 	return s.agentOptions(defaults, rollout)
 }
 
-func (s DistributionTargetSpec) agentOptions(defaults Defaults, rollout reconcile.RolloutStrategy) (agent.Options, error) {
+func (s DistributionTargetSpec) agentOptions(
+	defaults Defaults,
+	rollout reconcile.RolloutStrategy,
+) (agent.Options, error) {
 	clusterName := strings.TrimSpace(s.ClusterName)
 	if clusterName == "" {
 		clusterName = strings.TrimSpace(defaults.ClusterName)

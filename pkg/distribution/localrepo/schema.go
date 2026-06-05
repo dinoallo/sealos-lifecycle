@@ -15,16 +15,16 @@
 package localrepo
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/labring/sealos/pkg/distribution"
 	"github.com/opencontainers/go-digest"
 	"sigs.k8s.io/yaml"
-
-	"github.com/labring/sealos/pkg/distribution"
 )
 
 const (
@@ -34,55 +34,57 @@ const (
 )
 
 type Metadata struct {
-	Name   string            `json:"name" yaml:"name"`
+	Name   string            `json:"name"             yaml:"name"`
 	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 }
 
 type BOMReference struct {
-	Name     string `json:"name" yaml:"name"`
-	Revision string `json:"revision" yaml:"revision"`
+	Name     string `json:"name"             yaml:"name"`
+	Revision string `json:"revision"         yaml:"revision"`
 	Digest   string `json:"digest,omitempty" yaml:"digest,omitempty"`
 }
 
 type LocalRepoSpec struct {
-	Cluster          string `json:"cluster" yaml:"cluster"`
-	DistributionLine string `json:"distributionLine" yaml:"distributionLine"`
-	Channel          string `json:"channel,omitempty" yaml:"channel,omitempty"`
-	BOM              string `json:"bom,omitempty" yaml:"bom,omitempty"`
+	Cluster          string `json:"cluster"               yaml:"cluster"`
+	DistributionLine string `json:"distributionLine"      yaml:"distributionLine"`
+	Channel          string `json:"channel,omitempty"     yaml:"channel,omitempty"`
+	BOM              string `json:"bom,omitempty"         yaml:"bom,omitempty"`
 	BOMRevision      string `json:"bomRevision,omitempty" yaml:"bomRevision,omitempty"`
 }
 
 type LocalRepoDocument struct {
 	APIVersion string        `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string        `json:"kind" yaml:"kind"`
-	Metadata   Metadata      `json:"metadata" yaml:"metadata"`
-	Spec       LocalRepoSpec `json:"spec" yaml:"spec"`
+	Kind       string        `json:"kind"       yaml:"kind"`
+	Metadata   Metadata      `json:"metadata"   yaml:"metadata"`
+	Spec       LocalRepoSpec `json:"spec"       yaml:"spec"`
 }
 
 type LocalRepoRevisionSpec struct {
-	Cluster            string       `json:"cluster" yaml:"cluster"`
-	DistributionLine   string       `json:"distributionLine" yaml:"distributionLine"`
-	Channel            string       `json:"channel,omitempty" yaml:"channel,omitempty"`
-	BOM                BOMReference `json:"bom" yaml:"bom"`
+	Cluster            string       `json:"cluster"            yaml:"cluster"`
+	DistributionLine   string       `json:"distributionLine"   yaml:"distributionLine"`
+	Channel            string       `json:"channel,omitempty"  yaml:"channel,omitempty"`
+	BOM                BOMReference `json:"bom"                yaml:"bom"`
 	LocalInputRevision string       `json:"localInputRevision" yaml:"localInputRevision"`
-	Digest             string       `json:"digest" yaml:"digest"`
-	Audit              AuditFields  `json:"audit" yaml:"audit"`
+	Digest             string       `json:"digest"             yaml:"digest"`
+	Audit              AuditFields  `json:"audit"              yaml:"audit"`
 }
 
 type AuditFields struct {
-	CreatedAt string `json:"createdAt" yaml:"createdAt"`
+	CreatedAt string `json:"createdAt"           yaml:"createdAt"`
 	CreatedBy string `json:"createdBy,omitempty" yaml:"createdBy,omitempty"`
-	Command   string `json:"command,omitempty" yaml:"command,omitempty"`
+	Command   string `json:"command,omitempty"   yaml:"command,omitempty"`
 }
 
 type LocalRepoRevisionDocument struct {
 	APIVersion string                `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                `json:"kind" yaml:"kind"`
-	Metadata   Metadata              `json:"metadata" yaml:"metadata"`
-	Spec       LocalRepoRevisionSpec `json:"spec" yaml:"spec"`
+	Kind       string                `json:"kind"       yaml:"kind"`
+	Metadata   Metadata              `json:"metadata"   yaml:"metadata"`
+	Spec       LocalRepoRevisionSpec `json:"spec"       yaml:"spec"`
 }
 
-func NewDocument(name, cluster, distributionLine, channel, bomName, bomRevision string) *LocalRepoDocument {
+func NewDocument(
+	name, cluster, distributionLine, channel, bomName, bomRevision string,
+) *LocalRepoDocument {
 	return &LocalRepoDocument{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindLocalRepo,
@@ -118,13 +120,13 @@ func (d LocalRepoDocument) Validate() error {
 		return fmt.Errorf("kind must be %q", distribution.KindLocalRepo)
 	}
 	if strings.TrimSpace(d.Metadata.Name) == "" {
-		return fmt.Errorf("metadata.name cannot be empty")
+		return errors.New("metadata.name cannot be empty")
 	}
 	if strings.TrimSpace(d.Spec.Cluster) == "" {
-		return fmt.Errorf("spec.cluster cannot be empty")
+		return errors.New("spec.cluster cannot be empty")
 	}
 	if strings.TrimSpace(d.Spec.DistributionLine) == "" {
-		return fmt.Errorf("spec.distributionLine cannot be empty")
+		return errors.New("spec.distributionLine cannot be empty")
 	}
 	return nil
 }
@@ -137,19 +139,19 @@ func (d LocalRepoRevisionDocument) Validate() error {
 		return fmt.Errorf("kind must be %q", distribution.KindLocalRepoRevision)
 	}
 	if strings.TrimSpace(d.Metadata.Name) == "" {
-		return fmt.Errorf("metadata.name cannot be empty")
+		return errors.New("metadata.name cannot be empty")
 	}
 	if strings.TrimSpace(d.Spec.Cluster) == "" {
-		return fmt.Errorf("spec.cluster cannot be empty")
+		return errors.New("spec.cluster cannot be empty")
 	}
 	if strings.TrimSpace(d.Spec.DistributionLine) == "" {
-		return fmt.Errorf("spec.distributionLine cannot be empty")
+		return errors.New("spec.distributionLine cannot be empty")
 	}
 	if strings.TrimSpace(d.Spec.BOM.Name) == "" {
-		return fmt.Errorf("spec.bom.name cannot be empty")
+		return errors.New("spec.bom.name cannot be empty")
 	}
 	if strings.TrimSpace(d.Spec.BOM.Revision) == "" {
-		return fmt.Errorf("spec.bom.revision cannot be empty")
+		return errors.New("spec.bom.revision cannot be empty")
 	}
 	if err := validateDigest("spec.bom.digest", d.Spec.BOM.Digest, true); err != nil {
 		return err
@@ -161,7 +163,7 @@ func (d LocalRepoRevisionDocument) Validate() error {
 		return err
 	}
 	if strings.TrimSpace(d.Spec.Audit.CreatedAt) == "" {
-		return fmt.Errorf("spec.audit.createdAt cannot be empty")
+		return errors.New("spec.audit.createdAt cannot be empty")
 	}
 	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(d.Spec.Audit.CreatedAt)); err != nil {
 		return fmt.Errorf("spec.audit.createdAt must be RFC3339: %w", err)

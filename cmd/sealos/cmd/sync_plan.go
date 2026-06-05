@@ -19,131 +19,130 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
+	"github.com/spf13/cobra"
 )
 
 type syncPlanSummary struct {
-	Components        int  `json:"components" yaml:"components"`
-	Steps             int  `json:"steps" yaml:"steps"`
-	ContentSteps      int  `json:"contentSteps" yaml:"contentSteps"`
-	HookSteps         int  `json:"hookSteps" yaml:"hookSteps"`
-	LocalResources    int  `json:"localResources" yaml:"localResources"`
+	Components        int  `json:"components"        yaml:"components"`
+	Steps             int  `json:"steps"             yaml:"steps"`
+	ContentSteps      int  `json:"contentSteps"      yaml:"contentSteps"`
+	HookSteps         int  `json:"hookSteps"         yaml:"hookSteps"`
+	LocalResources    int  `json:"localResources"    yaml:"localResources"`
 	KubernetesObjects int  `json:"kubernetesObjects" yaml:"kubernetesObjects"`
-	SecretObjects     int  `json:"secretObjects" yaml:"secretObjects"`
-	TrackedHostPaths  int  `json:"trackedHostPaths" yaml:"trackedHostPaths"`
-	Blocked           bool `json:"blocked" yaml:"blocked"`
+	SecretObjects     int  `json:"secretObjects"     yaml:"secretObjects"`
+	TrackedHostPaths  int  `json:"trackedHostPaths"  yaml:"trackedHostPaths"`
+	Blocked           bool `json:"blocked"           yaml:"blocked"`
 }
 
 type syncPlanOutput struct {
-	ClusterName        string                    `json:"clusterName" yaml:"clusterName"`
-	BOMName            string                    `json:"bomName" yaml:"bomName"`
-	Revision           string                    `json:"revision" yaml:"revision"`
-	Channel            string                    `json:"channel" yaml:"channel"`
-	BundlePath         string                    `json:"bundlePath" yaml:"bundlePath"`
-	ExecutionTopology  hydrate.ExecutionTopology `json:"executionTopology" yaml:"executionTopology"`
-	SourcePreflight    *hydrate.SourcePreflight  `json:"sourcePreflight,omitempty" yaml:"sourcePreflight,omitempty"`
-	Summary            syncPlanSummary           `json:"summary" yaml:"summary"`
-	Preflight          syncPreflightOutput       `json:"preflight" yaml:"preflight"`
-	Components         []syncPlanComponent       `json:"components,omitempty" yaml:"components,omitempty"`
-	LocalResources     []syncPlanLocalResource   `json:"localResources,omitempty" yaml:"localResources,omitempty"`
-	KubernetesObjects  []syncPlanK8sObject       `json:"kubernetesObjects,omitempty" yaml:"kubernetesObjects,omitempty"`
+	ClusterName        string                    `json:"clusterName"                   yaml:"clusterName"`
+	BOMName            string                    `json:"bomName"                       yaml:"bomName"`
+	Revision           string                    `json:"revision"                      yaml:"revision"`
+	Channel            string                    `json:"channel"                       yaml:"channel"`
+	BundlePath         string                    `json:"bundlePath"                    yaml:"bundlePath"`
+	ExecutionTopology  hydrate.ExecutionTopology `json:"executionTopology"             yaml:"executionTopology"`
+	SourcePreflight    *hydrate.SourcePreflight  `json:"sourcePreflight,omitempty"     yaml:"sourcePreflight,omitempty"`
+	Summary            syncPlanSummary           `json:"summary"                       yaml:"summary"`
+	Preflight          syncPreflightOutput       `json:"preflight"                     yaml:"preflight"`
+	Components         []syncPlanComponent       `json:"components,omitempty"          yaml:"components,omitempty"`
+	LocalResources     []syncPlanLocalResource   `json:"localResources,omitempty"      yaml:"localResources,omitempty"`
+	KubernetesObjects  []syncPlanK8sObject       `json:"kubernetesObjects,omitempty"   yaml:"kubernetesObjects,omitempty"`
 	TrackedHostPathSet []syncPlanHostPathSet     `json:"trackedHostPathSets,omitempty" yaml:"trackedHostPathSets,omitempty"`
-	Warnings           []string                  `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	Warnings           []string                  `json:"warnings,omitempty"            yaml:"warnings,omitempty"`
 }
 
 type syncPlanComponent struct {
-	Order       int                   `json:"order" yaml:"order"`
-	Name        string                `json:"name" yaml:"name"`
-	PackageName string                `json:"packageName" yaml:"packageName"`
-	Version     string                `json:"version" yaml:"version"`
-	Class       string                `json:"class" yaml:"class"`
-	Safety      syncPlanPackageSafety `json:"safety" yaml:"safety"`
+	Order       int                   `json:"order"           yaml:"order"`
+	Name        string                `json:"name"            yaml:"name"`
+	PackageName string                `json:"packageName"     yaml:"packageName"`
+	Version     string                `json:"version"         yaml:"version"`
+	Class       string                `json:"class"           yaml:"class"`
+	Safety      syncPlanPackageSafety `json:"safety"          yaml:"safety"`
 	Steps       []syncPlanStep        `json:"steps,omitempty" yaml:"steps,omitempty"`
 }
 
 type syncPlanStep struct {
-	Order          int                    `json:"order" yaml:"order"`
-	Name           string                 `json:"name" yaml:"name"`
-	Kind           string                 `json:"kind" yaml:"kind"`
-	ContentType    string                 `json:"contentType,omitempty" yaml:"contentType,omitempty"`
-	HookPhase      string                 `json:"hookPhase,omitempty" yaml:"hookPhase,omitempty"`
-	BundlePath     string                 `json:"bundlePath" yaml:"bundlePath"`
-	SourcePath     string                 `json:"sourcePath" yaml:"sourcePath"`
-	Required       bool                   `json:"required,omitempty" yaml:"required,omitempty"`
+	Order          int                    `json:"order"                    yaml:"order"`
+	Name           string                 `json:"name"                     yaml:"name"`
+	Kind           string                 `json:"kind"                     yaml:"kind"`
+	ContentType    string                 `json:"contentType,omitempty"    yaml:"contentType,omitempty"`
+	HookPhase      string                 `json:"hookPhase,omitempty"      yaml:"hookPhase,omitempty"`
+	BundlePath     string                 `json:"bundlePath"               yaml:"bundlePath"`
+	SourcePath     string                 `json:"sourcePath"               yaml:"sourcePath"`
+	Required       bool                   `json:"required,omitempty"       yaml:"required,omitempty"`
 	TimeoutSeconds int32                  `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
-	Target         syncPlanResolvedTarget `json:"target" yaml:"target"`
-	Safety         syncPlanStepSafety     `json:"safety" yaml:"safety"`
+	Target         syncPlanResolvedTarget `json:"target"                   yaml:"target"`
+	Safety         syncPlanStepSafety     `json:"safety"                   yaml:"safety"`
 }
 
 type syncPlanResolvedTarget struct {
 	Declared  string   `json:"declared,omitempty" yaml:"declared,omitempty"`
-	Effective string   `json:"effective" yaml:"effective"`
-	Scope     string   `json:"scope" yaml:"scope"`
-	Hosts     []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
-	Error     string   `json:"error,omitempty" yaml:"error,omitempty"`
+	Effective string   `json:"effective"          yaml:"effective"`
+	Scope     string   `json:"scope"              yaml:"scope"`
+	Hosts     []string `json:"hosts,omitempty"    yaml:"hosts,omitempty"`
+	Error     string   `json:"error,omitempty"    yaml:"error,omitempty"`
 }
 
 type syncPlanPackageSafety struct {
-	Profile          string   `json:"profile" yaml:"profile"`
-	RolloutScope     string   `json:"rolloutScope" yaml:"rolloutScope"`
-	Gates            []string `json:"gates,omitempty" yaml:"gates,omitempty"`
-	Reasons          []string `json:"reasons,omitempty" yaml:"reasons,omitempty"`
-	BarrierSteps     []string `json:"barrierSteps,omitempty" yaml:"barrierSteps,omitempty"`
-	HostWaveSteps    []string `json:"hostWaveSteps,omitempty" yaml:"hostWaveSteps,omitempty"`
-	HookPhases       []string `json:"hookPhases,omitempty" yaml:"hookPhases,omitempty"`
-	PhaseProfiles    []string `json:"phaseProfiles,omitempty" yaml:"phaseProfiles,omitempty"`
+	Profile          string   `json:"profile"                    yaml:"profile"`
+	RolloutScope     string   `json:"rolloutScope"               yaml:"rolloutScope"`
+	Gates            []string `json:"gates,omitempty"            yaml:"gates,omitempty"`
+	Reasons          []string `json:"reasons,omitempty"          yaml:"reasons,omitempty"`
+	BarrierSteps     []string `json:"barrierSteps,omitempty"     yaml:"barrierSteps,omitempty"`
+	HostWaveSteps    []string `json:"hostWaveSteps,omitempty"    yaml:"hostWaveSteps,omitempty"`
+	HookPhases       []string `json:"hookPhases,omitempty"       yaml:"hookPhases,omitempty"`
+	PhaseProfiles    []string `json:"phaseProfiles,omitempty"    yaml:"phaseProfiles,omitempty"`
 	RequiresApproval bool     `json:"requiresApproval,omitempty" yaml:"requiresApproval,omitempty"`
-	ManifestOnly     bool     `json:"manifestOnly,omitempty" yaml:"manifestOnly,omitempty"`
-	HasRootfs        bool     `json:"hasRootfs,omitempty" yaml:"hasRootfs,omitempty"`
-	HasHostFile      bool     `json:"hasHostFile,omitempty" yaml:"hasHostFile,omitempty"`
-	HasLocalPatch    bool     `json:"hasLocalPatch,omitempty" yaml:"hasLocalPatch,omitempty"`
-	HasPackageHook   bool     `json:"hasPackageHook,omitempty" yaml:"hasPackageHook,omitempty"`
+	ManifestOnly     bool     `json:"manifestOnly,omitempty"     yaml:"manifestOnly,omitempty"`
+	HasRootfs        bool     `json:"hasRootfs,omitempty"        yaml:"hasRootfs,omitempty"`
+	HasHostFile      bool     `json:"hasHostFile,omitempty"      yaml:"hasHostFile,omitempty"`
+	HasLocalPatch    bool     `json:"hasLocalPatch,omitempty"    yaml:"hasLocalPatch,omitempty"`
+	HasPackageHook   bool     `json:"hasPackageHook,omitempty"   yaml:"hasPackageHook,omitempty"`
 }
 
 type syncPlanStepSafety struct {
-	Profile          string   `json:"profile" yaml:"profile"`
-	Phase            string   `json:"phase,omitempty" yaml:"phase,omitempty"`
-	RolloutScope     string   `json:"rolloutScope" yaml:"rolloutScope"`
-	Gates            []string `json:"gates,omitempty" yaml:"gates,omitempty"`
-	Reasons          []string `json:"reasons,omitempty" yaml:"reasons,omitempty"`
+	Profile          string   `json:"profile"                    yaml:"profile"`
+	Phase            string   `json:"phase,omitempty"            yaml:"phase,omitempty"`
+	RolloutScope     string   `json:"rolloutScope"               yaml:"rolloutScope"`
+	Gates            []string `json:"gates,omitempty"            yaml:"gates,omitempty"`
+	Reasons          []string `json:"reasons,omitempty"          yaml:"reasons,omitempty"`
 	RequiresApproval bool     `json:"requiresApproval,omitempty" yaml:"requiresApproval,omitempty"`
 }
 
 type syncPlanLocalResource struct {
-	Path    string                 `json:"path" yaml:"path"`
-	Target  syncPlanResolvedTarget `json:"target" yaml:"target"`
+	Path    string                 `json:"path"              yaml:"path"`
+	Target  syncPlanResolvedTarget `json:"target"            yaml:"target"`
 	Objects []syncPlanK8sObject    `json:"objects,omitempty" yaml:"objects,omitempty"`
 }
 
 type syncPlanK8sObject struct {
 	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
-	Kind       string `json:"kind" yaml:"kind"`
-	Namespace  string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Name       string `json:"name" yaml:"name"`
-	Path       string `json:"path" yaml:"path"`
-	Component  string `json:"component,omitempty" yaml:"component,omitempty"`
-	Source     string `json:"source" yaml:"source"`
-	Ownership  string `json:"ownership" yaml:"ownership"`
-	Sensitive  bool   `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`
+	Kind       string `json:"kind"                 yaml:"kind"`
+	Namespace  string `json:"namespace,omitempty"  yaml:"namespace,omitempty"`
+	Name       string `json:"name"                 yaml:"name"`
+	Path       string `json:"path"                 yaml:"path"`
+	Component  string `json:"component,omitempty"  yaml:"component,omitempty"`
+	Source     string `json:"source"               yaml:"source"`
+	Ownership  string `json:"ownership"            yaml:"ownership"`
+	Sensitive  bool   `json:"sensitive,omitempty"  yaml:"sensitive,omitempty"`
 }
 
 type syncPlanHostPathSet struct {
-	Component       string   `json:"component,omitempty" yaml:"component,omitempty"`
-	Source          string   `json:"source" yaml:"source"`
-	Ownership       string   `json:"ownership" yaml:"ownership"`
+	Component       string   `json:"component,omitempty"       yaml:"component,omitempty"`
+	Source          string   `json:"source"                    yaml:"source"`
+	Ownership       string   `json:"ownership"                 yaml:"ownership"`
 	ProjectionClass string   `json:"projectionClass,omitempty" yaml:"projectionClass,omitempty"`
 	CompareStrategy string   `json:"compareStrategy,omitempty" yaml:"compareStrategy,omitempty"`
-	InputName       string   `json:"inputName,omitempty" yaml:"inputName,omitempty"`
-	SafetyProfile   string   `json:"safetyProfile,omitempty" yaml:"safetyProfile,omitempty"`
-	RolloutScope    string   `json:"rolloutScope,omitempty" yaml:"rolloutScope,omitempty"`
-	Gates           []string `json:"gates,omitempty" yaml:"gates,omitempty"`
-	Count           int      `json:"count" yaml:"count"`
-	Hosts           []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
-	Examples        []string `json:"examples,omitempty" yaml:"examples,omitempty"`
+	InputName       string   `json:"inputName,omitempty"       yaml:"inputName,omitempty"`
+	SafetyProfile   string   `json:"safetyProfile,omitempty"   yaml:"safetyProfile,omitempty"`
+	RolloutScope    string   `json:"rolloutScope,omitempty"    yaml:"rolloutScope,omitempty"`
+	Gates           []string `json:"gates,omitempty"           yaml:"gates,omitempty"`
+	Count           int      `json:"count"                     yaml:"count"`
+	Hosts           []string `json:"hosts,omitempty"           yaml:"hosts,omitempty"`
+	Examples        []string `json:"examples,omitempty"        yaml:"examples,omitempty"`
 }
 
 func newSyncPlanCmd() *cobra.Command {
@@ -165,7 +164,12 @@ func newSyncPlanCmd() *cobra.Command {
 			if bundlePath == "" {
 				bundlePath = reconcile.CurrentBundlePath(flags.clusterName)
 			}
-			preflight, err := syncApplyPreflight(flags.clusterName, bundlePath, flags.allowStaleTopology, flags.allowStaleRenderInputs)
+			preflight, err := syncApplyPreflight(
+				flags.clusterName,
+				bundlePath,
+				flags.allowStaleTopology,
+				flags.allowStaleRenderInputs,
+			)
 			if err != nil {
 				return err
 			}
@@ -177,15 +181,23 @@ func newSyncPlanCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "plan result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to plan desired state for")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
-	cmd.Flags().BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "show the plan with stale executionTopology treated as an allowed preflight condition")
-	cmd.Flags().BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "show the plan with stale render inputs treated as an allowed preflight condition")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to plan desired state for")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
+	cmd.Flags().
+		BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "show the plan with stale executionTopology treated as an allowed preflight condition")
+	cmd.Flags().
+		BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "show the plan with stale render inputs treated as an allowed preflight condition")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
 
-func newSyncPlanOutput(clusterName, bundlePath string, preflight syncApplyPreflightResult, topology *syncExecutionTopology) syncPlanOutput {
+func newSyncPlanOutput(
+	clusterName, bundlePath string,
+	preflight syncApplyPreflightResult,
+	topology *syncExecutionTopology,
+) syncPlanOutput {
 	bundle := preflight.Bundle
 	executionTopology := hydrate.NewSingleNodeExecutionTopology()
 	if topology != nil {
@@ -208,7 +220,10 @@ func newSyncPlanOutput(clusterName, bundlePath string, preflight syncApplyPrefli
 	out.SourcePreflight = bundle.Spec.SourcePreflight
 	out.Components = buildSyncPlanComponents(bundle, topology, &out.Summary)
 	out.KubernetesObjects = buildSyncPlanK8sObjects(bundle.Spec.TrackedK8sObjects, &out.Summary)
-	out.LocalResources = buildSyncPlanLocalResources(bundle.Spec.LocalResources, out.KubernetesObjects)
+	out.LocalResources = buildSyncPlanLocalResources(
+		bundle.Spec.LocalResources,
+		out.KubernetesObjects,
+	)
 	out.TrackedHostPathSet = buildSyncPlanHostPathSets(bundle.Spec.TrackedHostPaths, topology)
 	out.Summary.Components = len(out.Components)
 	out.Summary.LocalResources = len(out.LocalResources)
@@ -216,7 +231,11 @@ func newSyncPlanOutput(clusterName, bundlePath string, preflight syncApplyPrefli
 	return out
 }
 
-func buildSyncPlanComponents(bundle *hydrate.Bundle, topology *syncExecutionTopology, summary *syncPlanSummary) []syncPlanComponent {
+func buildSyncPlanComponents(
+	bundle *hydrate.Bundle,
+	topology *syncExecutionTopology,
+	summary *syncPlanSummary,
+) []syncPlanComponent {
 	components := make([]syncPlanComponent, 0, len(bundle.Spec.Components))
 	for componentIndex, component := range bundle.Spec.Components {
 		item := syncPlanComponent{
@@ -257,7 +276,10 @@ func buildSyncPlanComponents(bundle *hydrate.Bundle, topology *syncExecutionTopo
 	return components
 }
 
-func syncPlanTargetForStep(topology *syncExecutionTopology, step hydrate.RenderedStep) syncPlanResolvedTarget {
+func syncPlanTargetForStep(
+	topology *syncExecutionTopology,
+	step hydrate.RenderedStep,
+) syncPlanResolvedTarget {
 	switch step.Kind {
 	case hydrate.StepHook:
 		return resolveSyncPlanTarget(topology, step.Target, step.Target)
@@ -270,14 +292,25 @@ func syncPlanTargetForStep(topology *syncExecutionTopology, step hydrate.Rendere
 		case packageformat.ContentValues:
 			return syncPlanResolvedTarget{Effective: "renderOnly", Scope: "renderOnly"}
 		default:
-			return syncPlanResolvedTarget{Effective: string(step.ContentType), Scope: "unsupported", Error: fmt.Sprintf("unsupported content type %q", step.ContentType)}
+			return syncPlanResolvedTarget{
+				Effective: string(step.ContentType),
+				Scope:     "unsupported",
+				Error:     fmt.Sprintf("unsupported content type %q", step.ContentType),
+			}
 		}
 	default:
-		return syncPlanResolvedTarget{Effective: string(step.Kind), Scope: "unsupported", Error: fmt.Sprintf("unsupported step kind %q", step.Kind)}
+		return syncPlanResolvedTarget{
+			Effective: string(step.Kind),
+			Scope:     "unsupported",
+			Error:     fmt.Sprintf("unsupported step kind %q", step.Kind),
+		}
 	}
 }
 
-func resolveSyncPlanTarget(topology *syncExecutionTopology, declared, effective packageformat.ExecutionTarget) syncPlanResolvedTarget {
+func resolveSyncPlanTarget(
+	topology *syncExecutionTopology,
+	declared, effective packageformat.ExecutionTarget,
+) syncPlanResolvedTarget {
 	target := syncPlanResolvedTarget{
 		Declared:  string(declared),
 		Effective: string(effective),
@@ -320,7 +353,11 @@ func syncPlanPackageSafetyForComponent(component hydrate.RenderedComponent) sync
 		safety.HasLocalPatch = true
 		safety.RequiresApproval = true
 		addUniqueString(&safety.Gates, seenGates, "localPatchPolicy", "approval")
-		addUniqueString(&safety.Reasons, seenReasons, "local patches mutate package output and require policy approval")
+		addUniqueString(
+			&safety.Reasons,
+			seenReasons,
+			"local patches mutate package output and require policy approval",
+		)
 	}
 
 	for _, step := range component.Steps {
@@ -355,11 +392,23 @@ func syncPlanPackageSafetyForComponent(component hydrate.RenderedComponent) sync
 		}
 	}
 
-	if safety.ManifestOnly && !safety.HasRootfs && !safety.HasHostFile && len(safety.HostWaveSteps) == 0 {
+	if safety.ManifestOnly && !safety.HasRootfs && !safety.HasHostFile &&
+		len(safety.HostWaveSteps) == 0 {
 		safety.Profile = "manifestOnly"
 		safety.RolloutScope = "clusterBarrier"
-		addUniqueString(&safety.Gates, seenGates, "kubeconfig", "apiReady", "applyManifest", "healthcheck")
-		addUniqueString(&safety.Reasons, seenReasons, "package only changes Kubernetes API objects and must pass cluster-level health gates")
+		addUniqueString(
+			&safety.Gates,
+			seenGates,
+			"kubeconfig",
+			"apiReady",
+			"applyManifest",
+			"healthcheck",
+		)
+		addUniqueString(
+			&safety.Reasons,
+			seenReasons,
+			"package only changes Kubernetes API objects and must pass cluster-level health gates",
+		)
 		return safety
 	}
 	if safety.HasRootfs {
@@ -369,8 +418,21 @@ func syncPlanPackageSafetyForComponent(component hydrate.RenderedComponent) sync
 		} else {
 			safety.RolloutScope = "hostWave"
 		}
-		addUniqueString(&safety.Gates, seenGates, "preflight", "hostBatch", "serviceStop", "contentApply", "daemonReload", "healthcheck")
-		addUniqueString(&safety.Reasons, seenReasons, "rootfs content mutates host filesystem and is protected by host batches")
+		addUniqueString(
+			&safety.Gates,
+			seenGates,
+			"preflight",
+			"hostBatch",
+			"serviceStop",
+			"contentApply",
+			"daemonReload",
+			"healthcheck",
+		)
+		addUniqueString(
+			&safety.Reasons,
+			seenReasons,
+			"rootfs content mutates host filesystem and is protected by host batches",
+		)
 		return safety
 	}
 	if safety.HasHostFile {
@@ -380,8 +442,20 @@ func syncPlanPackageSafetyForComponent(component hydrate.RenderedComponent) sync
 		} else {
 			safety.RolloutScope = "hostWave"
 		}
-		addUniqueString(&safety.Gates, seenGates, "preflight", "hostBatch", "contentApply", "daemonReload", "healthcheck")
-		addUniqueString(&safety.Reasons, seenReasons, "host file content mutates host filesystem and is protected by host batches")
+		addUniqueString(
+			&safety.Gates,
+			seenGates,
+			"preflight",
+			"hostBatch",
+			"contentApply",
+			"daemonReload",
+			"healthcheck",
+		)
+		addUniqueString(
+			&safety.Reasons,
+			seenReasons,
+			"host file content mutates host filesystem and is protected by host batches",
+		)
 		return safety
 	}
 	if safety.HasPackageHook {
@@ -395,13 +469,20 @@ func syncPlanPackageSafetyForComponent(component hydrate.RenderedComponent) sync
 			safety.RolloutScope = "mixed"
 		}
 		addUniqueString(&safety.Gates, seenGates, "hookTimeout", "targetResolution", "healthcheck")
-		addUniqueString(&safety.Reasons, seenReasons, "package hooks execute package-specific logic and must declare explicit targets")
+		addUniqueString(
+			&safety.Reasons,
+			seenReasons,
+			"package hooks execute package-specific logic and must declare explicit targets",
+		)
 		return safety
 	}
 	return safety
 }
 
-func syncPlanStepSafetyForStep(step hydrate.RenderedStep, target syncPlanResolvedTarget) syncPlanStepSafety {
+func syncPlanStepSafetyForStep(
+	step hydrate.RenderedStep,
+	target syncPlanResolvedTarget,
+) syncPlanStepSafety {
 	safety := syncPlanStepSafety{
 		Profile:      "generic",
 		RolloutScope: target.Scope,
@@ -425,18 +506,24 @@ func syncPlanStepSafetyForStep(step hydrate.RenderedStep, target syncPlanResolve
 	case step.Kind == hydrate.StepContent && step.ContentType == packageformat.ContentValues:
 		safety.Profile = "renderOnly"
 		safety.RolloutScope = "renderOnly"
-		safety.Reasons = []string{"values content is consumed during render and is not applied directly"}
+		safety.Reasons = []string{
+			"values content is consumed during render and is not applied directly",
+		}
 	case step.Kind == hydrate.StepContent && step.ContentType == packageformat.ContentPatch:
 		safety.Profile = "localPatchContent"
 		safety.RolloutScope = "clusterBarrier"
 		safety.Gates = []string{"localPatchPolicy", "approval"}
-		safety.Reasons = []string{"patch content changes rendered package output and requires policy approval before apply"}
+		safety.Reasons = []string{
+			"patch content changes rendered package output and requires policy approval before apply",
+		}
 		safety.RequiresApproval = true
 	case step.Kind == hydrate.StepContent && step.ContentType == packageformat.ContentChart:
 		safety.Profile = "chartContent"
 		safety.RolloutScope = "clusterBarrier"
 		safety.Gates = []string{"render", "kubeconfig", "apiReady", "healthcheck"}
-		safety.Reasons = []string{"chart content renders Kubernetes API objects and must pass cluster-level health gates"}
+		safety.Reasons = []string{
+			"chart content renders Kubernetes API objects and must pass cluster-level health gates",
+		}
 	case step.Kind == hydrate.StepHook:
 		safety = syncPlanHookSafety(step, target)
 	default:
@@ -447,7 +534,10 @@ func syncPlanStepSafetyForStep(step hydrate.RenderedStep, target syncPlanResolve
 	return safety
 }
 
-func syncPlanHookSafety(step hydrate.RenderedStep, target syncPlanResolvedTarget) syncPlanStepSafety {
+func syncPlanHookSafety(
+	step hydrate.RenderedStep,
+	target syncPlanResolvedTarget,
+) syncPlanStepSafety {
 	safety := syncPlanStepSafety{
 		Profile:      "packageHook",
 		Phase:        string(step.HookPhase),
@@ -467,25 +557,40 @@ func syncPlanHookSafety(step hydrate.RenderedStep, target syncPlanResolvedTarget
 	case packageformat.PhaseBootstrap:
 		safety.Profile = "bootstrapHook"
 		safety.Gates = append(safety.Gates, "bootstrap", "preflight")
-		safety.Reasons = append(safety.Reasons, "bootstrap hooks run before package install completion")
+		safety.Reasons = append(
+			safety.Reasons,
+			"bootstrap hooks run before package install completion",
+		)
 	case packageformat.PhaseConfigure:
 		safety.Profile = "configureHook"
 		safety.Gates = append(safety.Gates, "configurationDrift", "healthcheck")
-		safety.Reasons = append(safety.Reasons, "configure hooks can mutate runtime configuration and must be followed by health gates")
+		safety.Reasons = append(
+			safety.Reasons,
+			"configure hooks can mutate runtime configuration and must be followed by health gates",
+		)
 	case packageformat.PhaseInstall:
 		safety.Profile = "installHook"
 		safety.Gates = append(safety.Gates, "install", "healthcheck")
-		safety.Reasons = append(safety.Reasons, "install hooks can create runtime resources and must be followed by health gates")
+		safety.Reasons = append(
+			safety.Reasons,
+			"install hooks can create runtime resources and must be followed by health gates",
+		)
 	case packageformat.PhaseUpgrade:
 		safety.Profile = "upgradeHook"
 		safety.Gates = append(safety.Gates, "upgrade", "healthcheck", "rollbackPlan")
-		safety.Reasons = append(safety.Reasons, "upgrade hooks can migrate live state and require rollback planning")
+		safety.Reasons = append(
+			safety.Reasons,
+			"upgrade hooks can migrate live state and require rollback planning",
+		)
 		safety.RequiresApproval = true
 	case packageformat.PhaseRemove:
 		safety.Profile = "removeHook"
 		safety.RolloutScope = "clusterBarrier"
 		safety.Gates = append(safety.Gates, "destructiveAction", "approval", "rollbackPlan")
-		safety.Reasons = append(safety.Reasons, "remove hooks can delete runtime resources and require explicit approval")
+		safety.Reasons = append(
+			safety.Reasons,
+			"remove hooks can delete runtime resources and require explicit approval",
+		)
 		safety.RequiresApproval = true
 	case packageformat.PhaseHealth:
 		safety.Profile = "healthHook"
@@ -509,7 +614,10 @@ func addUniqueString(out *[]string, seen map[string]struct{}, values ...string) 
 	}
 }
 
-func buildSyncPlanK8sObjects(objects []hydrate.TrackedK8sObject, summary *syncPlanSummary) []syncPlanK8sObject {
+func buildSyncPlanK8sObjects(
+	objects []hydrate.TrackedK8sObject,
+	summary *syncPlanSummary,
+) []syncPlanK8sObject {
 	out := make([]syncPlanK8sObject, 0, len(objects))
 	for _, object := range objects {
 		item := syncPlanK8sObject{
@@ -535,7 +643,10 @@ func buildSyncPlanK8sObjects(objects []hydrate.TrackedK8sObject, summary *syncPl
 	return out
 }
 
-func buildSyncPlanLocalResources(paths []string, objects []syncPlanK8sObject) []syncPlanLocalResource {
+func buildSyncPlanLocalResources(
+	paths []string,
+	objects []syncPlanK8sObject,
+) []syncPlanLocalResource {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -560,7 +671,10 @@ func buildSyncPlanLocalResources(paths []string, objects []syncPlanK8sObject) []
 	return out
 }
 
-func buildSyncPlanHostPathSets(paths []hydrate.TrackedHostPath, topology *syncExecutionTopology) []syncPlanHostPathSet {
+func buildSyncPlanHostPathSets(
+	paths []hydrate.TrackedHostPath,
+	topology *syncExecutionTopology,
+) []syncPlanHostPathSet {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -607,7 +721,10 @@ func buildSyncPlanHostPathSets(paths []hydrate.TrackedHostPath, topology *syncEx
 	return out
 }
 
-func syncPlanHostsForTrackedHostPath(topology *syncExecutionTopology, path hydrate.TrackedHostPath) []string {
+func syncPlanHostsForTrackedHostPath(
+	topology *syncExecutionTopology,
+	path hydrate.TrackedHostPath,
+) []string {
 	if topology == nil {
 		return []string{syncLocalExecutionHost}
 	}
@@ -656,5 +773,16 @@ func syncPlanK8sObjectSortKey(object syncPlanK8sObject) string {
 }
 
 func syncPlanHostPathSetSortKey(set syncPlanHostPathSet) string {
-	return strings.Join([]string{set.Component, set.Source, set.Ownership, set.ProjectionClass, set.CompareStrategy, set.InputName, strings.Join(set.Hosts, ",")}, "\x00")
+	return strings.Join(
+		[]string{
+			set.Component,
+			set.Source,
+			set.Ownership,
+			set.ProjectionClass,
+			set.CompareStrategy,
+			set.InputName,
+			strings.Join(set.Hosts, ","),
+		},
+		"\x00",
+	)
 }

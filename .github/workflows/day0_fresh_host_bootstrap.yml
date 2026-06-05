@@ -40,7 +40,6 @@ jobs:
     env:
       GO_VERSION: ${{ inputs.go_version }}
       CLUSTER_NAME: ${{ inputs.cluster_name }}
-      WORKDIR: $RUNNER_TEMP/day0-bootstrap
       REGISTRY_PORT: "5065"
     steps:
       - name: Checkout
@@ -56,6 +55,14 @@ jobs:
 
       - name: Build sealos
         run: make build BINS=sealos
+
+      - name: Initialize workflow paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="${RUNNER_TEMP}/day0-bootstrap"
+          mkdir -p "${workdir}"
+          echo "WORKDIR=${workdir}" >>"${GITHUB_ENV}"
 
       - name: Start local package registry
         shell: bash

@@ -21,61 +21,60 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencontainers/go-digest"
-	"github.com/spf13/cobra"
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/distribution"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
+	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 type syncHealthProofAcceptanceReport struct {
 	APIVersion string                              `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                              `json:"kind" yaml:"kind"`
-	Metadata   bom.Metadata                        `json:"metadata" yaml:"metadata"`
-	Spec       syncHealthProofAcceptanceReportSpec `json:"spec" yaml:"spec"`
+	Kind       string                              `json:"kind"       yaml:"kind"`
+	Metadata   bom.Metadata                        `json:"metadata"   yaml:"metadata"`
+	Spec       syncHealthProofAcceptanceReportSpec `json:"spec"       yaml:"spec"`
 }
 
 type syncHealthProofAcceptanceReportSpec struct {
-	ClusterName           string                                 `json:"clusterName" yaml:"clusterName"`
-	StartedAt             string                                 `json:"startedAt" yaml:"startedAt"`
-	FinishedAt            string                                 `json:"finishedAt" yaml:"finishedAt"`
-	Status                string                                 `json:"status" yaml:"status"`
-	ExitCode              int                                    `json:"exitCode" yaml:"exitCode"`
-	MutatingApply         bool                                   `json:"mutatingApply" yaml:"mutatingApply"`
-	RevertCheck           bool                                   `json:"revertCheck" yaml:"revertCheck"`
-	PackageMode           string                                 `json:"packageMode" yaml:"packageMode"`
-	BOMFile               string                                 `json:"bomFile" yaml:"bomFile"`
-	BOMName               string                                 `json:"bomName" yaml:"bomName"`
-	BOMRevision           string                                 `json:"bomRevision" yaml:"bomRevision"`
-	BOMDigest             string                                 `json:"bomDigest" yaml:"bomDigest"`
-	Workdir               string                                 `json:"workdir" yaml:"workdir"`
-	RuntimeRoot           string                                 `json:"runtimeRoot" yaml:"runtimeRoot"`
-	LocalRepo             string                                 `json:"localRepo" yaml:"localRepo"`
-	BundleDir             string                                 `json:"bundleDir" yaml:"bundleDir"`
-	Kubeconfig            string                                 `json:"kubeconfig" yaml:"kubeconfig"`
-	HostRoot              string                                 `json:"hostRoot" yaml:"hostRoot"`
-	OutputsFormat         string                                 `json:"outputsFormat" yaml:"outputsFormat"`
-	DesiredStateDigest    string                                 `json:"desiredStateDigest" yaml:"desiredStateDigest"`
-	LocalRepoRevision     string                                 `json:"localRepoRevision" yaml:"localRepoRevision"`
-	SourcePreflightState  string                                 `json:"sourcePreflightState" yaml:"sourcePreflightState"`
+	ClusterName           string                                 `json:"clusterName"           yaml:"clusterName"`
+	StartedAt             string                                 `json:"startedAt"             yaml:"startedAt"`
+	FinishedAt            string                                 `json:"finishedAt"            yaml:"finishedAt"`
+	Status                string                                 `json:"status"                yaml:"status"`
+	ExitCode              int                                    `json:"exitCode"              yaml:"exitCode"`
+	MutatingApply         bool                                   `json:"mutatingApply"         yaml:"mutatingApply"`
+	RevertCheck           bool                                   `json:"revertCheck"           yaml:"revertCheck"`
+	PackageMode           string                                 `json:"packageMode"           yaml:"packageMode"`
+	BOMFile               string                                 `json:"bomFile"               yaml:"bomFile"`
+	BOMName               string                                 `json:"bomName"               yaml:"bomName"`
+	BOMRevision           string                                 `json:"bomRevision"           yaml:"bomRevision"`
+	BOMDigest             string                                 `json:"bomDigest"             yaml:"bomDigest"`
+	Workdir               string                                 `json:"workdir"               yaml:"workdir"`
+	RuntimeRoot           string                                 `json:"runtimeRoot"           yaml:"runtimeRoot"`
+	LocalRepo             string                                 `json:"localRepo"             yaml:"localRepo"`
+	BundleDir             string                                 `json:"bundleDir"             yaml:"bundleDir"`
+	Kubeconfig            string                                 `json:"kubeconfig"            yaml:"kubeconfig"`
+	HostRoot              string                                 `json:"hostRoot"              yaml:"hostRoot"`
+	OutputsFormat         string                                 `json:"outputsFormat"         yaml:"outputsFormat"`
+	DesiredStateDigest    string                                 `json:"desiredStateDigest"    yaml:"desiredStateDigest"`
+	LocalRepoRevision     string                                 `json:"localRepoRevision"     yaml:"localRepoRevision"`
+	SourcePreflightState  string                                 `json:"sourcePreflightState"  yaml:"sourcePreflightState"`
 	RuntimePreflightState string                                 `json:"runtimePreflightState" yaml:"runtimePreflightState"`
-	PostApplyState        string                                 `json:"postApplyState" yaml:"postApplyState"`
-	PostRevertState       string                                 `json:"postRevertState" yaml:"postRevertState"`
-	Stages                []syncHealthProofAcceptanceReportStage `json:"stages" yaml:"stages"`
-	Notes                 []string                               `json:"notes" yaml:"notes"`
+	PostApplyState        string                                 `json:"postApplyState"        yaml:"postApplyState"`
+	PostRevertState       string                                 `json:"postRevertState"       yaml:"postRevertState"`
+	Stages                []syncHealthProofAcceptanceReportStage `json:"stages"                yaml:"stages"`
+	Notes                 []string                               `json:"notes"                 yaml:"notes"`
 }
 
 type syncHealthProofAcceptanceReportStage struct {
-	Name       string `json:"name" yaml:"name"`
-	Status     string `json:"status" yaml:"status"`
-	Mutates    bool   `json:"mutates" yaml:"mutates"`
-	StartedAt  string `json:"startedAt" yaml:"startedAt"`
-	FinishedAt string `json:"finishedAt" yaml:"finishedAt"`
-	Output     string `json:"output,omitempty" yaml:"output,omitempty"`
+	Name       string `json:"name"              yaml:"name"`
+	Status     string `json:"status"            yaml:"status"`
+	Mutates    bool   `json:"mutates"           yaml:"mutates"`
+	StartedAt  string `json:"startedAt"         yaml:"startedAt"`
+	FinishedAt string `json:"finishedAt"        yaml:"finishedAt"`
+	Output     string `json:"output,omitempty"  yaml:"output,omitempty"`
 	Command    string `json:"command,omitempty" yaml:"command,omitempty"`
-	Reason     string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Reason     string `json:"reason,omitempty"  yaml:"reason,omitempty"`
 }
 
 func newSyncHealthProofCmd() *cobra.Command {
@@ -129,11 +128,16 @@ func newSyncHealthProofCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&flags.bomFile, "file", "f", "", "path to the target BOM file")
-	cmd.Flags().StringVar(&flags.reportFile, "acceptance-report", "", "PackageAcceptanceReport file produced by package lifecycle automation")
-	cmd.Flags().StringVar(&flags.name, "name", "", "metadata.name for the generated DistributionHealthProof; defaults from BOM line and revision")
-	cmd.Flags().StringVar(&flags.summary, "summary", "", "optional summary for the generated health proof")
-	cmd.Flags().StringVar(&flags.collectedAt, "collected-at", "", "proof collection timestamp in RFC3339 format; defaults to report spec.finishedAt")
-	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "optional path to write the generated DistributionHealthProof YAML")
+	cmd.Flags().
+		StringVar(&flags.reportFile, "acceptance-report", "", "PackageAcceptanceReport file produced by package lifecycle automation")
+	cmd.Flags().
+		StringVar(&flags.name, "name", "", "metadata.name for the generated DistributionHealthProof; defaults from BOM line and revision")
+	cmd.Flags().
+		StringVar(&flags.summary, "summary", "", "optional summary for the generated health proof")
+	cmd.Flags().
+		StringVar(&flags.collectedAt, "collected-at", "", "proof collection timestamp in RFC3339 format; defaults to report spec.finishedAt")
+	cmd.Flags().
+		StringVar(&flags.outputFile, "output-file", "", "optional path to write the generated DistributionHealthProof YAML")
 	addSyncOutputFlag(cmd, &flags.outputFormat)
 	mustMarkFlagRequired(cmd, "file")
 	mustMarkFlagRequired(cmd, "acceptance-report")
@@ -197,7 +201,11 @@ type syncHealthProofOptions struct {
 	BOMPath     string
 }
 
-func buildSyncHealthProof(targetBOM *bom.BOM, report *syncHealthProofAcceptanceReport, opts syncHealthProofOptions) (*bom.DistributionHealthProof, error) {
+func buildSyncHealthProof(
+	targetBOM *bom.BOM,
+	report *syncHealthProofAcceptanceReport,
+	opts syncHealthProofOptions,
+) (*bom.DistributionHealthProof, error) {
 	if targetBOM == nil {
 		return nil, fmt.Errorf("target BOM cannot be nil")
 	}
@@ -209,7 +217,12 @@ func buildSyncHealthProof(targetBOM *bom.BOM, report *syncHealthProofAcceptanceR
 		proofName = defaultSyncHealthProofName(targetBOM.Metadata.Name, targetBOM.Spec.Revision)
 	}
 	signals := syncHealthProofSignals(report, targetBOM, opts.BOMPath)
-	proof := bom.NewDistributionHealthProof(proofName, targetBOM.Metadata.Name, targetBOM.Spec.Revision, syncHealthProofSignalsPassed(signals))
+	proof := bom.NewDistributionHealthProof(
+		proofName,
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		syncHealthProofSignalsPassed(signals),
+	)
 	proof.Spec.Summary = syncHealthProofSummary(report, opts.Summary)
 	proof.Spec.CollectedAt = syncHealthProofCollectedAt(report, opts.CollectedAt)
 	proof.Spec.Thresholds = syncHealthProofThresholds(signals)
@@ -222,7 +235,9 @@ func buildSyncHealthProof(targetBOM *bom.BOM, report *syncHealthProofAcceptanceR
 }
 
 func defaultSyncHealthProofName(line, revision string) string {
-	return sanitizeSyncHealthProofName(strings.TrimSpace(line) + "-" + strings.TrimSpace(revision) + "-health")
+	return sanitizeSyncHealthProofName(
+		strings.TrimSpace(line) + "-" + strings.TrimSpace(revision) + "-health",
+	)
 }
 
 func sanitizeSyncHealthProofName(value string) string {
@@ -271,7 +286,9 @@ func syncHealthProofCollectedAt(report *syncHealthProofAcceptanceReport, overrid
 	return strings.TrimSpace(report.Spec.FinishedAt)
 }
 
-func syncHealthProofThresholds(signals []bom.DistributionHealthSignal) bom.DistributionHealthThresholds {
+func syncHealthProofThresholds(
+	signals []bom.DistributionHealthSignal,
+) bom.DistributionHealthThresholds {
 	required := make([]string, 0, len(signals))
 	for _, signal := range signals {
 		if signal.Required {
@@ -284,7 +301,10 @@ func syncHealthProofThresholds(signals []bom.DistributionHealthSignal) bom.Distr
 	}
 }
 
-func syncHealthProofRequiredSignal(signal bom.DistributionHealthSignal, evidenceRef string) bom.DistributionHealthSignal {
+func syncHealthProofRequiredSignal(
+	signal bom.DistributionHealthSignal,
+	evidenceRef string,
+) bom.DistributionHealthSignal {
 	signal.Required = true
 	if strings.TrimSpace(signal.Source) == "" {
 		signal.Source = distribution.KindPackageAcceptanceReport
@@ -299,18 +319,35 @@ func syncHealthProofStageEvidenceRef(name string) string {
 	return "spec.stages[name=" + strings.TrimSpace(name) + "]"
 }
 
-func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOM *bom.BOM, targetBOMPath string) []bom.DistributionHealthSignal {
+func syncHealthProofSignals(
+	report *syncHealthProofAcceptanceReport,
+	targetBOM *bom.BOM,
+	targetBOMPath string,
+) []bom.DistributionHealthSignal {
 	signals := []bom.DistributionHealthSignal{
 		syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-			Name:    "acceptance-report",
-			Passed:  strings.EqualFold(strings.TrimSpace(report.Spec.Status), "Passed") && report.Spec.ExitCode == 0,
-			Message: fmt.Sprintf("status=%s exitCode=%d", strings.TrimSpace(report.Spec.Status), report.Spec.ExitCode),
+			Name: "acceptance-report",
+			Passed: strings.EqualFold(strings.TrimSpace(report.Spec.Status), "Passed") &&
+				report.Spec.ExitCode == 0,
+			Message: fmt.Sprintf(
+				"status=%s exitCode=%d",
+				strings.TrimSpace(report.Spec.Status),
+				report.Spec.ExitCode,
+			),
 		}, "spec.status"),
 		syncHealthProofBOMFileSignal(report.Spec.BOMFile, targetBOMPath),
 		syncHealthProofBOMIdentitySignal(report.Spec.BOMName, report.Spec.BOMRevision, targetBOM),
 		syncHealthProofBOMDigestSignal(report.Spec.BOMDigest, targetBOMPath),
-		syncHealthProofDigestValueSignal("desired-state-digest", "desiredStateDigest", report.Spec.DesiredStateDigest),
-		syncHealthProofDigestValueSignal("local-repo-revision", "localRepoRevision", report.Spec.LocalRepoRevision),
+		syncHealthProofDigestValueSignal(
+			"desired-state-digest",
+			"desiredStateDigest",
+			report.Spec.DesiredStateDigest,
+		),
+		syncHealthProofDigestValueSignal(
+			"local-repo-revision",
+			"localRepoRevision",
+			report.Spec.LocalRepoRevision,
+		),
 	}
 	signals = append(signals, syncHealthProofContractSignals(report)...)
 	signals = append(signals, syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
@@ -330,8 +367,11 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOM *
 	}, "spec.mutatingApply"))
 	if report.Spec.MutatingApply && strings.TrimSpace(report.Spec.PostApplyState) != "" {
 		signals = append(signals, syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-			Name:    "post-apply-drift",
-			Passed:  strings.EqualFold(strings.TrimSpace(report.Spec.PostApplyState), syncHealthProofCleanState),
+			Name: "post-apply-drift",
+			Passed: strings.EqualFold(
+				strings.TrimSpace(report.Spec.PostApplyState),
+				syncHealthProofCleanState,
+			),
 			Message: "currentState=" + strings.TrimSpace(report.Spec.PostApplyState),
 		}, "spec.postApplyState"))
 	} else if report.Spec.MutatingApply {
@@ -343,8 +383,11 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOM *
 	}
 	if report.Spec.RevertCheck && strings.TrimSpace(report.Spec.PostRevertState) != "" {
 		signals = append(signals, syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-			Name:    "post-revert-drift",
-			Passed:  strings.EqualFold(strings.TrimSpace(report.Spec.PostRevertState), syncHealthProofCleanState),
+			Name: "post-revert-drift",
+			Passed: strings.EqualFold(
+				strings.TrimSpace(report.Spec.PostRevertState),
+				syncHealthProofCleanState,
+			),
 			Message: "currentState=" + strings.TrimSpace(report.Spec.PostRevertState),
 		}, "spec.postRevertState"))
 	} else if report.Spec.RevertCheck {
@@ -373,14 +416,21 @@ func syncHealthProofSignals(report *syncHealthProofAcceptanceReport, targetBOM *
 	return signals
 }
 
-func syncHealthProofBOMIdentitySignal(reportBOMName, reportBOMRevision string, targetBOM *bom.BOM) bom.DistributionHealthSignal {
+func syncHealthProofBOMIdentitySignal(
+	reportBOMName, reportBOMRevision string,
+	targetBOM *bom.BOM,
+) bom.DistributionHealthSignal {
 	reportBOMName = strings.TrimSpace(reportBOMName)
 	reportBOMRevision = strings.TrimSpace(reportBOMRevision)
 	if reportBOMName == "" || reportBOMRevision == "" {
 		return syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-			Name:    "bom-identity",
-			Passed:  false,
-			Message: fmt.Sprintf("reportBOMName=%s reportBOMRevision=%s", syncHealthProofStateMessage(reportBOMName), syncHealthProofStateMessage(reportBOMRevision)),
+			Name:   "bom-identity",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"reportBOMName=%s reportBOMRevision=%s",
+				syncHealthProofStateMessage(reportBOMName),
+				syncHealthProofStateMessage(reportBOMRevision),
+			),
 		}, "spec.bomName,spec.bomRevision")
 	}
 	if targetBOM == nil {
@@ -393,13 +443,21 @@ func syncHealthProofBOMIdentitySignal(reportBOMName, reportBOMRevision string, t
 	targetBOMName := strings.TrimSpace(targetBOM.Metadata.Name)
 	targetBOMRevision := strings.TrimSpace(targetBOM.Spec.Revision)
 	return syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-		Name:    "bom-identity",
-		Passed:  reportBOMName == targetBOMName && reportBOMRevision == targetBOMRevision,
-		Message: fmt.Sprintf("report=%s/%s target=%s/%s", reportBOMName, reportBOMRevision, targetBOMName, targetBOMRevision),
+		Name:   "bom-identity",
+		Passed: reportBOMName == targetBOMName && reportBOMRevision == targetBOMRevision,
+		Message: fmt.Sprintf(
+			"report=%s/%s target=%s/%s",
+			reportBOMName,
+			reportBOMRevision,
+			targetBOMName,
+			targetBOMRevision,
+		),
 	}, "spec.bomName,spec.bomRevision")
 }
 
-func syncHealthProofBOMDigestSignal(reportBOMDigest, targetBOMPath string) bom.DistributionHealthSignal {
+func syncHealthProofBOMDigestSignal(
+	reportBOMDigest, targetBOMPath string,
+) bom.DistributionHealthSignal {
 	reportBOMDigest = strings.TrimSpace(reportBOMDigest)
 	if reportBOMDigest == "" {
 		return syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
@@ -432,7 +490,9 @@ func syncHealthProofBOMDigestSignal(reportBOMDigest, targetBOMPath string) bom.D
 	}, "spec.bomDigest")
 }
 
-func syncHealthProofBOMFileSignal(reportBOMPath, targetBOMPath string) bom.DistributionHealthSignal {
+func syncHealthProofBOMFileSignal(
+	reportBOMPath, targetBOMPath string,
+) bom.DistributionHealthSignal {
 	reportBOMPath = strings.TrimSpace(reportBOMPath)
 	targetBOMPath = strings.TrimSpace(targetBOMPath)
 	if reportBOMPath == "" {
@@ -453,15 +513,23 @@ func syncHealthProofBOMFileSignal(reportBOMPath, targetBOMPath string) bom.Distr
 	targetAbs, targetErr := filepath.Abs(targetBOMPath)
 	if reportErr == nil && targetErr == nil {
 		return syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-			Name:    "bom-file",
-			Passed:  filepath.Clean(reportAbs) == filepath.Clean(targetAbs),
-			Message: fmt.Sprintf("report=%s target=%s", filepath.Clean(reportAbs), filepath.Clean(targetAbs)),
+			Name:   "bom-file",
+			Passed: filepath.Clean(reportAbs) == filepath.Clean(targetAbs),
+			Message: fmt.Sprintf(
+				"report=%s target=%s",
+				filepath.Clean(reportAbs),
+				filepath.Clean(targetAbs),
+			),
 		}, "spec.bomFile")
 	}
 	return syncHealthProofRequiredSignal(bom.DistributionHealthSignal{
-		Name:    "bom-file",
-		Passed:  filepath.Clean(reportBOMPath) == filepath.Clean(targetBOMPath),
-		Message: fmt.Sprintf("report=%s target=%s", filepath.Clean(reportBOMPath), filepath.Clean(targetBOMPath)),
+		Name:   "bom-file",
+		Passed: filepath.Clean(reportBOMPath) == filepath.Clean(targetBOMPath),
+		Message: fmt.Sprintf(
+			"report=%s target=%s",
+			filepath.Clean(reportBOMPath),
+			filepath.Clean(targetBOMPath),
+		),
 	}, "spec.bomFile")
 }
 
@@ -488,7 +556,9 @@ func syncHealthProofDigestValueSignal(name, field, value string) bom.Distributio
 	}, "spec."+field)
 }
 
-func syncHealthProofContractSignals(report *syncHealthProofAcceptanceReport) []bom.DistributionHealthSignal {
+func syncHealthProofContractSignals(
+	report *syncHealthProofAcceptanceReport,
+) []bom.DistributionHealthSignal {
 	stageByName := make(map[string]syncHealthProofAcceptanceReportStage, len(report.Spec.Stages))
 	for _, stage := range report.Spec.Stages {
 		stage.Name = strings.TrimSpace(stage.Name)
@@ -557,7 +627,8 @@ func syncHealthProofContractSignals(report *syncHealthProofAcceptanceReport) []b
 
 func syncHealthProofPreflightPassed(state string) bool {
 	state = strings.TrimSpace(state)
-	return strings.EqualFold(state, string(syncPreflightStateReady)) || strings.EqualFold(state, string(syncPreflightStateWarning))
+	return strings.EqualFold(state, string(syncPreflightStateReady)) ||
+		strings.EqualFold(state, string(syncPreflightStateWarning))
 }
 
 func syncHealthProofStateMessage(state string) string {

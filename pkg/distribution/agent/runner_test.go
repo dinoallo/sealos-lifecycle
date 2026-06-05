@@ -25,8 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
@@ -34,6 +32,7 @@ import (
 	"github.com/labring/sealos/pkg/distribution/reconcile"
 	"github.com/labring/sealos/pkg/distribution/state"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
 )
 
 func TestRunnerRunOnceWithExplicitBOM(t *testing.T) {
@@ -104,7 +103,13 @@ func TestRunnerRunOnceWithReleaseChannelDocument(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := bom.NewReleaseChannel("agent-runtime-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "bom.yaml")
+	channel := bom.NewReleaseChannel(
+		"agent-runtime-stable",
+		doc.Metadata.Name,
+		bom.ChannelStable,
+		doc.Spec.Revision,
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -179,7 +184,13 @@ func TestRunnerRunOnceWithReleaseChannelLookup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("agent-runtime-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "../boms/rev-agent-1.yaml")
+	channel := bom.NewReleaseChannel(
+		"agent-runtime-stable",
+		doc.Metadata.Name,
+		bom.ChannelStable,
+		doc.Spec.Revision,
+		"../boms/rev-agent-1.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(bomData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -637,7 +648,8 @@ func TestRunnerMarksDegradedAfterPrepareFailure(t *testing.T) {
 	if got, want := applied.Status.State, state.StateDegraded; got != want {
 		t.Fatalf("status.state = %q, want %q", got, want)
 	}
-	if len(applied.Status.Conditions) == 0 || applied.Status.Conditions[0].Reason != "PrepareRenderFailed" {
+	if len(applied.Status.Conditions) == 0 ||
+		applied.Status.Conditions[0].Reason != "PrepareRenderFailed" {
 		t.Fatalf("conditions = %#v, want PrepareRenderFailed", applied.Status.Conditions)
 	}
 }

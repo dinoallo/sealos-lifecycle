@@ -52,7 +52,11 @@ func TestStageContext(t *testing.T) {
 	out := t.TempDir()
 	ts := time.Unix(1234, 0)
 
-	meta, err := StageContext(filepath.Join("..", "packageformat", "testdata", "kubernetes-rootfs"), out, ts)
+	meta, err := StageContext(
+		filepath.Join("..", "packageformat", "testdata", "kubernetes-rootfs"),
+		out,
+		ts,
+	)
 	if err != nil {
 		t.Fatalf("StageContext() error = %v", err)
 	}
@@ -136,7 +140,11 @@ func TestCacheEnsureUsesDigestPathAndReusesEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
-	wantRoot := filepath.Join(cache.Root, "sha256", "1111111111111111111111111111111111111111111111111111111111111111")
+	wantRoot := filepath.Join(
+		cache.Root,
+		"sha256",
+		"1111111111111111111111111111111111111111111111111111111111111111",
+	)
 	if got := root; got != wantRoot {
 		t.Fatalf("cache root = %q, want %q", got, wantRoot)
 	}
@@ -149,7 +157,11 @@ func TestCacheEnsureUsesDigestPathAndReusesEntry(t *testing.T) {
 		t.Fatalf("second Ensure() error = %v", err)
 	}
 	if root != wantRoot || pkg.Spec.Component != "kubernetes" {
-		t.Fatalf("second Ensure() root=%q component=%q, want cached kubernetes package", root, pkg.Spec.Component)
+		t.Fatalf(
+			"second Ensure() root=%q component=%q, want cached kubernetes package",
+			root,
+			pkg.Spec.Component,
+		)
 	}
 	if got, want := len(mounter.mounted), 1; got != want {
 		t.Fatalf("mount count = %d, want %d", got, want)
@@ -160,7 +172,11 @@ func TestCacheListAndGC(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	validPath := filepath.Join(root, "sha256", "1111111111111111111111111111111111111111111111111111111111111111")
+	validPath := filepath.Join(
+		root,
+		"sha256",
+		"1111111111111111111111111111111111111111111111111111111111111111",
+	)
 	if err := os.MkdirAll(filepath.Dir(validPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(valid parent) error = %v", err)
 	}
@@ -189,7 +205,11 @@ func TestCacheListAndGC(t *testing.T) {
 	if got, want := len(entries), 2; got != want {
 		t.Fatalf("len(entries) = %d, want %d", got, want)
 	}
-	validEntry := findCacheEntry(entries, "sha256", "1111111111111111111111111111111111111111111111111111111111111111")
+	validEntry := findCacheEntry(
+		entries,
+		"sha256",
+		"1111111111111111111111111111111111111111111111111111111111111111",
+	)
 	if validEntry == nil {
 		t.Fatalf("valid cache entry missing: %#v", entries)
 	}

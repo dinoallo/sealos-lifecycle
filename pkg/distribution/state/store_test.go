@@ -132,7 +132,7 @@ func TestPersistSuccessfulApplyRecordsBoundedCrossBOMHistory(t *testing.T) {
 		constants.DefaultRuntimeRootDir = previousRoot
 	})
 
-	for i := 0; i < maxSuccessfulRevisionHistory+2; i++ {
+	for i := range maxSuccessfulRevisionHistory + 2 {
 		ref := BOMReference{
 			Name:     "default-platform",
 			Revision: "rev-" + string(rune('a'+i)),
@@ -280,7 +280,13 @@ func TestPersistRenderedStateKeepsCleanStatusForNoopRender(t *testing.T) {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
 
-	doc, err := PersistRenderedState("cluster-a", ref, desiredStateDigest, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "local-rev-2")
+	doc, err := PersistRenderedState(
+		"cluster-a",
+		ref,
+		desiredStateDigest,
+		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"local-rev-2",
+	)
 	if err != nil {
 		t.Fatalf("PersistRenderedState() error = %v", err)
 	}
@@ -318,7 +324,13 @@ func TestPersistRenderedStatePreservesLastSuccessfulRevision(t *testing.T) {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
 
-	doc, err := PersistRenderedState("cluster-a", ref, nextDesiredDigest, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "local-rev-2")
+	doc, err := PersistRenderedState(
+		"cluster-a",
+		ref,
+		nextDesiredDigest,
+		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"local-rev-2",
+	)
 	if err != nil {
 		t.Fatalf("PersistRenderedState() error = %v", err)
 	}
@@ -435,20 +447,26 @@ func TestPersistObservedState(t *testing.T) {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
 
-	doc, updated, err := PersistObservedState("cluster-a", desiredStateDigest, StateOrphan, &ObservedSummary{
-		Total:                3,
-		Present:              2,
-		Missing:              1,
-		Matched:              1,
-		Drifted:              1,
-		Clean:                1,
-		Dirty:                1,
-		Orphan:               1,
-		MixedOwnershipObject: 1,
-		DirectCommitEligible: 1,
-		DirectRevertEligible: 2,
-		BundleMatchRequired:  2,
-	}, "global drift detected while diffing tracked objects")
+	doc, updated, err := PersistObservedState(
+		"cluster-a",
+		desiredStateDigest,
+		StateOrphan,
+		&ObservedSummary{
+			Total:                3,
+			Present:              2,
+			Missing:              1,
+			Matched:              1,
+			Drifted:              1,
+			Clean:                1,
+			Dirty:                1,
+			Orphan:               1,
+			MixedOwnershipObject: 1,
+			DirectCommitEligible: 1,
+			DirectRevertEligible: 2,
+			BundleMatchRequired:  2,
+		},
+		"global drift detected while diffing tracked objects",
+	)
 	if err != nil {
 		t.Fatalf("PersistObservedState() error = %v", err)
 	}
@@ -516,9 +534,15 @@ func TestPersistObservedStateSkipsMismatchedDigest(t *testing.T) {
 		t.Fatalf("PersistSuccessfulApply() error = %v", err)
 	}
 
-	doc, updated, err := PersistObservedState("cluster-a", "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", StateDirty, &ObservedSummary{
-		Dirty: 1,
-	}, "local drift")
+	doc, updated, err := PersistObservedState(
+		"cluster-a",
+		"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		StateDirty,
+		&ObservedSummary{
+			Dirty: 1,
+		},
+		"local drift",
+	)
 	if err != nil {
 		t.Fatalf("PersistObservedState() error = %v", err)
 	}

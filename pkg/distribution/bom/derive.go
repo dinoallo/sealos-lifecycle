@@ -15,15 +15,15 @@
 package bom
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
-
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
 )
 
 type DeriveDistributionOptions struct {
@@ -61,32 +61,32 @@ type DeriveDistributionResult struct {
 }
 
 type ArtifactReplacementResult struct {
-	PackageName string            `json:"packageName" yaml:"packageName"`
-	Before      ArtifactReference `json:"before" yaml:"before"`
-	After       ArtifactReference `json:"after" yaml:"after"`
+	PackageName string            `json:"packageName"           yaml:"packageName"`
+	Before      ArtifactReference `json:"before"                yaml:"before"`
+	After       ArtifactReference `json:"after"                 yaml:"after"`
 	VersionFrom string            `json:"versionFrom,omitempty" yaml:"versionFrom,omitempty"`
-	VersionTo   string            `json:"versionTo,omitempty" yaml:"versionTo,omitempty"`
+	VersionTo   string            `json:"versionTo,omitempty"   yaml:"versionTo,omitempty"`
 }
 
 func DeriveDistributionFile(opts DeriveDistributionOptions) (*DeriveDistributionResult, error) {
 	sourceBOMPath := strings.TrimSpace(opts.SourceBOMPath)
 	if sourceBOMPath == "" {
-		return nil, fmt.Errorf("source BOM path cannot be empty")
+		return nil, errors.New("source BOM path cannot be empty")
 	}
 	outputRoot := strings.TrimSpace(opts.OutputRoot)
 	if outputRoot == "" {
-		return nil, fmt.Errorf("output root cannot be empty")
+		return nil, errors.New("output root cannot be empty")
 	}
 	line := strings.TrimSpace(opts.Line)
 	if line == "" {
-		return nil, fmt.Errorf("derived distribution line cannot be empty")
+		return nil, errors.New("derived distribution line cannot be empty")
 	}
 	if err := validateReleaseStorePathSegment("derived distribution line", line); err != nil {
 		return nil, err
 	}
 	revision := strings.TrimSpace(opts.Revision)
 	if revision == "" {
-		return nil, fmt.Errorf("derived revision cannot be empty")
+		return nil, errors.New("derived revision cannot be empty")
 	}
 	if err := validateReleaseStorePathSegment("derived revision", revision); err != nil {
 		return nil, err
@@ -107,7 +107,12 @@ func DeriveDistributionFile(opts DeriveDistributionOptions) (*DeriveDistribution
 	derived.Metadata.Name = line
 	derived.Spec.Revision = revision
 	derived.RuntimeChannel = channel
-	derived.Metadata.Labels = mergeDerivedLabels(source.Metadata.Labels, opts.Labels, source.Metadata.Name, source.Spec.Revision)
+	derived.Metadata.Labels = mergeDerivedLabels(
+		source.Metadata.Labels,
+		opts.Labels,
+		source.Metadata.Name,
+		source.Spec.Revision,
+	)
 
 	replacements, err := applyArtifactReplacements(&derived, opts.Replacements)
 	if err != nil {
@@ -182,7 +187,10 @@ func cloneStringMap(source map[string]string) map[string]string {
 	return clone
 }
 
-func mergeDerivedLabels(source, override map[string]string, sourceLine, sourceRevision string) map[string]string {
+func mergeDerivedLabels(
+	source, override map[string]string,
+	sourceLine, sourceRevision string,
+) map[string]string {
 	labels := cloneStringMap(source)
 	if labels == nil {
 		labels = make(map[string]string)
@@ -215,9 +223,12 @@ func validateReleaseStorePathSegment(field, value string) error {
 	return nil
 }
 
-func applyArtifactReplacements(doc *BOM, replacements []ArtifactReplacement) ([]ArtifactReplacementResult, error) {
+func applyArtifactReplacements(
+	doc *BOM,
+	replacements []ArtifactReplacement,
+) ([]ArtifactReplacementResult, error) {
 	if doc == nil {
-		return nil, fmt.Errorf("BOM cannot be nil")
+		return nil, errors.New("BOM cannot be nil")
 	}
 	results := make([]ArtifactReplacementResult, 0, len(replacements))
 	seen := make(map[string]struct{}, len(replacements))
@@ -239,7 +250,11 @@ func applyArtifactReplacements(doc *BOM, replacements []ArtifactReplacement) ([]
 			}
 		}
 		if packageIndex < 0 {
-			return nil, fmt.Errorf("replacements[%d]: package %q not found in source BOM", i, packageName)
+			return nil, fmt.Errorf(
+				"replacements[%d]: package %q not found in source BOM",
+				i,
+				packageName,
+			)
 		}
 		pkg := &doc.Spec.Packages[packageIndex]
 		before := pkg.Artifact

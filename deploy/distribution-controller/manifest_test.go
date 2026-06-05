@@ -16,6 +16,7 @@ package distributioncontroller_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	distributioncontroller "github.com/labring/sealos/pkg/distribution/controller"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -32,8 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
-
-	distributioncontroller "github.com/labring/sealos/pkg/distribution/controller"
 )
 
 func TestDistributionControllerManifestsDecode(t *testing.T) {
@@ -209,10 +209,28 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 	if got, want := deployment.Spec.Template.Spec.ServiceAccountName, "sealos-distribution-controller"; got != want {
 		t.Fatalf("service account = %q, want %q", got, want)
 	}
-	assertRequiredNodeAffinity(t, deployment.Spec.Template.Spec.Affinity, "node-role.kubernetes.io/control-plane")
-	assertRequiredNodeAffinity(t, deployment.Spec.Template.Spec.Affinity, "node-role.kubernetes.io/master")
-	assertToleration(t, deployment.Spec.Template.Spec.Tolerations, "node-role.kubernetes.io/control-plane", corev1.TaintEffectNoSchedule)
-	assertToleration(t, deployment.Spec.Template.Spec.Tolerations, "node-role.kubernetes.io/master", corev1.TaintEffectNoSchedule)
+	assertRequiredNodeAffinity(
+		t,
+		deployment.Spec.Template.Spec.Affinity,
+		"node-role.kubernetes.io/control-plane",
+	)
+	assertRequiredNodeAffinity(
+		t,
+		deployment.Spec.Template.Spec.Affinity,
+		"node-role.kubernetes.io/master",
+	)
+	assertToleration(
+		t,
+		deployment.Spec.Template.Spec.Tolerations,
+		"node-role.kubernetes.io/control-plane",
+		corev1.TaintEffectNoSchedule,
+	)
+	assertToleration(
+		t,
+		deployment.Spec.Template.Spec.Tolerations,
+		"node-role.kubernetes.io/master",
+		corev1.TaintEffectNoSchedule,
+	)
 	if len(deployment.Spec.Template.Spec.Containers) != 1 {
 		t.Fatalf("container count = %d, want 1", len(deployment.Spec.Template.Spec.Containers))
 	}
@@ -231,7 +249,8 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 			t.Fatalf("container args missing %q: %v", arg, container.Args)
 		}
 	}
-	if container.SecurityContext == nil || container.SecurityContext.Privileged == nil || !*container.SecurityContext.Privileged {
+	if container.SecurityContext == nil || container.SecurityContext.Privileged == nil ||
+		!*container.SecurityContext.Privileged {
 		t.Fatal("controller container must be privileged for host apply steps")
 	}
 	volumeMounts := map[string]string{}
@@ -289,7 +308,10 @@ func TestDistributionControllerProductionHostAgentOverlay(t *testing.T) {
 		t.Fatalf("priorityClassName = %q, want %q", got, want)
 	}
 	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
-		t.Fatalf("init container count = %d, want 1", len(deployment.Spec.Template.Spec.InitContainers))
+		t.Fatalf(
+			"init container count = %d, want 1",
+			len(deployment.Spec.Template.Spec.InitContainers),
+		)
 	}
 	initContainer := deployment.Spec.Template.Spec.InitContainers[0]
 	if got, want := initContainer.Name, "host-tool-preflight"; got != want {
@@ -314,17 +336,34 @@ func TestDistributionControllerProductionHostAgentOverlay(t *testing.T) {
 	if got, want := container.ImagePullPolicy, corev1.PullAlways; got != want {
 		t.Fatalf("controller imagePullPolicy = %q, want %q", got, want)
 	}
-	if !envVarEquals(container.Env, "SEALOS_DISTRIBUTION_CONTROLLER_PROFILE", "production-host-agent") {
+	if !envVarEquals(
+		container.Env,
+		"SEALOS_DISTRIBUTION_CONTROLLER_PROFILE",
+		"production-host-agent",
+	) {
 		t.Fatalf("controller profile env missing: %v", container.Env)
 	}
-	if container.Resources.Requests.Cpu().IsZero() || container.Resources.Requests.Memory().IsZero() {
+	if container.Resources.Requests.Cpu().IsZero() ||
+		container.Resources.Requests.Memory().IsZero() {
 		t.Fatalf("controller resource requests must be set: %#v", container.Resources)
 	}
 	if container.Resources.Limits.Cpu().IsZero() || container.Resources.Limits.Memory().IsZero() {
 		t.Fatalf("controller resource limits must be set: %#v", container.Resources)
 	}
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets", "distributionrolloutpolicies"}, []string{"get", "list", "watch"})
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets/status"}, []string{"get", "patch", "update"})
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets", "distributionrolloutpolicies"},
+		[]string{"get", "list", "watch"},
+	)
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets/status"},
+		[]string{"get", "patch", "update"},
+	)
 	if grantsClusterWideWrites(role.Rules) {
 		t.Fatalf("production overlay RBAC grants unexpected broad writes: %#v", role.Rules)
 	}
@@ -516,9 +555,27 @@ func TestDistributionControllerRBACContract(t *testing.T) {
 		t.Fatal("Role not found")
 	}
 
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets", "distributionrolloutpolicies"}, []string{"get", "list", "watch"})
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets/status"}, []string{"get", "patch", "update"})
-	assertRule(t, role.Rules, []string{"coordination.k8s.io"}, []string{"leases"}, []string{"create", "get", "list", "update", "watch"})
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets", "distributionrolloutpolicies"},
+		[]string{"get", "list", "watch"},
+	)
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets/status"},
+		[]string{"get", "patch", "update"},
+	)
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"coordination.k8s.io"},
+		[]string{"leases"},
+		[]string{"create", "get", "list", "update", "watch"},
+	)
 	assertRule(t, role.Rules, []string{""}, []string{"events"}, []string{"create", "patch"})
 }
 
@@ -556,7 +613,10 @@ func loadManifestObjects(t *testing.T, paths ...string) []runtime.Object {
 	decoder := newManifestDecoder(t)
 	objects := make([]runtime.Object, 0)
 	for _, relPath := range paths {
-		yamlDecoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(readManifest(t, relPath)), 4096)
+		yamlDecoder := utilyaml.NewYAMLOrJSONDecoder(
+			bytes.NewReader(readManifest(t, relPath)),
+			4096,
+		)
 		for {
 			var raw runtime.RawExtension
 			err := yamlDecoder.Decode(&raw)
@@ -605,7 +665,7 @@ func decodeManifestObjects(t *testing.T, label string, data []byte) []runtime.Ob
 	for {
 		var raw runtime.RawExtension
 		err := yamlDecoder.Decode(&raw)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -652,7 +712,11 @@ func newManifestDecoder(t *testing.T) runtime.Decoder {
 	return serializer.NewCodecFactory(scheme).UniversalDeserializer()
 }
 
-func crdVersion(t *testing.T, crd apiextensionsv1.CustomResourceDefinition, name string) apiextensionsv1.CustomResourceDefinitionVersion {
+func crdVersion(
+	t *testing.T,
+	crd apiextensionsv1.CustomResourceDefinition,
+	name string,
+) apiextensionsv1.CustomResourceDefinitionVersion {
 	t.Helper()
 
 	for _, version := range crd.Spec.Versions {
@@ -744,14 +808,25 @@ func assertRule(t *testing.T, rules []rbacv1.PolicyRule, apiGroups, resources, v
 			return
 		}
 	}
-	t.Fatalf("RBAC rule not found for apiGroups=%v resources=%v verbs=%v", apiGroups, resources, verbs)
+	t.Fatalf(
+		"RBAC rule not found for apiGroups=%v resources=%v verbs=%v",
+		apiGroups,
+		resources,
+		verbs,
+	)
 }
 
-func assertToleration(t *testing.T, tolerations []corev1.Toleration, key string, effect corev1.TaintEffect) {
+func assertToleration(
+	t *testing.T,
+	tolerations []corev1.Toleration,
+	key string,
+	effect corev1.TaintEffect,
+) {
 	t.Helper()
 
 	for _, toleration := range tolerations {
-		if toleration.Key == key && toleration.Operator == corev1.TolerationOpExists && toleration.Effect == effect {
+		if toleration.Key == key && toleration.Operator == corev1.TolerationOpExists &&
+			toleration.Effect == effect {
 			return
 		}
 	}

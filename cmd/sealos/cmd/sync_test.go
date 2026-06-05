@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http/httptest"
@@ -26,9 +27,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/opencontainers/go-digest"
-	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/constants"
@@ -45,6 +43,8 @@ import (
 	"github.com/labring/sealos/pkg/distribution/state"
 	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
+	"sigs.k8s.io/yaml"
 )
 
 func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
@@ -110,7 +110,10 @@ func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
 		t.Fatal("preflight.summary is empty")
 	}
 	if !strings.Contains(out.Preflight.RefreshCommand, "'sealos' 'sync' 'render'") {
-		t.Fatalf("preflight.refreshCommand = %q, want sync render command", out.Preflight.RefreshCommand)
+		t.Fatalf(
+			"preflight.refreshCommand = %q, want sync render command",
+			out.Preflight.RefreshCommand,
+		)
 	}
 	if got, want := out.Preflight.TopologyStatus.State, syncTopologyStateMatched; got != want {
 		t.Fatalf("preflight.topologyStatus.state = %q, want %q", got, want)
@@ -131,7 +134,10 @@ func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
 		t.Fatalf("renderProvenance.bomPath = %q, want %q", got, want)
 	}
 	if !strings.HasPrefix(out.RenderProvenance.BOMDigest, "sha256:") {
-		t.Fatalf("renderProvenance.bomDigest = %q, want sha256 digest", out.RenderProvenance.BOMDigest)
+		t.Fatalf(
+			"renderProvenance.bomDigest = %q, want sha256 digest",
+			out.RenderProvenance.BOMDigest,
+		)
 	}
 	if got, want := out.RenderProvenance.LocalPatchRevision, "local-rev-1"; got != want {
 		t.Fatalf("renderProvenance.localPatchRevision = %q, want %q", got, want)
@@ -150,7 +156,10 @@ func TestSyncRenderCmdWithLocalPackageSource(t *testing.T) {
 		t.Fatalf("renderProvenance.packageSources[0].path = %q, want %q", got, want)
 	}
 	if !strings.HasPrefix(out.RenderProvenance.PackageSources[0].Digest, "sha256:") {
-		t.Fatalf("renderProvenance.packageSources[0].digest = %q, want sha256 digest", out.RenderProvenance.PackageSources[0].Digest)
+		t.Fatalf(
+			"renderProvenance.packageSources[0].digest = %q, want sha256 digest",
+			out.RenderProvenance.PackageSources[0].Digest,
+		)
 	}
 	loadedBundle, err := reconcile.LoadBundle(out.BundlePath)
 	if err != nil {
@@ -198,7 +207,13 @@ func TestSyncRenderCmdWithReleaseChannelDocument(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(filepath.Dir(bomPath), "channel.yaml")
-	channel := bom.NewReleaseChannel("test-platform-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "bom.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		doc.Metadata.Name,
+		bom.ChannelStable,
+		doc.Spec.Revision,
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -237,7 +252,10 @@ func TestSyncRenderCmdWithReleaseChannelDocument(t *testing.T) {
 		t.Fatalf("renderProvenance.distributionLine = %q, want %q", got, want)
 	}
 	if !strings.HasPrefix(out.RenderProvenance.ReleaseChannelDigest, "sha256:") {
-		t.Fatalf("renderProvenance.releaseChannelDigest = %q, want sha256 digest", out.RenderProvenance.ReleaseChannelDigest)
+		t.Fatalf(
+			"renderProvenance.releaseChannelDigest = %q, want sha256 digest",
+			out.RenderProvenance.ReleaseChannelDigest,
+		)
 	}
 	if out.SourcePreflight == nil {
 		t.Fatal("sourcePreflight = nil, want source preflight output")
@@ -246,7 +264,10 @@ func TestSyncRenderCmdWithReleaseChannelDocument(t *testing.T) {
 		t.Fatalf("sourcePreflight.releaseChannelPath = %q, want %q", got, want)
 	}
 	if !strings.Contains(out.SourcePreflight.RenderCommand, "--release-channel") {
-		t.Fatalf("sourcePreflight.renderCommand = %q, want --release-channel", out.SourcePreflight.RenderCommand)
+		t.Fatalf(
+			"sourcePreflight.renderCommand = %q, want --release-channel",
+			out.SourcePreflight.RenderCommand,
+		)
 	}
 
 	loadedBundle, err := reconcile.LoadBundle(out.BundlePath)
@@ -286,7 +307,13 @@ func TestSyncRenderCmdWithReleaseChannelLookup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "../boms/rev-20240423.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		doc.Metadata.Name,
+		bom.ChannelStable,
+		doc.Spec.Revision,
+		"../boms/rev-20240423.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(bomData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -361,13 +388,20 @@ func TestSyncRenderCmdWithReleaseChannelLookup(t *testing.T) {
 		t.Fatal("applied.spec.resolvedTarget.releaseChannel = nil, want value")
 	}
 	if got, want := applied.Spec.ResolvedTarget.ReleaseChannel.TargetRevision, doc.Spec.Revision; got != want {
-		t.Fatalf("applied.spec.resolvedTarget.releaseChannel.targetRevision = %q, want %q", got, want)
+		t.Fatalf(
+			"applied.spec.resolvedTarget.releaseChannel.targetRevision = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if out.SourcePreflight == nil {
 		t.Fatal("sourcePreflight = nil, want source preflight output")
 	}
 	if !strings.Contains(out.SourcePreflight.RenderCommand, "--release-source") {
-		t.Fatalf("sourcePreflight.renderCommand = %q, want --release-source", out.SourcePreflight.RenderCommand)
+		t.Fatalf(
+			"sourcePreflight.renderCommand = %q, want --release-source",
+			out.SourcePreflight.RenderCommand,
+		)
 	}
 }
 
@@ -396,7 +430,13 @@ func TestSyncRenderCmdWithReleaseMetadataServiceLookup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", doc.Metadata.Name, bom.ChannelStable, doc.Spec.Revision, "../../releases/"+doc.Metadata.Name+"/"+doc.Spec.Revision+"/bom.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		doc.Metadata.Name,
+		bom.ChannelStable,
+		doc.Spec.Revision,
+		"../../releases/"+doc.Metadata.Name+"/"+doc.Spec.Revision+"/bom.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(bomData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -451,7 +491,13 @@ func TestSyncRenderCmdRejectsAmbiguousTarget(t *testing.T) {
 	}
 	channelPath := filepath.Join(filepath.Dir(bomPath), "channel.yaml")
 	doc := testSyncBOM()
-	channel := bom.NewReleaseChannel("test-platform-alpha", doc.Metadata.Name, bom.ChannelAlpha, doc.Spec.Revision, "bom.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-alpha",
+		doc.Metadata.Name,
+		bom.ChannelAlpha,
+		doc.Spec.Revision,
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -493,13 +539,26 @@ func TestSyncPromoteCmd(t *testing.T) {
 	}
 	targetBOMDigest := digest.Canonical.FromBytes(targetBOMData).String()
 	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
-	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof := bom.NewDistributionHealthProof(
+		"test-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
 	healthProof.Spec.Summary = "beta cohort passed"
-	healthProof.Spec.Signals = []bom.DistributionHealthSignal{{Name: "node-readiness", Passed: true}}
+	healthProof.Spec.Signals = []bom.DistributionHealthSignal{
+		{Name: "node-readiness", Passed: true},
+	}
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, oldBOM.Spec.Revision, "../boms/rev-20240423.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		targetBOM.Metadata.Name,
+		bom.ChannelStable,
+		oldBOM.Spec.Revision,
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -565,7 +624,10 @@ func TestSyncPromoteCmd(t *testing.T) {
 		t.Fatalf("promotion.healthProofSummary = %q, want %q", got, want)
 	}
 	if !strings.HasPrefix(out.Promotion.HealthProofDigest, "sha256:") {
-		t.Fatalf("promotion.healthProofDigest = %q, want sha256 digest", out.Promotion.HealthProofDigest)
+		t.Fatalf(
+			"promotion.healthProofDigest = %q, want sha256 digest",
+			out.Promotion.HealthProofDigest,
+		)
 	}
 	if out.PolicyDecision == nil {
 		t.Fatal("policyDecision = nil, want promotion policy decision")
@@ -746,7 +808,11 @@ func TestSyncDeriveCmdRejectsInvalidReplacement(t *testing.T) {
 
 func TestSyncPackageCacheListAndGC(t *testing.T) {
 	cacheRoot := filepath.Join(t.TempDir(), "package-cache")
-	validPath := filepath.Join(cacheRoot, "sha256", "2222222222222222222222222222222222222222222222222222222222222222")
+	validPath := filepath.Join(
+		cacheRoot,
+		"sha256",
+		"2222222222222222222222222222222222222222222222222222222222222222",
+	)
 	writeSyncTestPackage(t, validPath)
 	invalidPath := filepath.Join(cacheRoot, "ref", "stale")
 	writeSyncTestFile(t, filepath.Join(invalidPath, "README"), "invalid cache entry\n", 0o644)
@@ -836,11 +902,22 @@ func TestSyncPromoteCmdRejectsFailedHealthProof(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		targetBOM.Metadata.Name,
+		bom.ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, false)
+	healthProof := bom.NewDistributionHealthProof(
+		"test-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		false,
+	)
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
@@ -874,11 +951,22 @@ func TestSyncPromoteCmdRejectsEmptyHealthProofSignals(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		targetBOM.Metadata.Name,
+		bom.ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof := bom.NewDistributionHealthProof(
+		"test-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
@@ -911,7 +999,13 @@ func TestSyncPromoteCmdRejectsMissingHealthProofForStable(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		targetBOM.Metadata.Name,
+		bom.ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -944,12 +1038,25 @@ func TestSyncPromoteCmdRejectsAlphaCandidateForStable(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", targetBOM.Metadata.Name, bom.ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		targetBOM.Metadata.Name,
+		bom.ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := bom.NewDistributionHealthProof("test-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
-	healthProof.Spec.Signals = []bom.DistributionHealthSignal{{Name: "node-readiness", Passed: true}}
+	healthProof := bom.NewDistributionHealthProof(
+		"test-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
+	healthProof.Spec.Signals = []bom.DistributionHealthSignal{
+		{Name: "node-readiness", Passed: true},
+	}
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
@@ -1482,7 +1589,9 @@ func TestSyncHealthProofCmdFailsWhenContractStageMissing(t *testing.T) {
 		SourcePreflightState:  "Ready",
 		RuntimePreflightState: "Ready",
 		PostApplyState:        "Clean",
-		Stages:                []syncHealthProofAcceptanceReportStage{{Name: "apply", Status: "Passed", Mutates: true}},
+		Stages: []syncHealthProofAcceptanceReportStage{
+			{Name: "apply", Status: "Passed", Mutates: true},
+		},
 	})
 
 	buf := bytes.NewBuffer(nil)
@@ -1972,7 +2081,13 @@ func TestSyncApplyCmdDelegatesMultiNodeBundleToApplyEngine(t *testing.T) {
 	if got, want := out.BOMName, "multi-node-cli"; got != want {
 		t.Fatalf("out.BOMName = %q, want %q", got, want)
 	}
-	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(
+		got,
+		"\n",
+	) != strings.Join(
+		want,
+		"\n",
+	) {
 		t.Fatalf("out.Warnings = %#v, want %#v", got, want)
 	}
 }
@@ -2154,7 +2269,13 @@ func TestSyncPlanCmdSummarizesTargetsAndRedactsSecretContent(t *testing.T) {
 	if got, want := out.Preflight.State, syncPreflightStateWarning; got != want {
 		t.Fatalf("preflight.state = %q, want %q", got, want)
 	}
-	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(
+		got,
+		"\n",
+	) != strings.Join(
+		want,
+		"\n",
+	) {
 		t.Fatalf("warnings = %#v, want %#v", got, want)
 	}
 	if got, want := out.ExecutionTopology.FirstMaster, "10.0.0.10:22"; got != want {
@@ -2199,7 +2320,10 @@ func TestSyncPlanCmdSummarizesTargetsAndRedactsSecretContent(t *testing.T) {
 	if got, want := len(out.TrackedHostPathSet), 2; got != want {
 		t.Fatalf("len(trackedHostPathSets) = %d, want %d: %#v", got, want, out.TrackedHostPathSet)
 	}
-	generated := syncPlanHostPathSetByProjection(out.TrackedHostPathSet, string(hydrate.HostPathProjectionClassGenerated))
+	generated := syncPlanHostPathSetByProjection(
+		out.TrackedHostPathSet,
+		string(hydrate.HostPathProjectionClassGenerated),
+	)
 	if generated == nil {
 		t.Fatalf("generated tracked host path set missing: %#v", out.TrackedHostPathSet)
 	}
@@ -2400,7 +2524,10 @@ func TestSyncLocalRepoInitCmdCreatesValidSkeleton(t *testing.T) {
 
 	packageRoot := filepath.Join(t.TempDir(), "runtime-rootfs")
 	writeSyncTestPackage(t, packageRoot)
-	writeSyncTestFile(t, filepath.Join(packageRoot, "package.yaml"), `apiVersion: distribution.sealos.io/v1alpha1
+	writeSyncTestFile(
+		t,
+		filepath.Join(packageRoot, "package.yaml"),
+		`apiVersion: distribution.sealos.io/v1alpha1
 kind: ComponentPackage
 metadata:
   name: runtime-rootfs
@@ -2437,8 +2564,15 @@ spec:
       target: allNodes
       path: hooks/bootstrap.sh
       timeoutSeconds: 5
-`, 0o644)
-	writeSyncTestFile(t, filepath.Join(packageRoot, "files", "etc", "demo", "admin-password.txt"), "package-default-password\n", 0o600)
+`,
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(packageRoot, "files", "etc", "demo", "admin-password.txt"),
+		"package-default-password\n",
+		0o600,
+	)
 
 	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
 	if err := yamlutil.MarshalFile(bomPath, syncLifecycleBOM()); err != nil {
@@ -2495,10 +2629,17 @@ spec:
 	if _, err := os.Stat(filepath.Join(localRepoRoot, "resources", "secrets")); err != nil {
 		t.Fatalf("resources/secrets dir missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(localRepoRoot, "resources", "secrets", "README.md")); !os.IsNotExist(err) {
-		t.Fatalf("resources/secrets/README.md stat error = %v, want not exist so localrepo.Load does not treat it as a resource", err)
+	if _, err := os.Stat(filepath.Join(localRepoRoot, "resources", "secrets", "README.md")); !os.IsNotExist(
+		err,
+	) {
+		t.Fatalf(
+			"resources/secrets/README.md stat error = %v, want not exist so localrepo.Load does not treat it as a resource",
+			err,
+		)
 	}
-	secretInfo, err := os.Stat(filepath.Join(localRepoRoot, "inputs", "runtime", "admin-password.txt"))
+	secretInfo, err := os.Stat(
+		filepath.Join(localRepoRoot, "inputs", "runtime", "admin-password.txt"),
+	)
 	if err != nil {
 		t.Fatalf("Stat(admin-password input) error = %v", err)
 	}
@@ -2510,14 +2651,20 @@ spec:
 	if err != nil {
 		t.Fatalf("localrepo.Load() error = %v", err)
 	}
-	runtimeConfigBinding, ok := repo.BindingFor("runtime", packageformat.Input{Name: "runtime-config"})
+	runtimeConfigBinding, ok := repo.BindingFor(
+		"runtime",
+		packageformat.Input{Name: "runtime-config"},
+	)
 	if !ok {
 		t.Fatal("runtime-config binding missing")
 	}
 	if got, want := filepath.ToSlash(runtimeConfigBinding), filepath.ToSlash(filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml")); got != want {
 		t.Fatalf("runtime-config binding = %q, want %q", got, want)
 	}
-	adminPasswordBinding, ok := repo.BindingFor("runtime", packageformat.Input{Name: "admin-password"})
+	adminPasswordBinding, ok := repo.BindingFor(
+		"runtime",
+		packageformat.Input{Name: "admin-password"},
+	)
 	if !ok {
 		t.Fatal("admin-password binding missing")
 	}
@@ -2586,7 +2733,9 @@ spec:
 	if got := second.Summary.SkippedFiles; got == 0 {
 		t.Fatalf("second summary.skippedFiles = %d, want existing files skipped", got)
 	}
-	data, err := os.ReadFile(filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"))
+	data, err := os.ReadFile(
+		filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"),
+	)
 	if err != nil {
 		t.Fatalf("ReadFile(runtime-config after second init) error = %v", err)
 	}
@@ -2621,7 +2770,10 @@ func TestSyncLocalRepoDoctorCmdReportsLocalRepoIssues(t *testing.T) {
 
 	packageRoot := filepath.Join(t.TempDir(), "runtime-rootfs")
 	writeSyncTestPackage(t, packageRoot)
-	writeSyncTestFile(t, filepath.Join(packageRoot, "package.yaml"), `apiVersion: distribution.sealos.io/v1alpha1
+	writeSyncTestFile(
+		t,
+		filepath.Join(packageRoot, "package.yaml"),
+		`apiVersion: distribution.sealos.io/v1alpha1
 kind: ComponentPackage
 metadata:
   name: runtime-rootfs
@@ -2658,8 +2810,15 @@ spec:
       target: allNodes
       path: hooks/bootstrap.sh
       timeoutSeconds: 5
-`, 0o644)
-	writeSyncTestFile(t, filepath.Join(packageRoot, "files", "etc", "demo", "admin-password.txt"), "package-default-password\n", 0o600)
+`,
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(packageRoot, "files", "etc", "demo", "admin-password.txt"),
+		"package-default-password\n",
+		0o600,
+	)
 
 	bomPath := filepath.Join(t.TempDir(), "bom.yaml")
 	if err := yamlutil.MarshalFile(bomPath, syncLifecycleBOM()); err != nil {
@@ -2672,16 +2831,38 @@ spec:
 		Type:      string(packageformat.InputConfigFile),
 		Format:    "yaml",
 		Required:  true,
-		Path:      filepath.ToSlash(filepath.Join(localrepo.InputsDirName, "runtime", "runtime-config.yaml")),
+		Path: filepath.ToSlash(
+			filepath.Join(localrepo.InputsDirName, "runtime", "runtime-config.yaml"),
+		),
 	}
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"), syncLocalRepoInputTemplate(placeholderInput), 0o644)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "inputs", "runtime", "admin-password.txt"), "super-secret-password\n", 0o644)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "resources", "secrets", "grafana-admin-secret.yaml"), `apiVersion: v1
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"),
+		syncLocalRepoInputTemplate(placeholderInput),
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "inputs", "runtime", "admin-password.txt"),
+		"super-secret-password\n",
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "resources", "secrets", "grafana-admin-secret.yaml"),
+		`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-admin
-`, 0o644)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "resources", "notes.txt"), "operator note\n", 0o644)
+`,
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "resources", "notes.txt"),
+		"operator note\n",
+		0o644,
+	)
 	if err := os.MkdirAll(filepath.Join(localRepoRoot, "inputs", "old-component"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(stale inputs) error = %v", err)
 	}
@@ -2701,7 +2882,10 @@ metadata:
 		"--output", "yaml",
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("local-repo doctor Execute() error = nil, want blocking issues\noutput=%s", buf.String())
+		t.Fatalf(
+			"local-repo doctor Execute() error = nil, want blocking issues\noutput=%s",
+			buf.String(),
+		)
 	}
 	if strings.Contains(buf.String(), "super-secret-password") {
 		t.Fatalf("doctor output leaked secret input content:\n%s", buf.String())
@@ -2755,15 +2939,33 @@ func TestSyncLocalRepoDoctorAcceptsSecretReferencesAndRedactsPayloads(t *testing
 	}
 
 	localRepoRoot := filepath.Join(t.TempDir(), "local-repo")
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"), "clusterName: test\n", 0o644)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "resources", "secrets", "grafana-admin-direct-secret.yaml"), `apiVersion: v1
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"),
+		"clusterName: test\n",
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "resources", "secrets", "grafana-admin-direct-secret.yaml"),
+		`apiVersion: v1
 kind: Secret
 metadata:
   name: grafana-admin-direct
 stringData:
   password: direct-secret-value
-`, 0o600)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "resources", "external-secrets", "grafana-admin-external-secret.yaml"), `apiVersion: external-secrets.io/v1beta1
+`,
+		0o600,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(
+			localRepoRoot,
+			"resources",
+			"external-secrets",
+			"grafana-admin-external-secret.yaml",
+		),
+		`apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
   name: grafana-admin-external
@@ -2773,8 +2975,15 @@ spec:
       remoteRef:
         key: grafana/admin-password
         property: password
-`, 0o600)
-	secretProviderClassPath := filepath.Join(localRepoRoot, "resources", "secrets", "grafana-vault-secretproviderclass.yaml")
+`,
+		0o600,
+	)
+	secretProviderClassPath := filepath.Join(
+		localRepoRoot,
+		"resources",
+		"secrets",
+		"grafana-vault-secretproviderclass.yaml",
+	)
 	writeSyncTestFile(t, secretProviderClassPath, `apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
@@ -2810,7 +3019,12 @@ spec:
 	codes := syncLocalRepoDoctorIssueCodeSet(doctorOut.Issues)
 	for _, code := range []string{"secretResourceKindInvalid", "secretResourceModeTooOpen"} {
 		if _, ok := codes[code]; ok {
-			t.Fatalf("doctor issue code %q present, want absent; codes=%#v output=%#v", code, codes, doctorOut)
+			t.Fatalf(
+				"doctor issue code %q present, want absent; codes=%#v output=%#v",
+				code,
+				codes,
+				doctorOut,
+			)
 		}
 	}
 
@@ -2823,7 +3037,10 @@ spec:
 		PackageSources: []string{"runtime=" + packageRoot},
 	})
 	if doctorOut.Passed {
-		t.Fatalf("doctor passed = true, want false for too-open SecretProviderClass; output=%#v", doctorOut)
+		t.Fatalf(
+			"doctor passed = true, want false for too-open SecretProviderClass; output=%#v",
+			doctorOut,
+		)
 	}
 	doctorPayload, err = yaml.Marshal(doctorOut)
 	if err != nil {
@@ -2837,10 +3054,18 @@ spec:
 	)
 	codes = syncLocalRepoDoctorIssueCodeSet(doctorOut.Issues)
 	if _, ok := codes["secretResourceModeTooOpen"]; !ok {
-		t.Fatalf("doctor issue code secretResourceModeTooOpen missing; codes=%#v output=%#v", codes, doctorOut)
+		t.Fatalf(
+			"doctor issue code secretResourceModeTooOpen missing; codes=%#v output=%#v",
+			codes,
+			doctorOut,
+		)
 	}
 	if _, ok := codes["secretResourceKindInvalid"]; ok {
-		t.Fatalf("doctor issue code secretResourceKindInvalid present, want absent; codes=%#v output=%#v", codes, doctorOut)
+		t.Fatalf(
+			"doctor issue code secretResourceKindInvalid present, want absent; codes=%#v output=%#v",
+			codes,
+			doctorOut,
+		)
 	}
 }
 
@@ -2938,7 +3163,11 @@ func TestSyncApplyCmdReportsStaleTopologySnapshot(t *testing.T) {
 		"--runtime-root", runtimeRoot,
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("Execute() error = nil, want stale preflight error\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"Execute() error = nil, want stale preflight error\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	if got, want := applyCalls, 0; got != want {
 		t.Fatalf("runSyncApply calls = %d, want %d", got, want)
@@ -3021,7 +3250,12 @@ func TestSyncApplyCmdReportsStaleTopologySnapshot(t *testing.T) {
 		"--allow-stale-render-inputs",
 	})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() with allow stale error = %v\nstdout=%s\nstderr=%s", err, buf.String(), errBuf.String())
+		t.Fatalf(
+			"Execute() with allow stale error = %v\nstdout=%s\nstderr=%s",
+			err,
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	if got, want := applyCalls, 1; got != want {
 		t.Fatalf("runSyncApply calls after allow stale = %d, want %d", got, want)
@@ -3107,7 +3341,11 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 		"--runtime-root", runtimeRoot,
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("preflight Execute() error = nil, want blocked error\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"preflight Execute() error = nil, want blocked error\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	var out syncPreflightOutput
 	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -3152,7 +3390,12 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 		"--allow-stale-render-inputs",
 	})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("preflight Execute() with allow stale error = %v\nstdout=%s\nstderr=%s", err, buf.String(), errBuf.String())
+		t.Fatalf(
+			"preflight Execute() with allow stale error = %v\nstdout=%s\nstderr=%s",
+			err,
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	var allowedOut syncPreflightOutput
 	if err := yaml.Unmarshal(buf.Bytes(), &allowedOut); err != nil {
@@ -3180,7 +3423,11 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 			HostRoot:       syncRuntimeHostRoot(opts.HostRoot),
 			KubeconfigPath: opts.KubeconfigPath,
 		}
-		out.addCheck("privileges", syncRuntimePreflightCheckBlocked, "sync apply must run as root when mutating the real host root")
+		out.addCheck(
+			"privileges",
+			syncRuntimePreflightCheckBlocked,
+			"sync apply must run as root when mutating the real host root",
+		)
 		out.finalize()
 		return out
 	}
@@ -3202,7 +3449,11 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 		"--allow-stale-render-inputs",
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("preflight Execute() with runtime block error = nil, want error\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"preflight Execute() with runtime block error = nil, want error\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	var runtimeBlockedOut syncPreflightOutput
 	if err := yaml.Unmarshal(buf.Bytes(), &runtimeBlockedOut); err != nil {
@@ -3217,7 +3468,10 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 	if got, want := runtimeBlockedOut.RecommendedAction, syncPreflightRecommendedActionRerender; got != want {
 		t.Fatalf("runtime blocked recommendedAction = %q, want %q", got, want)
 	}
-	if got := strings.Join(runtimeBlockedOut.BlockedReasons, "\n"); !strings.Contains(got, "sync apply must run as root") {
+	if got := strings.Join(runtimeBlockedOut.BlockedReasons, "\n"); !strings.Contains(
+		got,
+		"sync apply must run as root",
+	) {
 		t.Fatalf("blockedReasons = %#v, want runtime reason", runtimeBlockedOut.BlockedReasons)
 	}
 
@@ -3237,7 +3491,12 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 		"--output", "json",
 	})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("preflight Execute() json error = %v\nstdout=%s\nstderr=%s", err, buf.String(), errBuf.String())
+		t.Fatalf(
+			"preflight Execute() json error = %v\nstdout=%s\nstderr=%s",
+			err,
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	var jsonOut struct {
 		ClusterName       string `json:"clusterName"`
@@ -3288,7 +3547,11 @@ func TestSyncPreflightCmdReportsApplyGateStatus(t *testing.T) {
 		"--output", "xml",
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("preflight Execute() invalid output error = nil, want error\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"preflight Execute() invalid output error = nil, want error\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	if got := buf.String(); got != "" {
 		t.Fatalf("invalid output stdout = %q, want empty", got)
@@ -3326,7 +3589,12 @@ func TestSyncPreflightCmdReportsSourceReadiness(t *testing.T) {
 			content = "cluster-local-password\n"
 			mode = 0o600
 		}
-		writeSyncTestFile(t, filepath.Join(localRepoRoot, filepath.FromSlash(input.Path)), content, mode)
+		writeSyncTestFile(
+			t,
+			filepath.Join(localRepoRoot, filepath.FromSlash(input.Path)),
+			content,
+			mode,
+		)
 	}
 
 	buf := bytes.NewBuffer(nil)
@@ -3343,7 +3611,12 @@ func TestSyncPreflightCmdReportsSourceReadiness(t *testing.T) {
 		"--output", "yaml",
 	})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("source preflight Execute() error = %v\nstdout=%s\nstderr=%s", err, buf.String(), errBuf.String())
+		t.Fatalf(
+			"source preflight Execute() error = %v\nstdout=%s\nstderr=%s",
+			err,
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 
 	var out syncSourcePreflightOutput
@@ -3394,14 +3667,21 @@ func TestSyncPreflightCmdBlocksSourceReadinessFailures(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	localRepoRoot := filepath.Join(t.TempDir(), "local-repo")
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"), syncLocalRepoInputTemplate(syncLocalRepoInitInput{
-		Component: "runtime",
-		Name:      "runtime-config",
-		Type:      string(packageformat.InputConfigFile),
-		Format:    "yaml",
-		Required:  true,
-		Path:      filepath.ToSlash(filepath.Join(localrepo.InputsDirName, "runtime", "runtime-config.yaml")),
-	}), 0o644)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"),
+		syncLocalRepoInputTemplate(syncLocalRepoInitInput{
+			Component: "runtime",
+			Name:      "runtime-config",
+			Type:      string(packageformat.InputConfigFile),
+			Format:    "yaml",
+			Required:  true,
+			Path: filepath.ToSlash(
+				filepath.Join(localrepo.InputsDirName, "runtime", "runtime-config.yaml"),
+			),
+		}),
+		0o644,
+	)
 
 	buf := bytes.NewBuffer(nil)
 	errBuf := bytes.NewBuffer(nil)
@@ -3415,7 +3695,11 @@ func TestSyncPreflightCmdBlocksSourceReadinessFailures(t *testing.T) {
 		"--local-repo", localRepoRoot,
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("source preflight Execute() error = nil, want blocking issues\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"source preflight Execute() error = nil, want blocking issues\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 
 	var out syncSourcePreflightOutput
@@ -3435,7 +3719,10 @@ func TestSyncPreflightCmdBlocksSourceReadinessFailures(t *testing.T) {
 		t.Fatalf("source preflight doctorErrors = 0, want blocking doctor issues; output=%#v", out)
 	}
 	if out.Counts.ValidateErrors == 0 {
-		t.Fatalf("source preflight validateErrors = 0, want blocking validate issues; output=%#v", out)
+		t.Fatalf(
+			"source preflight validateErrors = 0, want blocking validate issues; output=%#v",
+			out,
+		)
 	}
 	if !strings.Contains(errBuf.String(), "sync source preflight blocked") {
 		t.Fatalf("stderr = %q, want source preflight blocked error", errBuf.String())
@@ -3467,7 +3754,11 @@ func TestSyncPreflightCmdHandlesSourceModeWithoutLocalRepo(t *testing.T) {
 		"--package-source", "runtime=" + packageRoot,
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("source preflight without local repo error = nil, want required input failure\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"source preflight without local repo error = nil, want required input failure\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 
 	var out syncSourcePreflightOutput
@@ -3497,7 +3788,11 @@ func TestSyncPreflightCmdRejectsMixedSourceAndBundleModes(t *testing.T) {
 		"--bundle-dir", t.TempDir(),
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("preflight mixed mode error = nil, want error\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"preflight mixed mode error = nil, want error\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 	if got := buf.String(); got != "" {
 		t.Fatalf("preflight mixed mode stdout = %q, want empty", got)
@@ -3546,10 +3841,16 @@ func TestSyncRuntimePreflightReportsCustomHostRootWarnings(t *testing.T) {
 		t.Fatalf("runtime preflight state = %q, want %q", got, want)
 	}
 	if out.Counts.Warnings == 0 {
-		t.Fatalf("runtime preflight warnings = 0, want existing state warnings; checks=%#v", out.Checks)
+		t.Fatalf(
+			"runtime preflight warnings = 0, want existing state warnings; checks=%#v",
+			out.Checks,
+		)
 	}
 	if out.Counts.Skipped == 0 {
-		t.Fatalf("runtime preflight skipped = 0, want live checks skipped for custom host root; checks=%#v", out.Checks)
+		t.Fatalf(
+			"runtime preflight skipped = 0, want live checks skipped for custom host root; checks=%#v",
+			out.Checks,
+		)
 	}
 	if !syncRuntimePreflightHasCheck(out, "kubernetes-state", syncRuntimePreflightCheckWarning) {
 		t.Fatalf("runtime checks = %#v, want kubernetes-state warning", out.Checks)
@@ -3623,7 +3924,12 @@ func TestSyncTopologyStatusForBundle(t *testing.T) {
 		},
 	}
 	if status := syncTopologyStatusForBundle(clusterName, matchedBundle); status.State != syncTopologyStateMatched {
-		t.Fatalf("matched status = %q, want %q; message=%s", status.State, syncTopologyStateMatched, status.Message)
+		t.Fatalf(
+			"matched status = %q, want %q; message=%s",
+			status.State,
+			syncTopologyStateMatched,
+			status.Message,
+		)
 	}
 
 	staleBundle := &hydrate.Bundle{
@@ -3652,7 +3958,11 @@ func TestSyncTopologyStatusForBundle(t *testing.T) {
 	}
 }
 
-func syncRuntimePreflightHasCheck(out syncRuntimePreflightOutput, name string, state syncRuntimePreflightCheckState) bool {
+func syncRuntimePreflightHasCheck(
+	out syncRuntimePreflightOutput,
+	name string,
+	state syncRuntimePreflightCheckState,
+) bool {
 	for _, check := range out.Checks {
 		if check.Name == name && check.State == state {
 			return true
@@ -3669,7 +3979,13 @@ func TestSyncRenderInputStatusForBundle(t *testing.T) {
 	}
 
 	localRepoPath := t.TempDir()
-	writeSyncLocalInput(t, localRepoPath, "runtime", "runtime-config.yaml", "featureGate: enabled\n")
+	writeSyncLocalInput(
+		t,
+		localRepoPath,
+		"runtime",
+		"runtime-config.yaml",
+		"featureGate: enabled\n",
+	)
 	repo, err := localrepo.Load(localRepoPath)
 	if err != nil {
 		t.Fatalf("Load(local repo) error = %v", err)
@@ -3696,7 +4012,11 @@ func TestSyncRenderInputStatusForBundle(t *testing.T) {
 					LocalRepoPath:     localRepoPath,
 					LocalRepoRevision: repo.Revision,
 					PackageSources: []hydrate.RenderProvenancePackageSource{
-						{Component: "runtime", Path: packageSourcePath, Digest: packageSourceDigest.String()},
+						{
+							Component: "runtime",
+							Path:      packageSourcePath,
+							Digest:    packageSourceDigest.String(),
+						},
 					},
 				},
 			},
@@ -3734,11 +4054,20 @@ func TestSyncRenderInputStatusForBundle(t *testing.T) {
 	if err := os.WriteFile(bomPath, bomData, 0o644); err != nil {
 		t.Fatalf("WriteFile(restored bom) error = %v", err)
 	}
-	writeSyncLocalInput(t, localRepoPath, "runtime", "runtime-config.yaml", "featureGate: disabled\n")
+	writeSyncLocalInput(
+		t,
+		localRepoPath,
+		"runtime",
+		"runtime-config.yaml",
+		"featureGate: disabled\n",
+	)
 	localRepoStale := syncRenderInputStatusForBundle(newBundle())
 	localRepoChange, ok := syncRenderInputChangeByName(localRepoStale.ChangedInputs, "localRepo")
 	if !ok {
-		t.Fatalf("local repo stale changes = %#v, want localRepo change", localRepoStale.ChangedInputs)
+		t.Fatalf(
+			"local repo stale changes = %#v, want localRepo change",
+			localRepoStale.ChangedInputs,
+		)
 	}
 	if got, want := localRepoStale.State, syncRenderInputStateStale; got != want {
 		t.Fatalf("local repo stale state = %q, want %q", got, want)
@@ -3753,15 +4082,26 @@ func TestSyncRenderInputStatusForBundle(t *testing.T) {
 	}
 	packageSourceStale := syncRenderInputStatusForBundle(newBundle())
 	if got, want := packageSourceStale.State, syncRenderInputStateMatched; got != want {
-		t.Fatalf("package source pre-change state = %q, want %q; changes=%#v", got, want, packageSourceStale.ChangedInputs)
+		t.Fatalf(
+			"package source pre-change state = %q, want %q; changes=%#v",
+			got,
+			want,
+			packageSourceStale.ChangedInputs,
+		)
 	}
 	if err := os.WriteFile(filepath.Join(packageSourcePath, "package.yaml"), []byte("apiVersion: distribution.sealos.io/v1alpha1\nkind: ComponentPackage\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(changed package source) error = %v", err)
 	}
 	packageSourceStale = syncRenderInputStatusForBundle(newBundle())
-	packageSourceChange, ok := syncRenderInputChangeByName(packageSourceStale.ChangedInputs, "packageSource:runtime")
+	packageSourceChange, ok := syncRenderInputChangeByName(
+		packageSourceStale.ChangedInputs,
+		"packageSource:runtime",
+	)
 	if !ok {
-		t.Fatalf("package source stale changes = %#v, want packageSource:runtime change", packageSourceStale.ChangedInputs)
+		t.Fatalf(
+			"package source stale changes = %#v, want packageSource:runtime change",
+			packageSourceStale.ChangedInputs,
+		)
 	}
 	if got, want := packageSourceStale.State, syncRenderInputStateStale; got != want {
 		t.Fatalf("package source stale state = %q, want %q", got, want)
@@ -3781,7 +4121,10 @@ func TestSyncRenderInputStatusForBundle(t *testing.T) {
 		t.Fatalf("package source stale state = %q, want %q", got, want)
 	}
 	if _, ok := syncRenderInputChangeByName(packageSourceStale.ChangedInputs, "packageSource:runtime"); !ok {
-		t.Fatalf("package source stale changes = %#v, want packageSource:runtime change", packageSourceStale.ChangedInputs)
+		t.Fatalf(
+			"package source stale changes = %#v, want packageSource:runtime change",
+			packageSourceStale.ChangedInputs,
+		)
 	}
 }
 
@@ -3857,8 +4200,18 @@ exit 1
 	secret := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n  namespace: observability\ntype: Opaque\nstringData:\n  username: admin\n  password: passw0rd\n"
 
 	writeSyncTestPackage(t, packageRoot)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, localrepo.InputsDirName, "runtime", "runtime-config.yaml"), renderedInput, 0o644)
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, localrepo.ResourcesDirName, "grafana", "admin-secret.yaml"), secret, 0o600)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, localrepo.InputsDirName, "runtime", "runtime-config.yaml"),
+		renderedInput,
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, localrepo.ResourcesDirName, "grafana", "admin-secret.yaml"),
+		secret,
+		0o600,
+	)
 	if err := yamlutil.MarshalFile(bomPath, syncLifecycleBOM()); err != nil {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
@@ -3941,8 +4294,22 @@ exit 1
 		t.Fatal("render bundlePath is empty")
 	}
 
-	renderedBundleInputPath := filepath.Join(bundleDir, "components", "runtime", "files", "files", "etc", "demo", "config.yaml")
-	renderedBundleSecretPath := filepath.Join(bundleDir, "local-resources", "grafana", "admin-secret.yaml")
+	renderedBundleInputPath := filepath.Join(
+		bundleDir,
+		"components",
+		"runtime",
+		"files",
+		"files",
+		"etc",
+		"demo",
+		"config.yaml",
+	)
+	renderedBundleSecretPath := filepath.Join(
+		bundleDir,
+		"local-resources",
+		"grafana",
+		"admin-secret.yaml",
+	)
 	for path, want := range map[string]string{
 		renderedBundleInputPath:  renderedInput,
 		renderedBundleSecretPath: secret,
@@ -4058,7 +4425,12 @@ exit 1
 		t.Fatalf("commit currentState = %q, want %q\noutput=%s", got, want, commitBuf.String())
 	}
 	if got, want := len(commitOut.CommittedHostPaths), 1; got != want {
-		t.Fatalf("commit committedHostPaths = %d, want %d\noutput=%s", got, want, commitBuf.String())
+		t.Fatalf(
+			"commit committedHostPaths = %d, want %d\noutput=%s",
+			got,
+			want,
+			commitBuf.String(),
+		)
 	}
 	if got, want := commitOut.CommittedHostPaths[0].Path, "/etc/demo/config.yaml"; got != want {
 		t.Fatalf("committedHostPaths[0].path = %q, want %q", got, want)
@@ -4067,7 +4439,10 @@ exit 1
 		t.Fatalf("committedHostPaths[0].inputName = %q, want %q", got, want)
 	}
 	if commitOut.DesiredStateDigest == renderOut.DesiredStateDigest {
-		t.Fatalf("commit desiredStateDigest = %q, want changed from render digest", commitOut.DesiredStateDigest)
+		t.Fatalf(
+			"commit desiredStateDigest = %q, want changed from render digest",
+			commitOut.DesiredStateDigest,
+		)
 	}
 	for path, want := range map[string]string{
 		filepath.Join(localRepoRoot, localrepo.InputsDirName, "runtime", "runtime-config.yaml"): committedInput,
@@ -4168,7 +4543,13 @@ func TestRunSyncValidateWithReleaseChannelDocument(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := bom.NewReleaseChannel("test-platform-beta", doc.Metadata.Name, bom.ChannelBeta, doc.Spec.Revision, "bom.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-beta",
+		doc.Metadata.Name,
+		bom.ChannelBeta,
+		doc.Spec.Revision,
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -4264,7 +4645,13 @@ func TestSyncRenderInputStatusDetectsReleaseLookupDrift(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := bom.NewReleaseChannel("test-platform-stable", newBOM.Metadata.Name, bom.ChannelStable, newBOM.Spec.Revision, "../boms/rev-20240424.yaml")
+	channel := bom.NewReleaseChannel(
+		"test-platform-stable",
+		newBOM.Metadata.Name,
+		bom.ChannelStable,
+		newBOM.Spec.Revision,
+		"../boms/rev-20240424.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(newBOMData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -4310,14 +4697,21 @@ func TestSyncRenderCmdBlocksOnSourcePreflight(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	localRepoRoot := filepath.Join(t.TempDir(), "local-repo")
-	writeSyncTestFile(t, filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"), syncLocalRepoInputTemplate(syncLocalRepoInitInput{
-		Component: "runtime",
-		Name:      "runtime-config",
-		Type:      string(packageformat.InputConfigFile),
-		Format:    "yaml",
-		Required:  true,
-		Path:      filepath.ToSlash(filepath.Join(localrepo.InputsDirName, "runtime", "runtime-config.yaml")),
-	}), 0o644)
+	writeSyncTestFile(
+		t,
+		filepath.Join(localRepoRoot, "inputs", "runtime", "runtime-config.yaml"),
+		syncLocalRepoInputTemplate(syncLocalRepoInitInput{
+			Component: "runtime",
+			Name:      "runtime-config",
+			Type:      string(packageformat.InputConfigFile),
+			Format:    "yaml",
+			Required:  true,
+			Path: filepath.ToSlash(
+				filepath.Join(localrepo.InputsDirName, "runtime", "runtime-config.yaml"),
+			),
+		}),
+		0o644,
+	)
 
 	buf := bytes.NewBuffer(nil)
 	errBuf := bytes.NewBuffer(nil)
@@ -4331,7 +4725,11 @@ func TestSyncRenderCmdBlocksOnSourcePreflight(t *testing.T) {
 		"--local-repo", localRepoRoot,
 	})
 	if err := cmd.Execute(); err == nil {
-		t.Fatalf("render Execute() error = nil, want source preflight block\nstdout=%s\nstderr=%s", buf.String(), errBuf.String())
+		t.Fatalf(
+			"render Execute() error = nil, want source preflight block\nstdout=%s\nstderr=%s",
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 
 	var out syncRenderOutput
@@ -4378,7 +4776,12 @@ func TestSyncRenderCmdCanSkipSourcePreflightForDebugging(t *testing.T) {
 		"--skip-source-preflight",
 	})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("render Execute() with skip source preflight error = %v\nstdout=%s\nstderr=%s", err, buf.String(), errBuf.String())
+		t.Fatalf(
+			"render Execute() with skip source preflight error = %v\nstdout=%s\nstderr=%s",
+			err,
+			buf.String(),
+			errBuf.String(),
+		)
 	}
 
 	var out syncRenderOutput
@@ -4595,7 +4998,7 @@ func TestSyncDay0MultiNodePOCAcceptance(t *testing.T) {
 
 	previousFactory := newSyncBuildah
 	newSyncBuildah = func(string) (buildah.Interface, error) {
-		return nil, fmt.Errorf("unexpected buildah usage")
+		return nil, errors.New("unexpected buildah usage")
 	}
 	t.Cleanup(func() {
 		newSyncBuildah = previousFactory
@@ -4616,7 +5019,13 @@ func TestSyncDay0MultiNodePOCAcceptance(t *testing.T) {
 	}
 
 	localRepoRoot := writeSyncPOCLocalRepo(t)
-	writeSyncLocalInput(t, localRepoRoot, "cilium", "cilium-values.yaml", "hubble:\n  enabled: false\n")
+	writeSyncLocalInput(
+		t,
+		localRepoRoot,
+		"cilium",
+		"cilium-values.yaml",
+		"hubble:\n  enabled: false\n",
+	)
 
 	renderBuf := bytes.NewBuffer(nil)
 	renderCmd := newSyncCmd()
@@ -4676,20 +5085,42 @@ func TestSyncDay0MultiNodePOCAcceptance(t *testing.T) {
 	if got, want := planOut.ExecutionTopology.FirstMaster, "10.0.0.10:22"; got != want {
 		t.Fatalf("plan executionTopology.firstMaster = %q, want %q", got, want)
 	}
-	assertSyncPlanStepTarget(t, planOut, "containerd", "runtime-rootfs", "allNodes", "hosts", "10.0.0.10:22,10.0.0.11:22,10.0.0.12:22")
-	assertSyncPlanStepTarget(t, planOut, "kubernetes", "bootstrap", "allNodes", "hosts", "10.0.0.10:22,10.0.0.11:22,10.0.0.12:22")
+	assertSyncPlanStepTarget(
+		t,
+		planOut,
+		"containerd",
+		"runtime-rootfs",
+		"allNodes",
+		"hosts",
+		"10.0.0.10:22,10.0.0.11:22,10.0.0.12:22",
+	)
+	assertSyncPlanStepTarget(
+		t,
+		planOut,
+		"kubernetes",
+		"bootstrap",
+		"allNodes",
+		"hosts",
+		"10.0.0.10:22,10.0.0.11:22,10.0.0.12:22",
+	)
 	assertSyncPlanStepTarget(t, planOut, "kubernetes", "healthcheck", "cluster", "cluster", "")
 	assertSyncPlanStepTarget(t, planOut, "cilium", "cilium-manifests", "cluster", "cluster", "")
 	assertSyncPlanStepTarget(t, planOut, "cilium", "healthcheck", "cluster", "cluster", "")
 
-	direct := syncPlanHostPathSetByProjection(planOut.TrackedHostPathSet, string(hydrate.HostPathProjectionClassDirect))
+	direct := syncPlanHostPathSetByProjection(
+		planOut.TrackedHostPathSet,
+		string(hydrate.HostPathProjectionClassDirect),
+	)
 	if direct == nil {
 		t.Fatalf("direct tracked host path set missing: %#v", planOut.TrackedHostPathSet)
 	}
 	if got, want := strings.Join(direct.Hosts, ","), "10.0.0.10:22,10.0.0.11:22,10.0.0.12:22"; got != want {
 		t.Fatalf("direct tracked host path hosts = %q, want %q", got, want)
 	}
-	generated := syncPlanHostPathSetByProjection(planOut.TrackedHostPathSet, string(hydrate.HostPathProjectionClassGenerated))
+	generated := syncPlanHostPathSetByProjection(
+		planOut.TrackedHostPathSet,
+		string(hydrate.HostPathProjectionClassGenerated),
+	)
 	if generated == nil {
 		t.Fatalf("generated tracked host path set missing: %#v", planOut.TrackedHostPathSet)
 	}
@@ -4720,7 +5151,13 @@ func TestNewSyncMaterializeOptionsIncludesClusterInventoryTopology(t *testing.T)
 	target := &syncResolvedTarget{
 		BOM: testSyncBOM(),
 	}
-	opts, err := newSyncMaterializeOptions(target, clusterName, "", "", []string{"kubernetes=" + syncFixtureRoot()})
+	opts, err := newSyncMaterializeOptions(
+		target,
+		clusterName,
+		"",
+		"",
+		[]string{"kubernetes=" + syncFixtureRoot()},
+	)
 	if err != nil {
 		t.Fatalf("newSyncMaterializeOptions() error = %v", err)
 	}
@@ -4749,7 +5186,13 @@ func TestSyncRenderCmdWithLocalRepo(t *testing.T) {
 
 	clusterName := uniqueSyncClusterName(t, "cluster-local-repo")
 	localRepoRoot := writeSyncPOCLocalRepo(t)
-	writeSyncLocalInput(t, localRepoRoot, "cilium", "cilium-values.yaml", "hubble:\n  enabled: true\n")
+	writeSyncLocalInput(
+		t,
+		localRepoRoot,
+		"cilium",
+		"cilium-values.yaml",
+		"hubble:\n  enabled: true\n",
+	)
 
 	buf := bytes.NewBuffer(nil)
 	cmd := newSyncCmd()
@@ -4777,7 +5220,15 @@ func TestSyncRenderCmdWithLocalRepo(t *testing.T) {
 		t.Fatalf("out.LocalRepoRevision = %q, want sha256 digest", out.LocalRepoRevision)
 	}
 
-	renderedPath := filepath.Join(out.BundlePath, "components", "cilium", "files", "files", "values", "basic.yaml")
+	renderedPath := filepath.Join(
+		out.BundlePath,
+		"components",
+		"cilium",
+		"files",
+		"files",
+		"values",
+		"basic.yaml",
+	)
 	data, err := os.ReadFile(renderedPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%q) error = %v", renderedPath, err)
@@ -4869,7 +5320,12 @@ spec:
 	}
 
 	localRepoRoot := filepath.Join(tempDir, "local-repo")
-	writeSyncLocalPatch(t, localRepoRoot, "grafana", "grafana-settings.patch.yaml", strings.TrimSpace(`
+	writeSyncLocalPatch(
+		t,
+		localRepoRoot,
+		"grafana",
+		"grafana-settings.patch.yaml",
+		strings.TrimSpace(`
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -4877,7 +5333,8 @@ metadata:
   namespace: default
 data:
   enableHubble: "true"
-`)+"\n")
+`)+"\n",
+	)
 	writeSyncLocalPatch(t, localRepoRoot, "grafana", "grafana-image.patch.yaml", strings.TrimSpace(`
 apiVersion: apps/v1
 kind: Deployment
@@ -5251,7 +5708,12 @@ spec:
 	}
 
 	localRepoRoot := filepath.Join(tempDir, "local-repo")
-	writeSyncLocalPatch(t, localRepoRoot, "grafana", "grafana-settings.patch.yaml", strings.TrimSpace(`
+	writeSyncLocalPatch(
+		t,
+		localRepoRoot,
+		"grafana",
+		"grafana-settings.patch.yaml",
+		strings.TrimSpace(`
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5259,7 +5721,8 @@ metadata:
   namespace: default
 data:
   enableHubble: "true"
-`)+"\n")
+`)+"\n",
+	)
 	writeSyncLocalPatch(t, localRepoRoot, "grafana", "grafana-image.patch.yaml", strings.TrimSpace(`
 apiVersion: apps/v1
 kind: Deployment
@@ -5453,7 +5916,12 @@ spec:
 	}
 
 	localRepoRoot := filepath.Join(tempDir, "local-repo")
-	writeSyncLocalPatch(t, localRepoRoot, "grafana", "grafana-settings.patch.yaml", strings.TrimSpace(`
+	writeSyncLocalPatch(
+		t,
+		localRepoRoot,
+		"grafana",
+		"grafana-settings.patch.yaml",
+		strings.TrimSpace(`
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5461,7 +5929,8 @@ metadata:
   namespace: default
 data:
   enableHubble: "true"
-`)+"\n")
+`)+"\n",
+	)
 	writeSyncLocalPatch(t, localRepoRoot, "grafana", "grafana-image.patch.yaml", strings.TrimSpace(`
 apiVersion: apps/v1
 kind: Deployment
@@ -5547,13 +6016,21 @@ spec:
 		t.Fatalf("out.Gate.ApprovedViolations[0].Code = %q, want %q", got, want)
 	}
 	if got, want := out.Gate.ApprovedViolations[0].Impact.AddedAllowedPrefixes[0].Path, "metadata.annotations"; got != want {
-		t.Fatalf("out.Gate.ApprovedViolations[0].Impact.AddedAllowedPrefixes[0].Path = %q, want %q", got, want)
+		t.Fatalf(
+			"out.Gate.ApprovedViolations[0].Impact.AddedAllowedPrefixes[0].Path = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := out.Gate.ApprovedViolations[1].Code, policyreport.GateViolationIncompatiblePatches; got != want {
 		t.Fatalf("out.Gate.ApprovedViolations[1].Code = %q, want %q", got, want)
 	}
 	if got, want := out.Gate.ApprovedViolations[1].Impact.IncompatiblePatches[0].RelativePath, "grafana-image.patch.yaml"; got != want {
-		t.Fatalf("out.Gate.ApprovedViolations[1].Impact.IncompatiblePatches[0].RelativePath = %q, want %q", got, want)
+		t.Fatalf(
+			"out.Gate.ApprovedViolations[1].Impact.IncompatiblePatches[0].RelativePath = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := len(out.Gate.Warnings), 4; got != want {
 		t.Fatalf("len(out.Gate.Warnings) = %d, want %d", got, want)
@@ -5727,9 +6204,13 @@ func TestSyncDiffCmd(t *testing.T) {
 	outputSyncKubectl = func(args ...string) ([]byte, error) {
 		command := strings.Join(args, " ")
 		if strings.Contains(command, "Secret grafana-admin-credentials") {
-			return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1","uid":"abc","managedFields":[{}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"}},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="}}`), nil
+			return []byte(
+				`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1","uid":"abc","managedFields":[{}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"}},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="}}`,
+			), nil
 		}
-		return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
+		return []byte(
+			`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+		), nil
 	}
 	t.Cleanup(func() {
 		outputSyncKubectl = previousOutput
@@ -5900,7 +6381,13 @@ func TestSyncDiffCmd(t *testing.T) {
 	if got, want := out.Preflight.RecommendedAction, "inspect"; got != want {
 		t.Fatalf("preflight.recommendedAction = %q, want %q", got, want)
 	}
-	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(
+		got,
+		"\n",
+	) != strings.Join(
+		want,
+		"\n",
+	) {
 		t.Fatalf("warnings = %#v, want %#v", got, want)
 	}
 	if out.Preflight.Blocked {
@@ -5910,7 +6397,10 @@ func TestSyncDiffCmd(t *testing.T) {
 		t.Fatal("preflight.summary is empty")
 	}
 	if !strings.Contains(out.Preflight.RefreshCommand, "'sealos' 'sync' 'render'") {
-		t.Fatalf("preflight.refreshCommand = %q, want sync render command", out.Preflight.RefreshCommand)
+		t.Fatalf(
+			"preflight.refreshCommand = %q, want sync render command",
+			out.Preflight.RefreshCommand,
+		)
 	}
 	if got, want := out.LocalPatchPolicy.Source, "builtInDefault"; got != want {
 		t.Fatalf("localPatchPolicy.source = %q, want %q", got, want)
@@ -6045,7 +6535,9 @@ func TestSyncDiffCmdWithPolicyEligibleOrphanObject(t *testing.T) {
 		command := strings.Join(args, " ")
 		switch {
 		case strings.Contains(command, "ConfigMap cilium-config"):
-			return []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cilium-config","namespace":"kube-system","resourceVersion":"9"},"data":{"enable-hubble":"true"}}`), nil
+			return []byte(
+				`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cilium-config","namespace":"kube-system","resourceVersion":"9"},"data":{"enable-hubble":"true"}}`,
+			), nil
 		default:
 			return nil, fmt.Errorf("unexpected kubectl invocation: %s", command)
 		}
@@ -6130,7 +6622,14 @@ func TestSyncDiffCmdWithPolicyEligibleOrphanObject(t *testing.T) {
 		t.Fatalf("ReadFile(policy) error = %v", err)
 	}
 	bundle.Spec.LocalPatchPolicyDigest = digest.Canonical.FromBytes(policyData).String()
-	manifestPath := filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium-config.yaml")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium-config.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", manifestPath, err)
 	}
@@ -6253,13 +6752,25 @@ func TestSyncDiffCmdWithPolicyEligibleOrphanObject(t *testing.T) {
 		t.Fatalf("policyEligibleOrphanObjects[0].operatorAction = %q, want %q", got, want)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].OperatorActionMetadata.AllowsDirectCommit, false; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].OperatorActionMetadata.AllowsDirectRevert, false; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].OperatorActionMetadata.RequiresBundleMatch, false; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].Paths[0], "data.enable-hubble"; got != want {
 		t.Fatalf("policyEligibleOrphanObjects[0].paths[0] = %q, want %q", got, want)
@@ -6268,7 +6779,11 @@ func TestSyncDiffCmdWithPolicyEligibleOrphanObject(t *testing.T) {
 		t.Fatalf("policyEligibleOrphanObjects[0].remediation.policyName = %q, want %q", got, want)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].Remediation.PolicyEligiblePaths[0], "data.enable-hubble"; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].remediation.policyEligiblePaths[0] = %q, want %q", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].remediation.policyEligiblePaths[0] = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := len(out.CurrentCompare.Objects), 1; got != want {
 		t.Fatalf("len(currentCompare.objects) = %d, want %d", got, want)
@@ -6311,7 +6826,16 @@ func TestSyncDiffCmdWithHostPathDrift(t *testing.T) {
 	bundleDir := t.TempDir()
 	hostRoot := t.TempDir()
 
-	desiredPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet")
+	desiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
 	if err := os.MkdirAll(filepath.Dir(desiredPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(desired) error = %v", err)
 	}
@@ -6454,7 +6978,11 @@ func TestSyncDiffCmdWithHostPathDrift(t *testing.T) {
 		t.Fatalf("hostPaths[0].remediation.commandGuidance[2].command = %q, want %q", got, want)
 	}
 	if got, want := out.CurrentCompare.HostPaths[0].Remediation.CommandGuidance[2].Availability, "available"; got != want {
-		t.Fatalf("hostPaths[0].remediation.commandGuidance[2].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"hostPaths[0].remediation.commandGuidance[2].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 }
 
@@ -6620,10 +7148,18 @@ func TestSyncDiffCmdWithGeneratedHostPathRemediation(t *testing.T) {
 		t.Fatalf("hostPaths[0].remediation.commandGuidance[3].command = %q, want %q", got, want)
 	}
 	if got, want := out.CurrentCompare.HostPaths[0].Remediation.CommandGuidance[3].Availability, "blocked"; got != want {
-		t.Fatalf("hostPaths[0].remediation.commandGuidance[3].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"hostPaths[0].remediation.commandGuidance[3].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := out.CurrentCompare.HostPaths[0].Remediation.CommandGuidance[3].Preconditions[0], "bundleMatchesRecordedDesiredStateDigest"; got != want {
-		t.Fatalf("hostPaths[0].remediation.commandGuidance[3].preconditions[0] = %q, want %q", got, want)
+		t.Fatalf(
+			"hostPaths[0].remediation.commandGuidance[3].preconditions[0] = %q, want %q",
+			got,
+			want,
+		)
 	}
 }
 
@@ -6643,13 +7179,21 @@ func TestSyncStatusCmd(t *testing.T) {
 		command := strings.Join(args, " ")
 		switch {
 		case strings.Contains(command, "Secret grafana-admin-credentials"):
-			return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1"},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="},"type":"Opaque"}`), nil
+			return []byte(
+				`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1"},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="},"type":"Opaque"}`,
+			), nil
 		case strings.Contains(command, "ConfigMap grafana-settings"):
-			return []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"grafana-settings","namespace":"default"},"data":{"adminUser":"admin","imageTag":"10.4.0"}}`), nil
+			return []byte(
+				`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"grafana-settings","namespace":"default"},"data":{"adminUser":"admin","imageTag":"10.4.0"}}`,
+			), nil
 		case strings.Contains(command, "ConfigMap cilium-config"):
-			return []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cilium-config","namespace":"kube-system"},"data":{"enable-hubble":"true"}}`), nil
+			return []byte(
+				`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cilium-config","namespace":"kube-system"},"data":{"enable-hubble":"true"}}`,
+			), nil
 		default:
-			return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
+			return []byte(
+				`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+			), nil
 		}
 	}
 	t.Cleanup(func() {
@@ -6883,7 +7427,13 @@ func TestSyncStatusCmd(t *testing.T) {
 	if got, want := out.Preflight.RecommendedAction, "inspect"; got != want {
 		t.Fatalf("preflight.recommendedAction = %q, want %q", got, want)
 	}
-	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got, want := out.Warnings, []string{syncSourcePreflightMissingWarning}; strings.Join(
+		got,
+		"\n",
+	) != strings.Join(
+		want,
+		"\n",
+	) {
 		t.Fatalf("warnings = %#v, want %#v", got, want)
 	}
 	if out.Preflight.Blocked {
@@ -6893,7 +7443,10 @@ func TestSyncStatusCmd(t *testing.T) {
 		t.Fatal("preflight.summary is empty")
 	}
 	if !strings.Contains(out.Preflight.RefreshCommand, "'sealos' 'sync' 'render'") {
-		t.Fatalf("preflight.refreshCommand = %q, want sync render command", out.Preflight.RefreshCommand)
+		t.Fatalf(
+			"preflight.refreshCommand = %q, want sync render command",
+			out.Preflight.RefreshCommand,
+		)
 	}
 	if got, want := out.RecordedState, "Orphan"; got != want {
 		t.Fatalf("recordedState = %q, want %q\noutput=%s", got, want, buf.String())
@@ -6980,19 +7533,35 @@ func TestSyncStatusCmd(t *testing.T) {
 		t.Fatalf("dirtyObjects[0].operatorAction = %q, want %q", got, want)
 	}
 	if got, want := out.DirtyObjects[0].OperatorActionMetadata.AllowsDirectCommit, true; got != want {
-		t.Fatalf("dirtyObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t", got, want)
+		t.Fatalf(
+			"dirtyObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.DirtyObjects[0].OperatorActionMetadata.AllowsDirectRevert, true; got != want {
-		t.Fatalf("dirtyObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t", got, want)
+		t.Fatalf(
+			"dirtyObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.DirtyObjects[0].OperatorActionMetadata.RequiresBundleMatch, true; got != want {
-		t.Fatalf("dirtyObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t", got, want)
+		t.Fatalf(
+			"dirtyObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.DirtyObjects[0].Remediation.CommandGuidance[2].Command, "sync commit"; got != want {
 		t.Fatalf("dirtyObjects[0].remediation.commandGuidance[2].command = %q, want %q", got, want)
 	}
 	if got, want := out.DirtyObjects[0].Remediation.CommandGuidance[2].Availability, "available"; got != want {
-		t.Fatalf("dirtyObjects[0].remediation.commandGuidance[2].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"dirtyObjects[0].remediation.commandGuidance[2].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := len(out.OrphanObjects), 2; got != want {
 		t.Fatalf("len(orphanObjects) = %d, want %d", got, want)
@@ -7013,19 +7582,35 @@ func TestSyncStatusCmd(t *testing.T) {
 		t.Fatalf("orphanObjects[0].operatorAction = %q, want %q", got, want)
 	}
 	if got, want := out.OrphanObjects[0].OperatorActionMetadata.AllowsDirectCommit, false; got != want {
-		t.Fatalf("orphanObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanObjects[0].OperatorActionMetadata.AllowsDirectRevert, false; got != want {
-		t.Fatalf("orphanObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanObjects[0].OperatorActionMetadata.RequiresBundleMatch, false; got != want {
-		t.Fatalf("orphanObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanObjects[0].Remediation.CommandGuidance[2].Command, "sync revert"; got != want {
 		t.Fatalf("orphanObjects[0].remediation.commandGuidance[2].command = %q, want %q", got, want)
 	}
 	if got, want := out.OrphanObjects[0].Remediation.CommandGuidance[2].Availability, "available"; got != want {
-		t.Fatalf("orphanObjects[0].remediation.commandGuidance[2].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"orphanObjects[0].remediation.commandGuidance[2].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanObjects[1].Name, "cilium"; got != want {
 		t.Fatalf("orphanObjects[1].name = %q, want %q", got, want)
@@ -7037,13 +7622,25 @@ func TestSyncStatusCmd(t *testing.T) {
 		t.Fatalf("orphanObjects[1].operatorAction = %q, want %q", got, want)
 	}
 	if got, want := out.OrphanObjects[1].OperatorActionMetadata.AllowsDirectCommit, false; got != want {
-		t.Fatalf("orphanObjects[1].operatorActionMetadata.allowsDirectCommit = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanObjects[1].operatorActionMetadata.allowsDirectCommit = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanObjects[1].OperatorActionMetadata.AllowsDirectRevert, true; got != want {
-		t.Fatalf("orphanObjects[1].operatorActionMetadata.allowsDirectRevert = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanObjects[1].operatorActionMetadata.allowsDirectRevert = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanObjects[1].OperatorActionMetadata.RequiresBundleMatch, true; got != want {
-		t.Fatalf("orphanObjects[1].operatorActionMetadata.requiresBundleMatch = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanObjects[1].operatorActionMetadata.requiresBundleMatch = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := len(out.PolicyEligibleOrphanObjects), 1; got != want {
 		t.Fatalf("len(policyEligibleOrphanObjects) = %d, want %d", got, want)
@@ -7055,13 +7652,25 @@ func TestSyncStatusCmd(t *testing.T) {
 		t.Fatalf("policyEligibleOrphanObjects[0].operatorAction = %q, want %q", got, want)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].OperatorActionMetadata.AllowsDirectCommit, false; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectCommit = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].OperatorActionMetadata.AllowsDirectRevert, false; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].operatorActionMetadata.allowsDirectRevert = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].OperatorActionMetadata.RequiresBundleMatch, false; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].operatorActionMetadata.requiresBundleMatch = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].Paths[0], "data.enable-hubble"; got != want {
 		t.Fatalf("policyEligibleOrphanObjects[0].paths[0] = %q, want %q", got, want)
@@ -7070,7 +7679,11 @@ func TestSyncStatusCmd(t *testing.T) {
 		t.Fatalf("policyEligibleOrphanObjects[0].remediation.policyName = %q, want %q", got, want)
 	}
 	if got, want := out.PolicyEligibleOrphanObjects[0].Remediation.PolicyEligiblePaths[0], "data.enable-hubble"; got != want {
-		t.Fatalf("policyEligibleOrphanObjects[0].remediation.policyEligiblePaths[0] = %q, want %q", got, want)
+		t.Fatalf(
+			"policyEligibleOrphanObjects[0].remediation.policyEligiblePaths[0] = %q, want %q",
+			got,
+			want,
+		)
 	}
 }
 
@@ -7221,13 +7834,25 @@ func TestSyncStatusCmdWithGeneratedHostPathRemediation(t *testing.T) {
 		t.Fatalf("orphanHostPaths[0].operatorAction = %q, want %q", got, want)
 	}
 	if got, want := out.OrphanHostPaths[0].OperatorActionMetadata.AllowsDirectCommit, false; got != want {
-		t.Fatalf("orphanHostPaths[0].operatorActionMetadata.allowsDirectCommit = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].operatorActionMetadata.allowsDirectCommit = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanHostPaths[0].OperatorActionMetadata.AllowsDirectRevert, false; got != want {
-		t.Fatalf("orphanHostPaths[0].operatorActionMetadata.allowsDirectRevert = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].operatorActionMetadata.allowsDirectRevert = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanHostPaths[0].OperatorActionMetadata.RequiresBundleMatch, false; got != want {
-		t.Fatalf("orphanHostPaths[0].operatorActionMetadata.requiresBundleMatch = %t, want %t", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].operatorActionMetadata.requiresBundleMatch = %t, want %t",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanHostPaths[0].Remediation.Action, "reviewDistributionBaselineForGeneratedProjection"; got != want {
 		t.Fatalf("orphanHostPaths[0].remediation.action = %q, want %q", got, want)
@@ -7248,7 +7873,9 @@ func TestSyncStatusCmdWithGeneratedHostPathRemediation(t *testing.T) {
 		t.Fatalf("orphanHostPaths[0].remediation.generatedName = %q, want %q", got, want)
 	}
 	if out.OrphanHostPaths[0].Remediation.Repairable == nil {
-		t.Fatal("orphanHostPaths[0].remediation.repairable = nil, want explicit generated repairability")
+		t.Fatal(
+			"orphanHostPaths[0].remediation.repairable = nil, want explicit generated repairability",
+		)
 	}
 	if got, want := *out.OrphanHostPaths[0].Remediation.Repairable, false; got != want {
 		t.Fatalf("orphanHostPaths[0].remediation.repairable = %t, want %t", got, want)
@@ -7263,16 +7890,32 @@ func TestSyncStatusCmdWithGeneratedHostPathRemediation(t *testing.T) {
 		t.Fatalf("len(orphanHostPaths[0].remediation.commandGuidance) = %d, want %d", got, want)
 	}
 	if got, want := out.OrphanHostPaths[0].Remediation.CommandGuidance[3].Command, "sync apply"; got != want {
-		t.Fatalf("orphanHostPaths[0].remediation.commandGuidance[3].command = %q, want %q", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].remediation.commandGuidance[3].command = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanHostPaths[0].Remediation.CommandGuidance[3].Availability, "available"; got != want {
-		t.Fatalf("orphanHostPaths[0].remediation.commandGuidance[3].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].remediation.commandGuidance[3].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanHostPaths[0].Remediation.CommandGuidance[4].Command, "sync package build"; got != want {
-		t.Fatalf("orphanHostPaths[0].remediation.commandGuidance[4].command = %q, want %q", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].remediation.commandGuidance[4].command = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := out.OrphanHostPaths[0].Remediation.CommandGuidance[4].Availability, "available"; got != want {
-		t.Fatalf("orphanHostPaths[0].remediation.commandGuidance[4].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"orphanHostPaths[0].remediation.commandGuidance[4].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 }
 
@@ -7289,7 +7932,9 @@ func TestSyncCommitCmd(t *testing.T) {
 
 	previousOutput := outputSyncKubectl
 	outputSyncKubectl = func(args ...string) ([]byte, error) {
-		return []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"grafana-settings","namespace":"default"},"data":{"adminUser":"ops","imageTag":"10.4.0"}}`), nil
+		return []byte(
+			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"grafana-settings","namespace":"default"},"data":{"adminUser":"ops","imageTag":"10.4.0"}}`,
+		), nil
 	}
 	t.Cleanup(func() {
 		outputSyncKubectl = previousOutput
@@ -7333,8 +7978,10 @@ func TestSyncCommitCmd(t *testing.T) {
 			},
 			Components: []hydrate.RenderedComponent{
 				{
-					Name:         "grafana",
-					LocalPatches: []string{"components/grafana/local-patches/grafana-settings.patch.yaml"},
+					Name: "grafana",
+					LocalPatches: []string{
+						"components/grafana/local-patches/grafana-settings.patch.yaml",
+					},
 					Steps: []hydrate.RenderedStep{
 						{
 							Name:        "grafana-manifest",
@@ -7348,9 +7995,27 @@ func TestSyncCommitCmd(t *testing.T) {
 		},
 	}
 
-	manifestPath := filepath.Join(bundleDir, "components", "grafana", "files", "manifests", "grafana-settings.yaml")
-	patchBundlePath := filepath.Join(bundleDir, "components", "grafana", "local-patches", "grafana-settings.patch.yaml")
-	patchRepoPath := filepath.Join(localRepoRoot, localrepo.PatchesDirName, "grafana", "grafana-settings.patch.yaml")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"grafana",
+		"files",
+		"manifests",
+		"grafana-settings.yaml",
+	)
+	patchBundlePath := filepath.Join(
+		bundleDir,
+		"components",
+		"grafana",
+		"local-patches",
+		"grafana-settings.patch.yaml",
+	)
+	patchRepoPath := filepath.Join(
+		localRepoRoot,
+		localrepo.PatchesDirName,
+		"grafana",
+		"grafana-settings.patch.yaml",
+	)
 	for _, path := range []string{manifestPath, patchBundlePath, patchRepoPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -7460,7 +8125,9 @@ func TestSyncCommitCmdWithLocalResource(t *testing.T) {
 
 	previousOutput := outputSyncKubectl
 	outputSyncKubectl = func(args ...string) ([]byte, error) {
-		return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"2","uid":"abcd"},"type":"Opaque","data":{"username":"b3Bz","password":"bmV3LXBhc3M="}}`), nil
+		return []byte(
+			`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"2","uid":"abcd"},"type":"Opaque","data":{"username":"b3Bz","password":"bmV3LXBhc3M="}}`,
+		), nil
 	}
 	t.Cleanup(func() {
 		outputSyncKubectl = previousOutput
@@ -7497,8 +8164,18 @@ func TestSyncCommitCmdWithLocalResource(t *testing.T) {
 		},
 	}
 
-	bundleResourcePath := filepath.Join(bundleDir, "local-resources", "secrets", "grafana-admin-credentials.yaml")
-	repoResourcePath := filepath.Join(localRepoRoot, localrepo.ResourcesDirName, "secrets", "grafana-admin-credentials.yaml")
+	bundleResourcePath := filepath.Join(
+		bundleDir,
+		"local-resources",
+		"secrets",
+		"grafana-admin-credentials.yaml",
+	)
+	repoResourcePath := filepath.Join(
+		localRepoRoot,
+		localrepo.ResourcesDirName,
+		"secrets",
+		"grafana-admin-credentials.yaml",
+	)
 	for _, path := range []string{bundleResourcePath, repoResourcePath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -7606,8 +8283,22 @@ func TestSyncCommitCmdWithLocalInputHostPath(t *testing.T) {
 	localRepoRoot := t.TempDir()
 	hostRoot := t.TempDir()
 
-	repoInputPath := filepath.Join(localRepoRoot, localrepo.InputsDirName, "kubernetes", "kubeadm-cluster-config.yaml")
-	bundleInputPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
+	repoInputPath := filepath.Join(
+		localRepoRoot,
+		localrepo.InputsDirName,
+		"kubernetes",
+		"kubeadm-cluster-config.yaml",
+	)
+	bundleInputPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	liveHostPath := filepath.Join(hostRoot, "etc", "kubernetes", "kubeadm.yaml")
 	for _, path := range []string{repoInputPath, bundleInputPath, liveHostPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -7772,8 +8463,22 @@ func TestSyncCommitCmdRejectsMultiNodeLocalInputHostPathWithoutHost(t *testing.T
 	bundleDir := t.TempDir()
 	localRepoRoot := t.TempDir()
 
-	repoInputPath := filepath.Join(localRepoRoot, localrepo.InputsDirName, "kubernetes", "kubeadm-cluster-config.yaml")
-	bundleInputPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
+	repoInputPath := filepath.Join(
+		localRepoRoot,
+		localrepo.InputsDirName,
+		"kubernetes",
+		"kubeadm-cluster-config.yaml",
+	)
+	bundleInputPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	localLiveHostPath := filepath.Join(localHostRoot, "etc", "kubernetes", "kubeadm.yaml")
 	for _, path := range []string{repoInputPath, bundleInputPath, localLiveHostPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -7944,7 +8649,13 @@ func TestSyncCompareBundleUsesExecutionTopologySnapshot(t *testing.T) {
 		},
 	}
 
-	result, err := syncCompareBundle("snapshot-compare", bundle, bundleDir, "/tmp/test-kubeconfig", t.TempDir())
+	result, err := syncCompareBundle(
+		"snapshot-compare",
+		bundle,
+		bundleDir,
+		"/tmp/test-kubeconfig",
+		t.TempDir(),
+	)
 	if err != nil {
 		t.Fatalf("syncCompareBundle() error = %v", err)
 	}
@@ -8009,8 +8720,22 @@ func TestSyncCommitCmdRejectsDivergentSelectedHostWithoutScopedInput(t *testing.
 	bundleDir := t.TempDir()
 	localRepoRoot := t.TempDir()
 
-	repoInputPath := filepath.Join(localRepoRoot, localrepo.InputsDirName, "kubernetes", "kubeadm-cluster-config.yaml")
-	bundleInputPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
+	repoInputPath := filepath.Join(
+		localRepoRoot,
+		localrepo.InputsDirName,
+		"kubernetes",
+		"kubeadm-cluster-config.yaml",
+	)
+	bundleInputPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	localLiveHostPath := filepath.Join(localHostRoot, "etc", "kubernetes", "kubeadm.yaml")
 	for _, path := range []string{repoInputPath, bundleInputPath, localLiveHostPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -8157,10 +8882,41 @@ func TestSyncCommitCmdWithRemoteLocalInputHostPath(t *testing.T) {
 	bundleDir := t.TempDir()
 	localRepoRoot := t.TempDir()
 
-	repoInputPath := filepath.Join(localRepoRoot, localrepo.InputsDirName, "kubernetes", "kubeadm-cluster-config.yaml")
-	hostRepoInputPath := filepath.Join(localRepoRoot, localrepo.InputsDirName, "kubernetes", "hosts", "10.0.0.11", "kubeadm-cluster-config.yaml")
-	bundleInputPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
-	hostBundleInputPath := filepath.Join(bundleDir, "components", "kubernetes", "host-inputs", "10.0.0.11", "files", "etc", "kubernetes", "kubeadm.yaml")
+	repoInputPath := filepath.Join(
+		localRepoRoot,
+		localrepo.InputsDirName,
+		"kubernetes",
+		"kubeadm-cluster-config.yaml",
+	)
+	hostRepoInputPath := filepath.Join(
+		localRepoRoot,
+		localrepo.InputsDirName,
+		"kubernetes",
+		"hosts",
+		"10.0.0.11",
+		"kubeadm-cluster-config.yaml",
+	)
+	bundleInputPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
+	hostBundleInputPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"host-inputs",
+		"10.0.0.11",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	localLiveHostPath := filepath.Join(localHostRoot, "etc", "kubernetes", "kubeadm.yaml")
 	for _, path := range []string{repoInputPath, hostRepoInputPath, bundleInputPath, hostBundleInputPath, localLiveHostPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -8338,9 +9094,13 @@ func TestSyncRevertCmd(t *testing.T) {
 			return []byte("daemonset.apps/cilium configured\n"), nil
 		}
 		if reverted {
-			return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.0"}]}}}}`), nil
+			return []byte(
+				`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.0"}]}}}}`,
+			), nil
 		}
-		return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
+		return []byte(
+			`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+		), nil
 	}
 	t.Cleanup(func() {
 		outputSyncKubectl = previousOutput
@@ -8376,7 +9136,14 @@ func TestSyncRevertCmd(t *testing.T) {
 			},
 		},
 	}
-	manifestPath := filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(manifestPath), err)
 	}
@@ -8490,11 +9257,17 @@ func TestSyncRevertCmdWithLocalScopeAndObjectSelector(t *testing.T) {
 			return []byte("secret/grafana-admin-credentials configured\n"), nil
 		case strings.Contains(command, "get Secret grafana-admin-credentials"):
 			if secretReverted {
-				return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"2"},"type":"Opaque","data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="}}`), nil
+				return []byte(
+					`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"2"},"type":"Opaque","data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="}}`,
+				), nil
 			}
-			return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"2"},"type":"Opaque","data":{"username":"b3Bz","password":"bmV3LXBhc3M="}}`), nil
+			return []byte(
+				`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"2"},"type":"Opaque","data":{"username":"b3Bz","password":"bmV3LXBhc3M="}}`,
+			), nil
 		case strings.Contains(command, "get DaemonSet cilium"):
-			return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
+			return []byte(
+				`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+			), nil
 		default:
 			t.Fatalf("unexpected kubectl invocation: %s", command)
 			return nil, nil
@@ -8544,8 +9317,20 @@ func TestSyncRevertCmdWithLocalScopeAndObjectSelector(t *testing.T) {
 			},
 		},
 	}
-	manifestPath := filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml")
-	resourcePath := filepath.Join(bundleDir, "local-resources", "secrets", "grafana-admin-credentials.yaml")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
+	resourcePath := filepath.Join(
+		bundleDir,
+		"local-resources",
+		"secrets",
+		"grafana-admin-credentials.yaml",
+	)
 	for _, path := range []string{manifestPath, resourcePath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -8667,7 +9452,9 @@ func TestSyncRevertCmdRejectsLocalScopeForOrphan(t *testing.T) {
 			applyCalled = true
 			return nil, fmt.Errorf("unexpected apply")
 		}
-		return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
+		return []byte(
+			`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+		), nil
 	}
 	t.Cleanup(func() {
 		outputSyncKubectl = previousOutput
@@ -8703,7 +9490,14 @@ func TestSyncRevertCmdRejectsLocalScopeForOrphan(t *testing.T) {
 			},
 		},
 	}
-	manifestPath := filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(manifestPath), err)
 	}
@@ -8773,9 +9567,13 @@ func TestSyncRevertCmdRestoresMissingObject(t *testing.T) {
 			return []byte("daemonset.apps/cilium created\n"), nil
 		case strings.Contains(command, "get DaemonSet cilium"):
 			if recreated {
-				return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.0"}]}}}}`), nil
+				return []byte(
+					`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.0"}]}}}}`,
+				), nil
 			}
-			return nil, fmt.Errorf("Error from server (NotFound): daemonsets.apps \"cilium\" not found")
+			return nil, errors.New(
+				"Error from server (NotFound): daemonsets.apps \"cilium\" not found",
+			)
 		default:
 			t.Fatalf("unexpected kubectl invocation: %s", command)
 			return nil, nil
@@ -8815,7 +9613,14 @@ func TestSyncRevertCmdRestoresMissingObject(t *testing.T) {
 			},
 		},
 	}
-	manifestPath := filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(manifestPath), err)
 	}
@@ -8907,7 +9712,9 @@ func TestSyncRevertCmdWithHostPathSelector(t *testing.T) {
 		command := strings.Join(args, " ")
 		switch {
 		case strings.Contains(command, "get DaemonSet cilium"):
-			return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
+			return []byte(
+				`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+			), nil
 		default:
 			t.Fatalf("unexpected kubectl invocation: %s", command)
 			return nil, nil
@@ -8960,8 +9767,24 @@ func TestSyncRevertCmdWithHostPathSelector(t *testing.T) {
 		},
 	}
 
-	manifestPath := filepath.Join(bundleDir, "components", "cilium", "files", "manifests", "cilium.yaml")
-	desiredHostPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet")
+	manifestPath := filepath.Join(
+		bundleDir,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
+	desiredHostPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
 	for _, path := range []string{manifestPath, desiredHostPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -9114,8 +9937,27 @@ func TestSyncRevertCmdRestoresMissingLocalHostPath(t *testing.T) {
 		},
 	}
 	desired := "apiVersion: kubeadm.k8s.io/v1beta4\nkind: ClusterConfiguration\nclusterName: restored-local\n"
-	desiredHostPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
-	hostDesiredHostPath := filepath.Join(bundleDir, "components", "kubernetes", "host-inputs", "10.0.0.11", "files", "etc", "kubernetes", "kubeadm.yaml")
+	desiredHostPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
+	hostDesiredHostPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"host-inputs",
+		"10.0.0.11",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	for _, path := range []string{desiredHostPath, hostDesiredHostPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -9356,7 +10198,13 @@ func TestSyncRevertCmdRepairsGeneratedControlPlaneHostPath(t *testing.T) {
 	var repairCalls []reconcile.RepairGeneratedControlPlaneHostOptions
 	repairSyncGeneratedControlPlaneHost = func(opts reconcile.RepairGeneratedControlPlaneHostOptions) error {
 		repairCalls = append(repairCalls, opts)
-		targetPath := filepath.Join(opts.HostRoot, "etc", "kubernetes", "manifests", "kube-scheduler.yaml")
+		targetPath := filepath.Join(
+			opts.HostRoot,
+			"etc",
+			"kubernetes",
+			"manifests",
+			"kube-scheduler.yaml",
+		)
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return err
 		}
@@ -9562,7 +10410,16 @@ func TestSyncRevertCmdRejectsLocalScopeForGlobalHostPath(t *testing.T) {
 		},
 	}
 
-	desiredHostPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet")
+	desiredHostPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
 	if err := os.MkdirAll(filepath.Dir(desiredHostPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(desiredHostPath), err)
 	}
@@ -9671,8 +10528,27 @@ func TestSyncStatusCmdWithMultiNodeRemoteHostPathDrift(t *testing.T) {
 		_ = os.RemoveAll(filepath.Join(runtimeRoot, clusterName))
 	})
 	bundleDir := t.TempDir()
-	desiredPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet")
-	hostDesiredPath := filepath.Join(bundleDir, "components", "kubernetes", "host-inputs", "10.0.0.11", "rootfs", "usr", "bin", "kubelet")
+	desiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
+	hostDesiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"host-inputs",
+		"10.0.0.11",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
 	hostDesiredContent := "desired-kubelet-host-11"
 	for path, content := range map[string]string{
 		desiredPath:     desiredContent,
@@ -9849,7 +10725,14 @@ func TestSyncStatusCmdReportsHostPathConflicts(t *testing.T) {
 		{component: "containerd", content: "desired-containerd"},
 		{component: "kubernetes", content: "desired-kubernetes"},
 	} {
-		desiredPath := filepath.Join(bundleDir, "components", entry.component, "files", "rootfs", "README")
+		desiredPath := filepath.Join(
+			bundleDir,
+			"components",
+			entry.component,
+			"files",
+			"rootfs",
+			"README",
+		)
 		if err := os.MkdirAll(filepath.Dir(desiredPath), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", entry.component, err)
 		}
@@ -9940,7 +10823,8 @@ func TestSyncStatusCmdReportsHostPathConflicts(t *testing.T) {
 		Hint       string   `yaml:"hint"`
 	}
 	for i := range out.HostPathConflicts {
-		if out.HostPathConflicts[i].Host == "10.0.0.11:22" && out.HostPathConflicts[i].Path == "/README" {
+		if out.HostPathConflicts[i].Host == "10.0.0.11:22" &&
+			out.HostPathConflicts[i].Path == "/README" {
 			remoteConflict = &out.HostPathConflicts[i]
 			break
 		}
@@ -10011,8 +10895,27 @@ func TestSyncStatusCmdReportsLocalInputHostSplits(t *testing.T) {
 		_ = os.RemoveAll(filepath.Join(runtimeRoot, clusterName))
 	})
 	bundleDir := t.TempDir()
-	desiredPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
-	hostDesiredPath := filepath.Join(bundleDir, "components", "kubernetes", "host-inputs", "10.0.0.11", "files", "etc", "kubernetes", "kubeadm.yaml")
+	desiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
+	hostDesiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"host-inputs",
+		"10.0.0.11",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	for _, path := range []string{desiredPath, hostDesiredPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -10047,7 +10950,12 @@ func TestSyncStatusCmdReportsLocalInputHostSplits(t *testing.T) {
 				{
 					Name: "kubernetes",
 					InputBindings: map[string]string{
-						"kubeadm-cluster-config": filepath.Join(t.TempDir(), "inputs", "kubernetes", "kubeadm-cluster-config.yaml"),
+						"kubeadm-cluster-config": filepath.Join(
+							t.TempDir(),
+							"inputs",
+							"kubernetes",
+							"kubeadm-cluster-config.yaml",
+						),
 					},
 				},
 			},
@@ -10252,8 +11160,27 @@ func TestSyncRevertCmdWithRemoteHostPathSelector(t *testing.T) {
 		_ = os.RemoveAll(filepath.Join(runtimeRoot, clusterName))
 	})
 	bundleDir := t.TempDir()
-	desiredPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet")
-	hostDesiredPath := filepath.Join(bundleDir, "components", "kubernetes", "host-inputs", "10.0.0.11", "rootfs", "usr", "bin", "kubelet")
+	desiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
+	hostDesiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"host-inputs",
+		"10.0.0.11",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
 	hostDesiredContent := "desired-kubelet-host-11"
 	for path, content := range map[string]string{
 		desiredPath:     desiredContent,
@@ -10376,7 +11303,14 @@ func TestSyncRevertCmdWithRemoteHostPathSelector(t *testing.T) {
 		t.Fatalf("beforeState = %q, want %q", got, want)
 	}
 	if got, want := out.CurrentState, "Clean"; got != want {
-		t.Fatalf("currentState = %q, want %q; currentHostPaths=%+v; cmds=%v; output=%s", got, want, out.CurrentCompare.HostPaths, fakeRemote.cmds, buf.String())
+		t.Fatalf(
+			"currentState = %q, want %q; currentHostPaths=%+v; cmds=%v; output=%s",
+			got,
+			want,
+			out.CurrentCompare.HostPaths,
+			fakeRemote.cmds,
+			buf.String(),
+		)
 	}
 	if !out.Reverted {
 		t.Fatal("reverted = false, want true")
@@ -10457,8 +11391,27 @@ func TestSyncRevertCmdWithRemoteLocalScopeHostPathSelector(t *testing.T) {
 	bundleDir := t.TempDir()
 	defaultDesired := "apiVersion: kubeadm.k8s.io/v1beta4\nkind: ClusterConfiguration\nclusterName: default-desired\n"
 	remoteDesired := "apiVersion: kubeadm.k8s.io/v1beta4\nkind: ClusterConfiguration\nclusterName: remote-desired\n"
-	defaultDesiredPath := filepath.Join(bundleDir, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
-	remoteDesiredPath := filepath.Join(bundleDir, "components", "kubernetes", "host-inputs", "10.0.0.11", "files", "etc", "kubernetes", "kubeadm.yaml")
+	defaultDesiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
+	remoteDesiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"host-inputs",
+		"10.0.0.11",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
 	for path, content := range map[string]string{
 		defaultDesiredPath: defaultDesired,
 		remoteDesiredPath:  remoteDesired,
@@ -10535,7 +11488,9 @@ func TestSyncRevertCmdWithRemoteLocalScopeHostPathSelector(t *testing.T) {
 	if got, want := string(localData), localLive; got != want {
 		t.Fatalf("local host path content = %q, want unchanged %q", got, want)
 	}
-	remoteData, err := os.ReadFile(filepath.Join(remoteHostRoot, "etc", "kubernetes", "kubeadm.yaml"))
+	remoteData, err := os.ReadFile(
+		filepath.Join(remoteHostRoot, "etc", "kubernetes", "kubeadm.yaml"),
+	)
 	if err != nil {
 		t.Fatalf("ReadFile(remote) error = %v", err)
 	}
@@ -10663,7 +11618,14 @@ func TestSyncRevertCmdRejectsAmbiguousRemoteHostPathWithoutComponent(t *testing.
 		{component: "containerd", content: desiredContainerd},
 		{component: "kubernetes", content: desiredKubernetes},
 	} {
-		desiredPath := filepath.Join(bundleDir, "components", entry.component, "files", "rootfs", "README")
+		desiredPath := filepath.Join(
+			bundleDir,
+			"components",
+			entry.component,
+			"files",
+			"rootfs",
+			"README",
+		)
 		if err := os.MkdirAll(filepath.Dir(desiredPath), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", entry.component, err)
 		}
@@ -10732,7 +11694,10 @@ func TestSyncRevertCmdRejectsAmbiguousRemoteHostPathWithoutComponent(t *testing.
 	if err == nil {
 		t.Fatal("Execute() error = nil, want ambiguity error")
 	}
-	if got := err.Error(); !strings.Contains(got, "specify --host or --component from [containerd, kubernetes]") {
+	if got := err.Error(); !strings.Contains(
+		got,
+		"specify --host or --component from [containerd, kubernetes]",
+	) {
 		t.Fatalf("Execute() error = %q, want component guidance", got)
 	}
 }
@@ -10799,7 +11764,14 @@ func TestSyncRevertCmdWithRemoteHostPathAndComponentSelector(t *testing.T) {
 		{component: "containerd", content: "desired-containerd"},
 		{component: "kubernetes", content: "desired-kubernetes"},
 	} {
-		desiredPath := filepath.Join(bundleDir, "components", entry.component, "files", "rootfs", "README")
+		desiredPath := filepath.Join(
+			bundleDir,
+			"components",
+			entry.component,
+			"files",
+			"rootfs",
+			"README",
+		)
 		if err := os.MkdirAll(filepath.Dir(desiredPath), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", entry.component, err)
 		}
@@ -11038,7 +12010,11 @@ type syncHealthProofTestReportOptions struct {
 	Stages                 []syncHealthProofAcceptanceReportStage
 }
 
-func writeSyncHealthProofTestReport(t *testing.T, path string, opts syncHealthProofTestReportOptions) {
+func writeSyncHealthProofTestReport(
+	t *testing.T,
+	path string,
+	opts syncHealthProofTestReportOptions,
+) {
 	t.Helper()
 
 	bomFile := opts.BOMFile
@@ -11140,7 +12116,11 @@ func syncHealthProofTestStages(revertCheck bool) []syncHealthProofAcceptanceRepo
 	}
 	for i := range stages {
 		switch stages[i].Name {
-		case "revert-check-drift-inject", "revert-check-drift-diff", "revert-check-revert", "revert-check-clean-diff", "validate-cluster-after-revert":
+		case "revert-check-drift-inject",
+			"revert-check-drift-diff",
+			"revert-check-revert",
+			"revert-check-clean-diff",
+			"validate-cluster-after-revert":
 			stages[i].Status = "Passed"
 		}
 	}
@@ -11152,7 +12132,10 @@ func syncHealthProofTestSignalPassed(proof bom.DistributionHealthProof, name str
 	return signal != nil && signal.Passed
 }
 
-func syncHealthProofTestSignal(proof bom.DistributionHealthProof, name string) *bom.DistributionHealthSignal {
+func syncHealthProofTestSignal(
+	proof bom.DistributionHealthProof,
+	name string,
+) *bom.DistributionHealthSignal {
 	for i := range proof.Spec.Signals {
 		if proof.Spec.Signals[i].Name == name {
 			return &proof.Spec.Signals[i]
@@ -11162,7 +12145,16 @@ func syncHealthProofTestSignal(proof bom.DistributionHealthProof, name string) *
 }
 
 func syncFixtureRoot() string {
-	return filepath.Join("..", "..", "..", "pkg", "distribution", "packageformat", "testdata", "kubernetes-rootfs")
+	return filepath.Join(
+		"..",
+		"..",
+		"..",
+		"pkg",
+		"distribution",
+		"packageformat",
+		"testdata",
+		"kubernetes-rootfs",
+	)
 }
 
 func syncLifecycleBOM() *bom.BOM {
@@ -11183,7 +12175,10 @@ func syncLifecycleBOM() *bom.BOM {
 func writeSyncTestPackage(t *testing.T, root string) {
 	t.Helper()
 
-	writeSyncTestFile(t, filepath.Join(root, "package.yaml"), `apiVersion: distribution.sealos.io/v1alpha1
+	writeSyncTestFile(
+		t,
+		filepath.Join(root, "package.yaml"),
+		`apiVersion: distribution.sealos.io/v1alpha1
 kind: ComponentPackage
 metadata:
   name: runtime-rootfs
@@ -11211,9 +12206,16 @@ spec:
       target: allNodes
       path: hooks/bootstrap.sh
       timeoutSeconds: 5
-`, 0o644)
+`,
+		0o644,
+	)
 	writeSyncTestFile(t, filepath.Join(root, "rootfs", "README"), "runtime rootfs\n", 0o644)
-	writeSyncTestFile(t, filepath.Join(root, "files", "etc", "demo", "config.yaml"), "clusterName: package-default\nfeatureGate: disabled\n", 0o644)
+	writeSyncTestFile(
+		t,
+		filepath.Join(root, "files", "etc", "demo", "config.yaml"),
+		"clusterName: package-default\nfeatureGate: disabled\n",
+		0o644,
+	)
 	writeSyncTestExecutable(t, filepath.Join(root, "hooks", "bootstrap.sh"), "#!/bin/sh\nexit 0\n")
 }
 
@@ -11221,7 +12223,10 @@ func writeSyncRequiredInputsTestPackage(t *testing.T, root string) {
 	t.Helper()
 
 	writeSyncTestPackage(t, root)
-	writeSyncTestFile(t, filepath.Join(root, "package.yaml"), `apiVersion: distribution.sealos.io/v1alpha1
+	writeSyncTestFile(
+		t,
+		filepath.Join(root, "package.yaml"),
+		`apiVersion: distribution.sealos.io/v1alpha1
 kind: ComponentPackage
 metadata:
   name: runtime-rootfs
@@ -11258,8 +12263,15 @@ spec:
       target: allNodes
       path: hooks/bootstrap.sh
       timeoutSeconds: 5
-`, 0o644)
-	writeSyncTestFile(t, filepath.Join(root, "files", "etc", "demo", "admin-password.txt"), "package-default-password\n", 0o600)
+`,
+		0o644,
+	)
+	writeSyncTestFile(
+		t,
+		filepath.Join(root, "files", "etc", "demo", "admin-password.txt"),
+		"package-default-password\n",
+		0o600,
+	)
 }
 
 func syncPOCBOMPath() string {
@@ -11323,11 +12335,20 @@ func writeSyncPOCLocalRepo(t *testing.T) string {
 
 	root := t.TempDir()
 	writeSyncLocalInput(t, root, "containerd", "containerd-config.toml", "version = 2\n")
-	writeSyncLocalInput(t, root, "kubernetes", "kubeadm-cluster-config.yaml", "apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\n")
+	writeSyncLocalInput(
+		t,
+		root,
+		"kubernetes",
+		"kubeadm-cluster-config.yaml",
+		"apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\n",
+	)
 	return root
 }
 
-func syncRenderInputChangeByName(changes []syncRenderInputChange, name string) (syncRenderInputChange, bool) {
+func syncRenderInputChangeByName(
+	changes []syncRenderInputChange,
+	name string,
+) (syncRenderInputChange, bool) {
 	for _, change := range changes {
 		if change.Name == name {
 			return change, true
@@ -11336,7 +12357,10 @@ func syncRenderInputChangeByName(changes []syncRenderInputChange, name string) (
 	return syncRenderInputChange{}, false
 }
 
-func syncPlanHostPathSetByProjection(sets []syncPlanHostPathSet, projectionClass string) *syncPlanHostPathSet {
+func syncPlanHostPathSetByProjection(
+	sets []syncPlanHostPathSet,
+	projectionClass string,
+) *syncPlanHostPathSet {
 	for i := range sets {
 		if sets[i].ProjectionClass == projectionClass {
 			return &sets[i]
@@ -11345,7 +12369,11 @@ func syncPlanHostPathSetByProjection(sets []syncPlanHostPathSet, projectionClass
 	return nil
 }
 
-func assertSyncPlanStepTarget(t *testing.T, out syncPlanOutput, componentName, stepName, effective, scope, hosts string) {
+func assertSyncPlanStepTarget(
+	t *testing.T,
+	out syncPlanOutput,
+	componentName, stepName, effective, scope, hosts string,
+) {
 	t.Helper()
 	for _, component := range out.Components {
 		if component.Name != componentName {
@@ -11356,7 +12384,13 @@ func assertSyncPlanStepTarget(t *testing.T, out syncPlanOutput, componentName, s
 				continue
 			}
 			if got := step.Target.Effective; got != effective {
-				t.Fatalf("%s/%s target.effective = %q, want %q", componentName, stepName, got, effective)
+				t.Fatalf(
+					"%s/%s target.effective = %q, want %q",
+					componentName,
+					stepName,
+					got,
+					effective,
+				)
 			}
 			if got := step.Target.Scope; got != scope {
 				t.Fatalf("%s/%s target.scope = %q, want %q", componentName, stepName, got, scope)
@@ -11464,7 +12498,11 @@ func (f *fakeSyncRemoteExecutor) Fetch(host, src, dst string) error {
 	return os.WriteFile(dst, data, info.Mode().Perm())
 }
 
-func (f *fakeSyncRemoteExecutor) CmdAsyncWithContext(_ context.Context, host string, cmds ...string) error {
+func (f *fakeSyncRemoteExecutor) CmdAsyncWithContext(
+	_ context.Context,
+	host string,
+	cmds ...string,
+) error {
 	_, err := f.rootForHost(host)
 	if err != nil {
 		return err

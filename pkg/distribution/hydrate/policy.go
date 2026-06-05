@@ -15,16 +15,16 @@
 package hydrate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/distribution/ownership"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
 )
 
 const LocalPatchPolicyBundlePath = "policy/" + ownership.LocalPatchPolicyFileName
@@ -32,18 +32,18 @@ const LocalPatchPolicyBundlePath = "policy/" + ownership.LocalPatchPolicyFileNam
 const localPatchPolicyBuiltInPath = "builtInDefault"
 
 type LocalPatchPolicyCandidate struct {
-	Source    ownership.LocalPatchPolicySource `json:"source" yaml:"source"`
-	Path      string                           `json:"path,omitempty" yaml:"path,omitempty"`
+	Source    ownership.LocalPatchPolicySource `json:"source"              yaml:"source"`
+	Path      string                           `json:"path,omitempty"      yaml:"path,omitempty"`
 	Component string                           `json:"component,omitempty" yaml:"component,omitempty"`
-	Selected  bool                             `json:"selected" yaml:"selected"`
+	Selected  bool                             `json:"selected"            yaml:"selected"`
 }
 
 type LocalPatchPolicySelection struct {
-	Document   *ownership.LocalPatchPolicyDocument `json:"-" yaml:"-"`
-	Source     ownership.LocalPatchPolicySource    `json:"source" yaml:"source"`
-	Path       string                              `json:"path" yaml:"path"`
-	Name       string                              `json:"name" yaml:"name"`
-	Scope      ownership.LocalPatchPolicyScope     `json:"scope" yaml:"scope"`
+	Document   *ownership.LocalPatchPolicyDocument `json:"-"                    yaml:"-"`
+	Source     ownership.LocalPatchPolicySource    `json:"source"               yaml:"source"`
+	Path       string                              `json:"path"                 yaml:"path"`
+	Name       string                              `json:"name"                 yaml:"name"`
+	Scope      ownership.LocalPatchPolicyScope     `json:"scope"                yaml:"scope"`
 	Candidates []LocalPatchPolicyCandidate         `json:"candidates,omitempty" yaml:"candidates,omitempty"`
 }
 
@@ -59,7 +59,12 @@ func resolvePlanLocalPatchPolicy(plan *Plan) ownership.LocalPatchPolicyDocument 
 	return ownership.DefaultLocalPatchPolicyDocument()
 }
 
-func SelectLocalPatchPolicy(plan *Plan, bomRoot string, sources SourceProvider, repo LocalPatchPolicyRepo) (*LocalPatchPolicySelection, error) {
+func SelectLocalPatchPolicy(
+	plan *Plan,
+	bomRoot string,
+	sources SourceProvider,
+	repo LocalPatchPolicyRepo,
+) (*LocalPatchPolicySelection, error) {
 	document := ownership.DefaultLocalPatchPolicyDocument().Clone()
 	selection := &LocalPatchPolicySelection{
 		Document: document,
@@ -91,7 +96,12 @@ func SelectLocalPatchPolicy(plan *Plan, bomRoot string, sources SourceProvider, 
 
 	if plan == nil {
 		if localPolicy != nil {
-			selection.selectDocument(localPolicy, ownership.LocalPatchPolicySourceLocalRepo, localPolicyPath, "")
+			selection.selectDocument(
+				localPolicy,
+				ownership.LocalPatchPolicySourceLocalRepo,
+				localPolicyPath,
+				"",
+			)
 		}
 		return selection, nil
 	}
@@ -116,7 +126,12 @@ func SelectLocalPatchPolicy(plan *Plan, bomRoot string, sources SourceProvider, 
 	selection.Candidates = append(selection.Candidates, packageCandidates...)
 
 	if localPolicy != nil {
-		selection.selectDocument(localPolicy, ownership.LocalPatchPolicySourceLocalRepo, localPolicyPath, "")
+		selection.selectDocument(
+			localPolicy,
+			ownership.LocalPatchPolicySourceLocalRepo,
+			localPolicyPath,
+			"",
+		)
 		return selection, nil
 	}
 
@@ -140,11 +155,20 @@ func SelectLocalPatchPolicy(plan *Plan, bomRoot string, sources SourceProvider, 
 	if err != nil {
 		return nil, err
 	}
-	selection.selectDocument(packagePolicy, ownership.LocalPatchPolicySourcePackage, packageCandidate.Path, packageCandidate.Component)
+	selection.selectDocument(
+		packagePolicy,
+		ownership.LocalPatchPolicySourcePackage,
+		packageCandidate.Path,
+		packageCandidate.Component,
+	)
 	return selection, nil
 }
 
-func (s *LocalPatchPolicySelection) selectDocument(document *ownership.LocalPatchPolicyDocument, source ownership.LocalPatchPolicySource, path, component string) {
+func (s *LocalPatchPolicySelection) selectDocument(
+	document *ownership.LocalPatchPolicyDocument,
+	source ownership.LocalPatchPolicySource,
+	path, component string,
+) {
 	if s == nil || document == nil {
 		return
 	}
@@ -156,7 +180,10 @@ func (s *LocalPatchPolicySelection) selectDocument(document *ownership.LocalPatc
 	s.markOnlySelected(source, path, component)
 }
 
-func (s *LocalPatchPolicySelection) markOnlySelected(source ownership.LocalPatchPolicySource, path, component string) {
+func (s *LocalPatchPolicySelection) markOnlySelected(
+	source ownership.LocalPatchPolicySource,
+	path, component string,
+) {
 	if s == nil {
 		return
 	}
@@ -191,22 +218,33 @@ func packageLocalPatchPolicyCandidates(plan *Plan) ([]LocalPatchPolicyCandidate,
 	return candidates, nil
 }
 
-func selectSinglePackageLocalPatchPolicyCandidate(candidates []LocalPatchPolicyCandidate) (LocalPatchPolicyCandidate, bool, error) {
+func selectSinglePackageLocalPatchPolicyCandidate(
+	candidates []LocalPatchPolicyCandidate,
+) (LocalPatchPolicyCandidate, bool, error) {
 	if len(candidates) == 0 {
 		return LocalPatchPolicyCandidate{}, false, nil
 	}
 	if len(candidates) > 1 {
 		descriptions := make([]string, 0, len(candidates))
 		for _, candidate := range candidates {
-			descriptions = append(descriptions, fmt.Sprintf("%s:%s", candidate.Component, candidate.Path))
+			descriptions = append(
+				descriptions,
+				fmt.Sprintf("%s:%s", candidate.Component, candidate.Path),
+			)
 		}
 		slices.Sort(descriptions)
-		return LocalPatchPolicyCandidate{}, false, fmt.Errorf("multiple component packages declare local patch policies: %s; exactly one package policy is supported", strings.Join(descriptions, ", "))
+		return LocalPatchPolicyCandidate{}, false, fmt.Errorf(
+			"multiple component packages declare local patch policies: %s; exactly one package policy is supported",
+			strings.Join(descriptions, ", "),
+		)
 	}
 	return candidates[0], true, nil
 }
 
-func LoadBOMLocalPatchPolicy(plan *Plan, bomRoot string) (*ownership.LocalPatchPolicyDocument, error) {
+func LoadBOMLocalPatchPolicy(
+	plan *Plan,
+	bomRoot string,
+) (*ownership.LocalPatchPolicyDocument, error) {
 	if plan == nil {
 		return nil, nil
 	}
@@ -215,7 +253,10 @@ func LoadBOMLocalPatchPolicy(plan *Plan, bomRoot string) (*ownership.LocalPatchP
 		return nil, nil
 	}
 	if strings.TrimSpace(bomRoot) == "" {
-		return nil, fmt.Errorf("BOM root cannot be empty when BOM declares local patch policy %q", policyPath)
+		return nil, fmt.Errorf(
+			"BOM root cannot be empty when BOM declares local patch policy %q",
+			policyPath,
+		)
 	}
 	cleanPath, err := cleanRelative(policyPath)
 	if err != nil {
@@ -229,7 +270,10 @@ func LoadBOMLocalPatchPolicy(plan *Plan, bomRoot string) (*ownership.LocalPatchP
 	return document.Clone(), nil
 }
 
-func LoadPackageLocalPatchPolicy(plan *Plan, sources SourceProvider) (*ownership.LocalPatchPolicyDocument, error) {
+func LoadPackageLocalPatchPolicy(
+	plan *Plan,
+	sources SourceProvider,
+) (*ownership.LocalPatchPolicyDocument, error) {
 	candidates, err := packageLocalPatchPolicyCandidates(plan)
 	if err != nil {
 		return nil, err
@@ -258,7 +302,12 @@ func LoadPackageLocalPatchPolicy(plan *Plan, sources SourceProvider) (*ownership
 	resolved := filepath.Join(source.Root, filepath.FromSlash(selected.Path))
 	document, err := ownership.LoadLocalPatchPolicyFile(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("load component %q local patch policy %q: %w", component.Name, selected.Path, err)
+		return nil, fmt.Errorf(
+			"load component %q local patch policy %q: %w",
+			component.Name,
+			selected.Path,
+			err,
+		)
 	}
 	return document.Clone(), nil
 }
@@ -309,7 +358,10 @@ func renderLocalPatchPolicy(plan *Plan, bundle *Bundle, outputDir string) error 
 	return nil
 }
 
-func LoadBundleLocalPatchPolicy(bundle *Bundle, bundleRoot string) (*ownership.LocalPatchPolicyDocument, error) {
+func LoadBundleLocalPatchPolicy(
+	bundle *Bundle,
+	bundleRoot string,
+) (*ownership.LocalPatchPolicyDocument, error) {
 	if bundle == nil {
 		return nil, fmt.Errorf("bundle cannot be nil")
 	}
@@ -332,11 +384,23 @@ func LoadBundleLocalPatchPolicy(bundle *Bundle, bundleRoot string) (*ownership.L
 	if err != nil {
 		return nil, err
 	}
-	if expectedName := strings.TrimSpace(bundle.Spec.LocalPatchPolicyName); expectedName != "" && document.EffectiveName() != expectedName {
-		return nil, fmt.Errorf("local patch policy name mismatch for source %q: bundle records %q but rendered policy is %q", source, expectedName, document.EffectiveName())
+	if expectedName := strings.TrimSpace(bundle.Spec.LocalPatchPolicyName); expectedName != "" &&
+		document.EffectiveName() != expectedName {
+		return nil, fmt.Errorf(
+			"local patch policy name mismatch for source %q: bundle records %q but rendered policy is %q",
+			source,
+			expectedName,
+			document.EffectiveName(),
+		)
 	}
-	if expectedScope := bundle.Spec.LocalPatchPolicyScope; expectedScope != "" && document.Spec.EffectiveScope() != expectedScope {
-		return nil, fmt.Errorf("local patch policy scope mismatch for source %q: bundle records %q but rendered policy is %q", source, expectedScope, document.Spec.EffectiveScope())
+	if expectedScope := bundle.Spec.LocalPatchPolicyScope; expectedScope != "" &&
+		document.Spec.EffectiveScope() != expectedScope {
+		return nil, fmt.Errorf(
+			"local patch policy scope mismatch for source %q: bundle records %q but rendered policy is %q",
+			source,
+			expectedScope,
+			document.Spec.EffectiveScope(),
+		)
 	}
 	if expectedDigest := strings.TrimSpace(bundle.Spec.LocalPatchPolicyDigest); expectedDigest != "" {
 		data, err := os.ReadFile(resolved)
@@ -345,13 +409,20 @@ func LoadBundleLocalPatchPolicy(bundle *Bundle, bundleRoot string) (*ownership.L
 		}
 		actualDigest := digest.Canonical.FromBytes(data).String()
 		if actualDigest != expectedDigest {
-			return nil, fmt.Errorf("local patch policy digest mismatch for source %q: bundle records %q but rendered policy is %q", source, expectedDigest, actualDigest)
+			return nil, fmt.Errorf(
+				"local patch policy digest mismatch for source %q: bundle records %q but rendered policy is %q",
+				source,
+				expectedDigest,
+				actualDigest,
+			)
 		}
 	}
 	return document, nil
 }
 
-func resolveBundleLocalPatchPolicySource(spec BundleSpec) (ownership.LocalPatchPolicySource, error) {
+func resolveBundleLocalPatchPolicySource(
+	spec BundleSpec,
+) (ownership.LocalPatchPolicySource, error) {
 	source := spec.LocalPatchPolicySource
 	path := strings.TrimSpace(spec.LocalPatchPolicyPath)
 
@@ -359,7 +430,9 @@ func resolveBundleLocalPatchPolicySource(spec BundleSpec) (ownership.LocalPatchP
 		return ownership.LocalPatchPolicySourceBuiltInDefault, nil
 	}
 	if source == "" {
-		return "", fmt.Errorf("local patch policy source must be set when localPatchPolicyPath is present")
+		return "", errors.New(
+			"local patch policy source must be set when localPatchPolicyPath is present",
+		)
 	}
 	if err := source.Validate(); err != nil {
 		return "", fmt.Errorf("local patch policy source: %w", err)

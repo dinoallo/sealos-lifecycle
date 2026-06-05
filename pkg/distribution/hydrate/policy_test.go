@@ -20,10 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/distribution/ownership"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
 )
 
 func TestLoadBundleLocalPatchPolicyLegacyDefault(t *testing.T) {
@@ -216,7 +215,10 @@ func TestLoadPackageLocalPatchPolicyRejectsMultipleBeforeSourceLookup(t *testing
 		t.Fatal("LoadPackageLocalPatchPolicy() error = nil, want multiple package policy error")
 	}
 	if !strings.Contains(err.Error(), "multiple component packages declare local patch policies") {
-		t.Fatalf("LoadPackageLocalPatchPolicy() error = %v, want multiple package policy error", err)
+		t.Fatalf(
+			"LoadPackageLocalPatchPolicy() error = %v, want multiple package policy error",
+			err,
+		)
 	}
 }
 
@@ -258,11 +260,26 @@ func TestSelectLocalPatchPolicyReportsCandidatesAndPrecedence(t *testing.T) {
 	if got, want := selection.Name, "bom-policy"; got != want {
 		t.Fatalf("selection.Name = %q, want %q", got, want)
 	}
-	if !hasPolicyCandidate(selection.Candidates, ownership.LocalPatchPolicySourceBOM, "policy/local-patch-policy.yaml", "", true) {
+	if !hasPolicyCandidate(
+		selection.Candidates,
+		ownership.LocalPatchPolicySourceBOM,
+		"policy/local-patch-policy.yaml",
+		"",
+		true,
+	) {
 		t.Fatalf("selection.Candidates missing selected BOM candidate: %#v", selection.Candidates)
 	}
-	if !hasPolicyCandidate(selection.Candidates, ownership.LocalPatchPolicySourcePackage, "policy/local-patch-policy.yaml", "runtime", false) {
-		t.Fatalf("selection.Candidates missing unselected package candidate: %#v", selection.Candidates)
+	if !hasPolicyCandidate(
+		selection.Candidates,
+		ownership.LocalPatchPolicySourcePackage,
+		"policy/local-patch-policy.yaml",
+		"runtime",
+		false,
+	) {
+		t.Fatalf(
+			"selection.Candidates missing unselected package candidate: %#v",
+			selection.Candidates,
+		)
 	}
 }
 
@@ -282,12 +299,26 @@ func TestSelectLocalPatchPolicyUsesBuiltInDefaultWhenNoExternalSource(t *testing
 	if got, want := selection.Name, ownership.DefaultLocalPatchPolicyName; got != want {
 		t.Fatalf("selection.Name = %q, want %q", got, want)
 	}
-	if !hasPolicyCandidate(selection.Candidates, ownership.LocalPatchPolicySourceBuiltInDefault, "builtInDefault", "", true) {
-		t.Fatalf("selection.Candidates missing selected built-in default: %#v", selection.Candidates)
+	if !hasPolicyCandidate(
+		selection.Candidates,
+		ownership.LocalPatchPolicySourceBuiltInDefault,
+		"builtInDefault",
+		"",
+		true,
+	) {
+		t.Fatalf(
+			"selection.Candidates missing selected built-in default: %#v",
+			selection.Candidates,
+		)
 	}
 }
 
-func hasPolicyCandidate(candidates []LocalPatchPolicyCandidate, source ownership.LocalPatchPolicySource, path, component string, selected bool) bool {
+func hasPolicyCandidate(
+	candidates []LocalPatchPolicyCandidate,
+	source ownership.LocalPatchPolicySource,
+	path, component string,
+	selected bool,
+) bool {
 	for _, candidate := range candidates {
 		if candidate.Source == source &&
 			candidate.Path == path &&
@@ -304,5 +335,10 @@ func testLocalPatchPolicyYAML(name string, allowedPrefixes ...string) []byte {
 	for _, prefix := range allowedPrefixes {
 		prefixLines = append(prefixLines, "        - "+prefix)
 	}
-	return []byte("apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: " + name + "\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n" + strings.Join(prefixLines, "\n") + "\n")
+	return []byte(
+		"apiVersion: distribution.sealos.io/v1alpha1\nkind: LocalPatchPolicy\nmetadata:\n  name: " + name + "\nspec:\n  scope: clusterLocal\n  forbiddenExactPaths:\n    - status\n    - spec.selector\n  forbiddenMetadataKeys:\n    - uid\n    - resourceVersion\n    - generation\n    - creationTimestamp\n    - managedFields\n    - ownerReferences\n    - finalizers\n    - generateName\n    - selfLink\n    - deletionTimestamp\n    - deletionGracePeriodSeconds\n  forbiddenContainerFields:\n    - image\n  kindRules:\n    - kind: ConfigMap\n      allowedPrefixes:\n" + strings.Join(
+			prefixLines,
+			"\n",
+		) + "\n",
+	)
 }

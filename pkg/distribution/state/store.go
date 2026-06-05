@@ -20,11 +20,10 @@ import (
 	"os"
 	"path/filepath"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/labring/sealos/pkg/constants"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -44,7 +43,11 @@ func CurrentAppliedRevisionName(clusterName string) string {
 }
 
 func AppliedRevisionPath(clusterName string) string {
-	return filepath.Join(constants.NewPathResolver(clusterName).RunRoot(), StoreDirName, AppliedRevisionFileName)
+	return filepath.Join(
+		constants.NewPathResolver(clusterName).RunRoot(),
+		StoreDirName,
+		AppliedRevisionFileName,
+	)
 }
 
 type PersistRevisionOptions struct {
@@ -98,12 +101,33 @@ func SaveAppliedRevision(doc *AppliedRevision) error {
 	return nil
 }
 
-func PersistRenderedState(clusterName string, ref BOMReference, desiredStateDigest, localRepoRevision, localPatchRevision string) (*AppliedRevision, error) {
-	return PersistRenderedStateWithOptions(clusterName, ref, desiredStateDigest, localRepoRevision, localPatchRevision, PersistRevisionOptions{})
+func PersistRenderedState(
+	clusterName string,
+	ref BOMReference,
+	desiredStateDigest, localRepoRevision, localPatchRevision string,
+) (*AppliedRevision, error) {
+	return PersistRenderedStateWithOptions(
+		clusterName,
+		ref,
+		desiredStateDigest,
+		localRepoRevision,
+		localPatchRevision,
+		PersistRevisionOptions{},
+	)
 }
 
-func PersistRenderedStateWithOptions(clusterName string, ref BOMReference, desiredStateDigest, localRepoRevision, localPatchRevision string, opts PersistRevisionOptions) (*AppliedRevision, error) {
-	doc := NewAppliedRevision(CurrentAppliedRevisionName(clusterName), clusterName, ref, desiredStateDigest)
+func PersistRenderedStateWithOptions(
+	clusterName string,
+	ref BOMReference,
+	desiredStateDigest, localRepoRevision, localPatchRevision string,
+	opts PersistRevisionOptions,
+) (*AppliedRevision, error) {
+	doc := NewAppliedRevision(
+		CurrentAppliedRevisionName(clusterName),
+		clusterName,
+		ref,
+		desiredStateDigest,
+	)
 	doc.Spec.LocalRepoRevision = localRepoRevision
 	doc.Spec.LocalPatchRevision = localPatchRevision
 	doc.Spec.RequestedTarget = cloneRequestedTarget(opts.RequestedTarget)
@@ -113,7 +137,9 @@ func PersistRenderedStateWithOptions(clusterName string, ref BOMReference, desir
 	switch {
 	case err == nil:
 		doc.Status.LastAppliedTime = existing.Status.LastAppliedTime
-		doc.Status.LastSuccessfulRevision = cloneRevisionSnapshot(existing.Status.LastSuccessfulRevision)
+		doc.Status.LastSuccessfulRevision = cloneRevisionSnapshot(
+			existing.Status.LastSuccessfulRevision,
+		)
 		doc.Status.SuccessfulRevisions = cloneRevisionSnapshots(existing.Status.SuccessfulRevisions)
 	case errors.Is(err, os.ErrNotExist):
 		existing = nil
@@ -140,17 +166,38 @@ func PersistRenderedStateWithOptions(clusterName string, ref BOMReference, desir
 	return doc, nil
 }
 
-func PersistSuccessfulApply(clusterName string, ref BOMReference, desiredStateDigest, localRepoRevision, localPatchRevision string) (*AppliedRevision, error) {
-	return PersistSuccessfulApplyWithOptions(clusterName, ref, desiredStateDigest, localRepoRevision, localPatchRevision, PersistRevisionOptions{})
+func PersistSuccessfulApply(
+	clusterName string,
+	ref BOMReference,
+	desiredStateDigest, localRepoRevision, localPatchRevision string,
+) (*AppliedRevision, error) {
+	return PersistSuccessfulApplyWithOptions(
+		clusterName,
+		ref,
+		desiredStateDigest,
+		localRepoRevision,
+		localPatchRevision,
+		PersistRevisionOptions{},
+	)
 }
 
-func PersistSuccessfulApplyWithOptions(clusterName string, ref BOMReference, desiredStateDigest, localRepoRevision, localPatchRevision string, opts PersistRevisionOptions) (*AppliedRevision, error) {
+func PersistSuccessfulApplyWithOptions(
+	clusterName string,
+	ref BOMReference,
+	desiredStateDigest, localRepoRevision, localPatchRevision string,
+	opts PersistRevisionOptions,
+) (*AppliedRevision, error) {
 	existing, err := LoadAppliedRevision(clusterName)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 
-	doc := NewAppliedRevision(CurrentAppliedRevisionName(clusterName), clusterName, ref, desiredStateDigest)
+	doc := NewAppliedRevision(
+		CurrentAppliedRevisionName(clusterName),
+		clusterName,
+		ref,
+		desiredStateDigest,
+	)
 	doc.Spec.LocalRepoRevision = localRepoRevision
 	doc.Spec.LocalPatchRevision = localPatchRevision
 	doc.Spec.RequestedTarget = cloneRequestedTarget(opts.RequestedTarget)
@@ -171,7 +218,12 @@ func PersistSuccessfulApplyWithOptions(clusterName string, ref BOMReference, des
 	doc.Status.LastSuccessfulRevision = &snapshot
 	doc.Status.SuccessfulRevisions = prependSuccessfulRevisionHistory(snapshot, existing)
 	doc.Status.Conditions = []Condition{
-		NewCondition(ConditionTypeApplied, corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
+		NewCondition(
+			ConditionTypeApplied,
+			corev1.ConditionTrue,
+			"ReconcileSucceeded",
+			"desired revision applied",
+		),
 	}
 
 	if err := SaveAppliedRevision(doc); err != nil {
@@ -201,7 +253,12 @@ func MarkSuccessfulApply(clusterName string) (*AppliedRevision, error) {
 	doc.Status.LastSuccessfulRevision = &snapshot
 	doc.Status.SuccessfulRevisions = prependSuccessfulRevisionHistory(snapshot, doc)
 	doc.Status.Conditions = []Condition{
-		NewCondition(ConditionTypeApplied, corev1.ConditionTrue, "ReconcileSucceeded", "desired revision applied"),
+		NewCondition(
+			ConditionTypeApplied,
+			corev1.ConditionTrue,
+			"ReconcileSucceeded",
+			"desired revision applied",
+		),
 	}
 
 	if err := SaveAppliedRevision(doc); err != nil {
@@ -220,14 +277,22 @@ func MarkDegraded(clusterName, reason, message string) (*AppliedRevision, bool, 
 	}
 
 	doc.Status.State = StateDegraded
-	doc.Status.Conditions = upsertCondition(doc.Status.Conditions, NewCondition(ConditionTypeApplied, corev1.ConditionFalse, reason, message))
+	doc.Status.Conditions = upsertCondition(
+		doc.Status.Conditions,
+		NewCondition(ConditionTypeApplied, corev1.ConditionFalse, reason, message),
+	)
 	if err := SaveAppliedRevision(doc); err != nil {
 		return nil, false, err
 	}
 	return doc, true, nil
 }
 
-func PersistObservedState(clusterName, desiredStateDigest string, observedState ClusterState, observedSummary *ObservedSummary, message string) (*AppliedRevision, bool, error) {
+func PersistObservedState(
+	clusterName, desiredStateDigest string,
+	observedState ClusterState,
+	observedSummary *ObservedSummary,
+	message string,
+) (*AppliedRevision, bool, error) {
 	if err := observedState.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -254,7 +319,10 @@ func PersistObservedState(clusterName, desiredStateDigest string, observedState 
 		now := metav1.Now()
 		doc.Status.ObservedSummary.LastObservedTime = &now
 	}
-	doc.Status.Conditions = upsertCondition(doc.Status.Conditions, observedStateCondition(observedState, message))
+	doc.Status.Conditions = upsertCondition(
+		doc.Status.Conditions,
+		observedStateCondition(observedState, message),
+	)
 	if err := SaveAppliedRevision(doc); err != nil {
 		return nil, false, err
 	}
@@ -264,13 +332,33 @@ func PersistObservedState(clusterName, desiredStateDigest string, observedState 
 func observedStateCondition(observedState ClusterState, message string) Condition {
 	switch observedState {
 	case StateClean:
-		return NewCondition(ConditionTypeObserved, corev1.ConditionFalse, "LiveStateMatchesDesired", observedMessage(message, "live tracked state matches desired ownership state"))
+		return NewCondition(
+			ConditionTypeObserved,
+			corev1.ConditionFalse,
+			"LiveStateMatchesDesired",
+			observedMessage(message, "live tracked state matches desired ownership state"),
+		)
 	case StateDirty:
-		return NewCondition(ConditionTypeObserved, corev1.ConditionTrue, "LocalOwnershipDriftDetected", observedMessage(message, "local-owned drift detected"))
+		return NewCondition(
+			ConditionTypeObserved,
+			corev1.ConditionTrue,
+			"LocalOwnershipDriftDetected",
+			observedMessage(message, "local-owned drift detected"),
+		)
 	case StateOrphan:
-		return NewCondition(ConditionTypeObserved, corev1.ConditionTrue, "GlobalOwnershipDriftDetected", observedMessage(message, "global-owned drift detected"))
+		return NewCondition(
+			ConditionTypeObserved,
+			corev1.ConditionTrue,
+			"GlobalOwnershipDriftDetected",
+			observedMessage(message, "global-owned drift detected"),
+		)
 	default:
-		return NewCondition(ConditionTypeObserved, corev1.ConditionUnknown, "ObservationIncomplete", observedMessage(message, "live ownership state could not be fully determined"))
+		return NewCondition(
+			ConditionTypeObserved,
+			corev1.ConditionUnknown,
+			"ObservationIncomplete",
+			observedMessage(message, "live ownership state could not be fully determined"),
+		)
 	}
 }
 
@@ -304,11 +392,15 @@ func cloneObservedSummary(summary *ObservedSummary) *ObservedSummary {
 	return &cloned
 }
 
-func prependSuccessfulRevisionHistory(snapshot RevisionSnapshot, existing *AppliedRevision) []RevisionSnapshot {
+func prependSuccessfulRevisionHistory(
+	snapshot RevisionSnapshot,
+	existing *AppliedRevision,
+) []RevisionSnapshot {
 	history := []RevisionSnapshot{cloneRevisionSnapshotValue(snapshot)}
 	if existing != nil {
 		history = append(history, existing.Status.SuccessfulRevisions...)
-		if len(existing.Status.SuccessfulRevisions) == 0 && existing.Status.LastSuccessfulRevision != nil {
+		if len(existing.Status.SuccessfulRevisions) == 0 &&
+			existing.Status.LastSuccessfulRevision != nil {
 			history = append(history, *existing.Status.LastSuccessfulRevision)
 		}
 	}

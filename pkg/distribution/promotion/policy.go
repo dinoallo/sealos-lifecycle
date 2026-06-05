@@ -29,32 +29,32 @@ const (
 )
 
 type CandidateRevision struct {
-	Line            string  `json:"line" yaml:"line"`
-	Revision        string  `json:"revision" yaml:"revision"`
-	SourceChannel   Channel `json:"sourceChannel" yaml:"sourceChannel"`
-	Replacing       string  `json:"replacing,omitempty" yaml:"replacing,omitempty"`
+	Line            string  `json:"line"                      yaml:"line"`
+	Revision        string  `json:"revision"                  yaml:"revision"`
+	SourceChannel   Channel `json:"sourceChannel"             yaml:"sourceChannel"`
+	Replacing       string  `json:"replacing,omitempty"       yaml:"replacing,omitempty"`
 	ComponentDigest string  `json:"componentDigest,omitempty" yaml:"componentDigest,omitempty"`
 }
 
 type HealthProofSummary struct {
-	Provided               bool     `json:"provided" yaml:"provided"`
-	Passed                 bool     `json:"passed" yaml:"passed"`
-	TotalSignals           int      `json:"totalSignals,omitempty" yaml:"totalSignals,omitempty"`
-	PassedSignals          int      `json:"passedSignals,omitempty" yaml:"passedSignals,omitempty"`
-	FailedSignals          []string `json:"failedSignals,omitempty" yaml:"failedSignals,omitempty"`
-	OptionalFailedSignals  []string `json:"optionalFailedSignals,omitempty" yaml:"optionalFailedSignals,omitempty"`
-	RequiredSignals        []string `json:"requiredSignals,omitempty" yaml:"requiredSignals,omitempty"`
-	FailedRequiredSignals  []string `json:"failedRequiredSignals,omitempty" yaml:"failedRequiredSignals,omitempty"`
+	Provided               bool     `json:"provided"                         yaml:"provided"`
+	Passed                 bool     `json:"passed"                           yaml:"passed"`
+	TotalSignals           int      `json:"totalSignals,omitempty"           yaml:"totalSignals,omitempty"`
+	PassedSignals          int      `json:"passedSignals,omitempty"          yaml:"passedSignals,omitempty"`
+	FailedSignals          []string `json:"failedSignals,omitempty"          yaml:"failedSignals,omitempty"`
+	OptionalFailedSignals  []string `json:"optionalFailedSignals,omitempty"  yaml:"optionalFailedSignals,omitempty"`
+	RequiredSignals        []string `json:"requiredSignals,omitempty"        yaml:"requiredSignals,omitempty"`
+	FailedRequiredSignals  []string `json:"failedRequiredSignals,omitempty"  yaml:"failedRequiredSignals,omitempty"`
 	MissingRequiredSignals []string `json:"missingRequiredSignals,omitempty" yaml:"missingRequiredSignals,omitempty"`
-	MinPassedSignals       int      `json:"minPassedSignals,omitempty" yaml:"minPassedSignals,omitempty"`
+	MinPassedSignals       int      `json:"minPassedSignals,omitempty"       yaml:"minPassedSignals,omitempty"`
 }
 
 type ChannelRule struct {
-	Channel               Channel   `json:"channel" yaml:"channel"`
-	Intent                string    `json:"intent" yaml:"intent"`
-	Rank                  int       `json:"rank" yaml:"rank"`
+	Channel               Channel   `json:"channel"               yaml:"channel"`
+	Intent                string    `json:"intent"                yaml:"intent"`
+	Rank                  int       `json:"rank"                  yaml:"rank"`
 	AllowedSourceChannels []Channel `json:"allowedSourceChannels" yaml:"allowedSourceChannels"`
-	RequiresHealthProof   bool      `json:"requiresHealthProof" yaml:"requiresHealthProof"`
+	RequiresHealthProof   bool      `json:"requiresHealthProof"   yaml:"requiresHealthProof"`
 }
 
 type Policy struct {
@@ -63,26 +63,26 @@ type Policy struct {
 
 type Request struct {
 	TargetChannel Channel            `json:"targetChannel" yaml:"targetChannel"`
-	Candidate     CandidateRevision  `json:"candidate" yaml:"candidate"`
-	HealthProof   HealthProofSummary `json:"healthProof" yaml:"healthProof"`
+	Candidate     CandidateRevision  `json:"candidate"     yaml:"candidate"`
+	HealthProof   HealthProofSummary `json:"healthProof"   yaml:"healthProof"`
 }
 
 type Decision struct {
-	Allowed     bool               `json:"allowed" yaml:"allowed"`
-	Transition  ChannelTransition  `json:"transition" yaml:"transition"`
+	Allowed     bool               `json:"allowed"              yaml:"allowed"`
+	Transition  ChannelTransition  `json:"transition"           yaml:"transition"`
 	Violations  []Violation        `json:"violations,omitempty" yaml:"violations,omitempty"`
-	Warnings    []string           `json:"warnings,omitempty" yaml:"warnings,omitempty"`
-	ChannelRule ChannelRule        `json:"channelRule" yaml:"channelRule"`
-	HealthProof HealthProofSummary `json:"healthProof" yaml:"healthProof"`
+	Warnings    []string           `json:"warnings,omitempty"   yaml:"warnings,omitempty"`
+	ChannelRule ChannelRule        `json:"channelRule"          yaml:"channelRule"`
+	HealthProof HealthProofSummary `json:"healthProof"          yaml:"healthProof"`
 }
 
 type ChannelTransition struct {
-	Line                string  `json:"line" yaml:"line"`
+	Line                string  `json:"line"                   yaml:"line"`
 	FromRevision        string  `json:"fromRevision,omitempty" yaml:"fromRevision,omitempty"`
-	ToRevision          string  `json:"toRevision" yaml:"toRevision"`
-	SourceChannel       Channel `json:"sourceChannel" yaml:"sourceChannel"`
-	TargetChannel       Channel `json:"targetChannel" yaml:"targetChannel"`
-	HealthProofRequired bool    `json:"healthProofRequired" yaml:"healthProofRequired"`
+	ToRevision          string  `json:"toRevision"             yaml:"toRevision"`
+	SourceChannel       Channel `json:"sourceChannel"          yaml:"sourceChannel"`
+	TargetChannel       Channel `json:"targetChannel"          yaml:"targetChannel"`
+	HealthProofRequired bool    `json:"healthProofRequired"    yaml:"healthProofRequired"`
 }
 
 type ViolationCode string
@@ -94,7 +94,7 @@ const (
 )
 
 type Violation struct {
-	Code    ViolationCode `json:"code" yaml:"code"`
+	Code    ViolationCode `json:"code"    yaml:"code"`
 	Message string        `json:"message" yaml:"message"`
 }
 
@@ -158,8 +158,14 @@ func (p Policy) Evaluate(req Request) (*Decision, error) {
 	}
 
 	if !channelIn(req.Candidate.SourceChannel, rule.AllowedSourceChannels) {
-		decision.addViolation(ViolationSourceChannelBlocked,
-			fmt.Sprintf("candidate source channel %q cannot promote to target channel %q", req.Candidate.SourceChannel, req.TargetChannel))
+		decision.addViolation(
+			ViolationSourceChannelBlocked,
+			fmt.Sprintf(
+				"candidate source channel %q cannot promote to target channel %q",
+				req.Candidate.SourceChannel,
+				req.TargetChannel,
+			),
+		)
 	}
 	if rule.RequiresHealthProof {
 		if !req.HealthProof.Provided {
@@ -172,24 +178,51 @@ func (p Policy) Evaluate(req Request) (*Decision, error) {
 			"health proof did not pass")
 	}
 	if len(req.HealthProof.FailedSignals) > 0 {
-		decision.addViolation(ViolationHealthProofFailed,
-			fmt.Sprintf("health proof has failed signal(s): %s", strings.Join(req.HealthProof.FailedSignals, ", ")))
+		decision.addViolation(
+			ViolationHealthProofFailed,
+			"health proof has failed signal(s): "+strings.Join(
+				req.HealthProof.FailedSignals,
+				", ",
+			),
+		)
 	}
 	if len(req.HealthProof.FailedRequiredSignals) > 0 {
-		decision.addViolation(ViolationHealthProofFailed,
-			fmt.Sprintf("health proof has failed required signal(s): %s", strings.Join(req.HealthProof.FailedRequiredSignals, ", ")))
+		decision.addViolation(
+			ViolationHealthProofFailed,
+			"health proof has failed required signal(s): "+strings.Join(
+				req.HealthProof.FailedRequiredSignals,
+				", ",
+			),
+		)
 	}
 	if len(req.HealthProof.MissingRequiredSignals) > 0 {
-		decision.addViolation(ViolationHealthProofFailed,
-			fmt.Sprintf("health proof is missing required signal(s): %s", strings.Join(req.HealthProof.MissingRequiredSignals, ", ")))
+		decision.addViolation(
+			ViolationHealthProofFailed,
+			"health proof is missing required signal(s): "+strings.Join(
+				req.HealthProof.MissingRequiredSignals,
+				", ",
+			),
+		)
 	}
-	if req.HealthProof.MinPassedSignals > 0 && req.HealthProof.PassedSignals < req.HealthProof.MinPassedSignals {
-		decision.addViolation(ViolationHealthProofFailed,
-			fmt.Sprintf("health proof passed %d/%d required evidence threshold signal(s)", req.HealthProof.PassedSignals, req.HealthProof.MinPassedSignals))
+	if req.HealthProof.MinPassedSignals > 0 &&
+		req.HealthProof.PassedSignals < req.HealthProof.MinPassedSignals {
+		decision.addViolation(
+			ViolationHealthProofFailed,
+			fmt.Sprintf(
+				"health proof passed %d/%d required evidence threshold signal(s)",
+				req.HealthProof.PassedSignals,
+				req.HealthProof.MinPassedSignals,
+			),
+		)
 	}
 	if len(req.HealthProof.OptionalFailedSignals) > 0 {
-		decision.Warnings = append(decision.Warnings,
-			fmt.Sprintf("health proof has non-blocking failed optional signal(s): %s", strings.Join(req.HealthProof.OptionalFailedSignals, ", ")))
+		decision.Warnings = append(
+			decision.Warnings,
+			"health proof has non-blocking failed optional signal(s): "+strings.Join(
+				req.HealthProof.OptionalFailedSignals,
+				", ",
+			),
+		)
 	}
 
 	sort.Slice(decision.Violations, func(i, j int) bool {

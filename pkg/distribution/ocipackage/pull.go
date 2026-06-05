@@ -15,6 +15,7 @@
 package ocipackage
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,10 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	fileutil "github.com/labring/sealos/pkg/utils/file"
+	"github.com/opencontainers/go-digest"
 )
 
 type PullOptions struct {
@@ -190,11 +190,11 @@ func (c *Cache) Load(image string) (*packageformat.ComponentPackage, error) {
 
 func (c *Cache) List() ([]CacheEntry, error) {
 	if c == nil {
-		return nil, fmt.Errorf("package cache cannot be nil")
+		return nil, errors.New("package cache cannot be nil")
 	}
 	root := strings.TrimSpace(c.Root)
 	if root == "" {
-		return nil, fmt.Errorf("cache root cannot be empty")
+		return nil, errors.New("cache root cannot be empty")
 	}
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil, nil

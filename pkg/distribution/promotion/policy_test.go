@@ -200,7 +200,8 @@ func TestEvaluateDefault(t *testing.T) {
 				t.Fatalf("HealthProofRequired = %v, want %v", got, want)
 			}
 			assertViolationCodes(t, decision.Violations, tt.wantCodes)
-			if tt.name == "beta accepts optional failed signal when thresholds pass" && len(decision.Warnings) == 0 {
+			if tt.name == "beta accepts optional failed signal when thresholds pass" &&
+				len(decision.Warnings) == 0 {
 				t.Fatal("Warnings empty, want optional failed signal warning")
 			}
 		})
@@ -291,11 +292,22 @@ func assertViolationCodes(t *testing.T, violations []Violation, want []Violation
 	t.Helper()
 
 	if len(violations) != len(want) {
-		t.Fatalf("len(Violations) = %d, want %d; violations=%#v", len(violations), len(want), violations)
+		t.Fatalf(
+			"len(Violations) = %d, want %d; violations=%#v",
+			len(violations),
+			len(want),
+			violations,
+		)
 	}
 	for i, violation := range violations {
 		if violation.Code != want[i] {
-			t.Fatalf("Violations[%d].Code = %q, want %q; violations=%#v", i, violation.Code, want[i], violations)
+			t.Fatalf(
+				"Violations[%d].Code = %q, want %q; violations=%#v",
+				i,
+				violation.Code,
+				want[i],
+				violations,
+			)
 		}
 	}
 }

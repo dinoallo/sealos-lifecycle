@@ -15,6 +15,7 @@
 package bom
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,9 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"sigs.k8s.io/yaml"
-
 	promotionpolicy "github.com/labring/sealos/pkg/distribution/promotion"
+	"sigs.k8s.io/yaml"
 )
 
 type ReleaseMetadataService struct {
@@ -34,28 +34,28 @@ type ReleaseMetadataService struct {
 }
 
 type ReleasePromotionRequest struct {
-	TargetRevision   string                   `json:"targetRevision" yaml:"targetRevision"`
-	SourceChannel    ReleaseChannel           `json:"sourceChannel,omitempty" yaml:"sourceChannel,omitempty"`
-	HealthProof      *DistributionHealthProof `json:"healthProof,omitempty" yaml:"healthProof,omitempty"`
-	HealthProofPath  string                   `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
+	TargetRevision   string                   `json:"targetRevision"             yaml:"targetRevision"`
+	SourceChannel    ReleaseChannel           `json:"sourceChannel,omitempty"    yaml:"sourceChannel,omitempty"`
+	HealthProof      *DistributionHealthProof `json:"healthProof,omitempty"      yaml:"healthProof,omitempty"`
+	HealthProofPath  string                   `json:"healthProofPath,omitempty"  yaml:"healthProofPath,omitempty"`
 	ValidationCohort string                   `json:"validationCohort,omitempty" yaml:"validationCohort,omitempty"`
-	Reason           string                   `json:"reason" yaml:"reason"`
-	ApprovedBy       string                   `json:"approvedBy" yaml:"approvedBy"`
-	ApprovedAt       string                   `json:"approvedAt,omitempty" yaml:"approvedAt,omitempty"`
+	Reason           string                   `json:"reason"                     yaml:"reason"`
+	ApprovedBy       string                   `json:"approvedBy"                 yaml:"approvedBy"`
+	ApprovedAt       string                   `json:"approvedAt,omitempty"       yaml:"approvedAt,omitempty"`
 }
 
 type ReleasePromotionResponse struct {
-	Line                 string                    `json:"line" yaml:"line"`
-	Channel              string                    `json:"channel" yaml:"channel"`
-	ReleaseChannel       string                    `json:"releaseChannelPath" yaml:"releaseChannelPath"`
-	BOMPath              string                    `json:"bomPath" yaml:"bomPath"`
-	FromRevision         string                    `json:"fromRevision" yaml:"fromRevision"`
-	ToRevision           string                    `json:"toRevision" yaml:"toRevision"`
-	Changed              bool                      `json:"changed" yaml:"changed"`
-	Promotion            DistributionPromotionRef  `json:"promotion" yaml:"promotion"`
-	PolicyDecision       *promotionpolicy.Decision `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
-	HealthProofPath      string                    `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
-	CandidatePath        string                    `json:"candidatePath,omitempty" yaml:"candidatePath,omitempty"`
+	Line                 string                    `json:"line"                           yaml:"line"`
+	Channel              string                    `json:"channel"                        yaml:"channel"`
+	ReleaseChannel       string                    `json:"releaseChannelPath"             yaml:"releaseChannelPath"`
+	BOMPath              string                    `json:"bomPath"                        yaml:"bomPath"`
+	FromRevision         string                    `json:"fromRevision"                   yaml:"fromRevision"`
+	ToRevision           string                    `json:"toRevision"                     yaml:"toRevision"`
+	Changed              bool                      `json:"changed"                        yaml:"changed"`
+	Promotion            DistributionPromotionRef  `json:"promotion"                      yaml:"promotion"`
+	PolicyDecision       *promotionpolicy.Decision `json:"policyDecision,omitempty"       yaml:"policyDecision,omitempty"`
+	HealthProofPath      string                    `json:"healthProofPath,omitempty"      yaml:"healthProofPath,omitempty"`
+	CandidatePath        string                    `json:"candidatePath,omitempty"        yaml:"candidatePath,omitempty"`
 	PromotionHistoryPath string                    `json:"promotionHistoryPath,omitempty" yaml:"promotionHistoryPath,omitempty"`
 }
 
@@ -64,7 +64,7 @@ func NewReleaseMetadataHandler(source string) (http.Handler, error) {
 		Source: strings.TrimPrefix(strings.TrimSpace(source), "file://"),
 	}
 	if service.Source == "" {
-		return nil, fmt.Errorf("release source cannot be empty")
+		return nil, errors.New("release source cannot be empty")
 	}
 	info, err := os.Stat(service.Source)
 	if err != nil {
@@ -78,7 +78,9 @@ func NewReleaseMetadataHandler(source string) (http.Handler, error) {
 
 func (s *ReleaseMetadataService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := splitReleaseMetadataPath(r.URL.Path)
-	if len(parts) == 6 && parts[0] == "v1" && parts[1] == "distributions" && parts[3] == "channels" && parts[5] == "promotions" {
+	if len(parts) == 6 && parts[0] == "v1" && parts[1] == "distributions" &&
+		parts[3] == "channels" &&
+		parts[5] == "promotions" {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -103,7 +105,11 @@ func (s *ReleaseMetadataService) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *ReleaseMetadataService) serveChannel(w http.ResponseWriter, r *http.Request, line, channelValue string) {
+func (s *ReleaseMetadataService) serveChannel(
+	w http.ResponseWriter,
+	r *http.Request,
+	line, channelValue string,
+) {
 	channel := ReleaseChannel(channelValue)
 	resolved, err := ResolveReleaseChannelLookup(ReleaseChannelLookupOptions{
 		DistributionLine: line,
@@ -123,7 +129,11 @@ func (s *ReleaseMetadataService) serveChannel(w http.ResponseWriter, r *http.Req
 	writeReleaseMetadataYAML(w, r, &doc)
 }
 
-func (s *ReleaseMetadataService) serveBOM(w http.ResponseWriter, r *http.Request, line, revision string) {
+func (s *ReleaseMetadataService) serveBOM(
+	w http.ResponseWriter,
+	r *http.Request,
+	line, revision string,
+) {
 	data, err := loadReleaseMetadataBOMData(s.Source, line, revision)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -132,7 +142,11 @@ func (s *ReleaseMetadataService) serveBOM(w http.ResponseWriter, r *http.Request
 	writeReleaseMetadataBytes(w, r, data)
 }
 
-func (s *ReleaseMetadataService) servePromotion(w http.ResponseWriter, r *http.Request, line, channelValue string) {
+func (s *ReleaseMetadataService) servePromotion(
+	w http.ResponseWriter,
+	r *http.Request,
+	line, channelValue string,
+) {
 	request, err := decodeReleasePromotionRequest(w, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -159,17 +173,26 @@ func (s *ReleaseMetadataService) servePromotion(w http.ResponseWriter, r *http.R
 	})
 }
 
-func (s *ReleaseMetadataService) promote(line string, channel ReleaseChannel, request ReleasePromotionRequest) (*PromoteReleaseChannelResult, string, error) {
+func (s *ReleaseMetadataService) promote(
+	line string,
+	channel ReleaseChannel,
+	request ReleasePromotionRequest,
+) (*PromoteReleaseChannelResult, string, error) {
 	targetRevision := strings.TrimSpace(request.TargetRevision)
 	if targetRevision == "" {
-		return nil, "", fmt.Errorf("targetRevision cannot be empty")
+		return nil, "", errors.New("targetRevision cannot be empty")
 	}
 	channelPath, channelDoc, err := resolveReleaseMetadataChannelPath(s.Source, line, channel)
 	if err != nil {
 		return nil, "", err
 	}
 	if channelDoc.Distribution() != line {
-		return nil, "", fmt.Errorf("release channel %q distribution %q does not match requested line %q", channelDoc.Metadata.Name, channelDoc.Distribution(), line)
+		return nil, "", fmt.Errorf(
+			"release channel %q distribution %q does not match requested line %q",
+			channelDoc.Metadata.Name,
+			channelDoc.Distribution(),
+			line,
+		)
 	}
 	targetBOMPath, err := resolveReleaseMetadataBOMPath(s.Source, line, targetRevision)
 	if err != nil {
@@ -177,7 +200,12 @@ func (s *ReleaseMetadataService) promote(line string, channel ReleaseChannel, re
 	}
 	healthProofPath := strings.TrimSpace(request.HealthProofPath)
 	if request.HealthProof != nil {
-		healthProofPath, err = writeReleaseMetadataHealthProof(s.Source, line, targetRevision, request.HealthProof)
+		healthProofPath, err = writeReleaseMetadataHealthProof(
+			s.Source,
+			line,
+			targetRevision,
+			request.HealthProof,
+		)
 		if err != nil {
 			return nil, "", err
 		}
@@ -206,13 +234,16 @@ func (s *ReleaseMetadataService) promote(line string, channel ReleaseChannel, re
 	return result, healthProofPath, nil
 }
 
-func decodeReleasePromotionRequest(w http.ResponseWriter, r *http.Request) (ReleasePromotionRequest, error) {
+func decodeReleasePromotionRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+) (ReleasePromotionRequest, error) {
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		return ReleasePromotionRequest{}, fmt.Errorf("read promotion request: %w", err)
 	}
 	if len(strings.TrimSpace(string(data))) == 0 {
-		return ReleasePromotionRequest{}, fmt.Errorf("promotion request body cannot be empty")
+		return ReleasePromotionRequest{}, errors.New("promotion request body cannot be empty")
 	}
 	var request ReleasePromotionRequest
 	if err := yaml.Unmarshal(data, &request); err != nil {
@@ -242,7 +273,10 @@ func splitReleaseMetadataPath(value string) []string {
 	return parts
 }
 
-func resolveReleaseMetadataChannelPath(source, line string, channel ReleaseChannel) (string, *ReleaseChannelDocument, error) {
+func resolveReleaseMetadataChannelPath(
+	source, line string,
+	channel ReleaseChannel,
+) (string, *ReleaseChannelDocument, error) {
 	if err := channel.ValidateRequired(); err != nil {
 		return "", nil, fmt.Errorf("channel: %w", err)
 	}
@@ -256,11 +290,20 @@ func resolveReleaseMetadataChannelPath(source, line string, channel ReleaseChann
 		}
 		return candidate, doc, nil
 	}
-	return "", nil, fmt.Errorf("release channel %s/%s not found under source %q", line, channel, source)
+	return "", nil, fmt.Errorf(
+		"release channel %s/%s not found under source %q",
+		line,
+		channel,
+		source,
+	)
 }
 
 func releaseMetadataBOMEndpoint(line, revision string) string {
-	return "/v1/distributions/" + url.PathEscape(strings.TrimSpace(line)) + "/revisions/" + url.PathEscape(strings.TrimSpace(revision)) + "/bom"
+	return "/v1/distributions/" + url.PathEscape(
+		strings.TrimSpace(line),
+	) + "/revisions/" + url.PathEscape(
+		strings.TrimSpace(revision),
+	) + "/bom"
 }
 
 func loadReleaseMetadataBOMData(source, line, revision string) ([]byte, error) {
@@ -289,10 +332,20 @@ func resolveReleaseMetadataBOMPath(source, line, revision string) (string, error
 			return "", err
 		}
 		if doc.Metadata.Name != line {
-			return "", fmt.Errorf("release BOM %q metadata.name %q does not match line %q", candidate, doc.Metadata.Name, line)
+			return "", fmt.Errorf(
+				"release BOM %q metadata.name %q does not match line %q",
+				candidate,
+				doc.Metadata.Name,
+				line,
+			)
 		}
 		if doc.Spec.Revision != revision {
-			return "", fmt.Errorf("release BOM %q revision %q does not match requested revision %q", candidate, doc.Spec.Revision, revision)
+			return "", fmt.Errorf(
+				"release BOM %q revision %q does not match requested revision %q",
+				candidate,
+				doc.Spec.Revision,
+				revision,
+			)
 		}
 		return candidate, nil
 	}
@@ -313,7 +366,10 @@ func releaseMetadataBOMCandidates(root, line, revision string) []string {
 	return candidates
 }
 
-func writeReleaseMetadataHealthProof(source, line, revision string, proof *DistributionHealthProof) (string, error) {
+func writeReleaseMetadataHealthProof(
+	source, line, revision string,
+	proof *DistributionHealthProof,
+) (string, error) {
 	if proof == nil {
 		return "", nil
 	}
@@ -321,10 +377,18 @@ func writeReleaseMetadataHealthProof(source, line, revision string, proof *Distr
 		return "", fmt.Errorf("validate healthProof: %w", err)
 	}
 	if proof.Spec.Line != line {
-		return "", fmt.Errorf("healthProof line %q does not match requested line %q", proof.Spec.Line, line)
+		return "", fmt.Errorf(
+			"healthProof line %q does not match requested line %q",
+			proof.Spec.Line,
+			line,
+		)
 	}
 	if proof.Spec.TargetRevision != revision {
-		return "", fmt.Errorf("healthProof targetRevision %q does not match requested revision %q", proof.Spec.TargetRevision, revision)
+		return "", fmt.Errorf(
+			"healthProof targetRevision %q does not match requested revision %q",
+			proof.Spec.TargetRevision,
+			revision,
+		)
 	}
 	name := releaseMetadataSafeName(proof.Metadata.Name)
 	if name == "" {

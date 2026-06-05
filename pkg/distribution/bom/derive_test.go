@@ -152,7 +152,10 @@ func TestDeriveDistributionFileRejectsUnknownPackage(t *testing.T) {
 		Line:          "corp-platform",
 		Revision:      "rev-corp-001",
 		Replacements: []ArtifactReplacement{
-			{PackageName: "missing", Digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+			{
+				PackageName: "missing",
+				Digest:      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			},
 		},
 	})
 	if err == nil {

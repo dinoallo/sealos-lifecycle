@@ -15,6 +15,7 @@
 package bom
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,74 +23,73 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencontainers/go-digest"
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/distribution"
 	promotionpolicy "github.com/labring/sealos/pkg/distribution/promotion"
 	fileutil "github.com/labring/sealos/pkg/utils/file"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
+	"sigs.k8s.io/yaml"
 )
 
 type ReleaseChannelDocumentSpec struct {
-	Distribution     string                     `json:"distribution" yaml:"distribution"`
-	Channel          ReleaseChannel             `json:"channel" yaml:"channel"`
-	TargetRevision   string                     `json:"targetRevision" yaml:"targetRevision"`
-	BOMPath          string                     `json:"bomPath" yaml:"bomPath"`
-	BOMDigest        string                     `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
+	Distribution     string                     `json:"distribution"               yaml:"distribution"`
+	Channel          ReleaseChannel             `json:"channel"                    yaml:"channel"`
+	TargetRevision   string                     `json:"targetRevision"             yaml:"targetRevision"`
+	BOMPath          string                     `json:"bomPath"                    yaml:"bomPath"`
+	BOMDigest        string                     `json:"bomDigest,omitempty"        yaml:"bomDigest,omitempty"`
 	PromotionHistory []DistributionPromotionRef `json:"promotionHistory,omitempty" yaml:"promotionHistory,omitempty"`
 }
 
 type DistributionPromotionRef struct {
-	FromRevision       string                          `json:"fromRevision,omitempty" yaml:"fromRevision,omitempty"`
-	ToRevision         string                          `json:"toRevision" yaml:"toRevision"`
-	SourceChannel      ReleaseChannel                  `json:"sourceChannel,omitempty" yaml:"sourceChannel,omitempty"`
-	TargetChannel      ReleaseChannel                  `json:"targetChannel,omitempty" yaml:"targetChannel,omitempty"`
-	BOMPath            string                          `json:"bomPath" yaml:"bomPath"`
-	BOMDigest          string                          `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
-	ComponentDigests   []ReleaseComponentDigestRef     `json:"componentDigests,omitempty" yaml:"componentDigests,omitempty"`
-	ValidationCohort   string                          `json:"validationCohort,omitempty" yaml:"validationCohort,omitempty"`
-	Reason             string                          `json:"reason" yaml:"reason"`
-	ApprovedBy         string                          `json:"approvedBy" yaml:"approvedBy"`
-	ApprovedAt         string                          `json:"approvedAt" yaml:"approvedAt"`
-	Evidence           []ReleasePromotionEvidenceRef   `json:"evidence,omitempty" yaml:"evidence,omitempty"`
-	Timeline           []ReleasePromotionTimelineEvent `json:"timeline,omitempty" yaml:"timeline,omitempty"`
-	HealthProofPath    string                          `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
-	HealthProofDigest  string                          `json:"healthProofDigest,omitempty" yaml:"healthProofDigest,omitempty"`
+	FromRevision       string                          `json:"fromRevision,omitempty"       yaml:"fromRevision,omitempty"`
+	ToRevision         string                          `json:"toRevision"                   yaml:"toRevision"`
+	SourceChannel      ReleaseChannel                  `json:"sourceChannel,omitempty"      yaml:"sourceChannel,omitempty"`
+	TargetChannel      ReleaseChannel                  `json:"targetChannel,omitempty"      yaml:"targetChannel,omitempty"`
+	BOMPath            string                          `json:"bomPath"                      yaml:"bomPath"`
+	BOMDigest          string                          `json:"bomDigest,omitempty"          yaml:"bomDigest,omitempty"`
+	ComponentDigests   []ReleaseComponentDigestRef     `json:"componentDigests,omitempty"   yaml:"componentDigests,omitempty"`
+	ValidationCohort   string                          `json:"validationCohort,omitempty"   yaml:"validationCohort,omitempty"`
+	Reason             string                          `json:"reason"                       yaml:"reason"`
+	ApprovedBy         string                          `json:"approvedBy"                   yaml:"approvedBy"`
+	ApprovedAt         string                          `json:"approvedAt"                   yaml:"approvedAt"`
+	Evidence           []ReleasePromotionEvidenceRef   `json:"evidence,omitempty"           yaml:"evidence,omitempty"`
+	Timeline           []ReleasePromotionTimelineEvent `json:"timeline,omitempty"           yaml:"timeline,omitempty"`
+	HealthProofPath    string                          `json:"healthProofPath,omitempty"    yaml:"healthProofPath,omitempty"`
+	HealthProofDigest  string                          `json:"healthProofDigest,omitempty"  yaml:"healthProofDigest,omitempty"`
 	HealthProofSummary string                          `json:"healthProofSummary,omitempty" yaml:"healthProofSummary,omitempty"`
 }
 
 type ReleaseComponentDigestRef struct {
-	PackageName  string `json:"packageName" yaml:"packageName"`
-	Category     string `json:"category,omitempty" yaml:"category,omitempty"`
-	Version      string `json:"version,omitempty" yaml:"version,omitempty"`
+	PackageName  string `json:"packageName"            yaml:"packageName"`
+	Category     string `json:"category,omitempty"     yaml:"category,omitempty"`
+	Version      string `json:"version,omitempty"      yaml:"version,omitempty"`
 	ArtifactName string `json:"artifactName,omitempty" yaml:"artifactName,omitempty"`
-	Image        string `json:"image,omitempty" yaml:"image,omitempty"`
-	Digest       string `json:"digest" yaml:"digest"`
+	Image        string `json:"image,omitempty"        yaml:"image,omitempty"`
+	Digest       string `json:"digest"                 yaml:"digest"`
 }
 
 type ReleasePromotionEvidenceRef struct {
-	Type    string `json:"type" yaml:"type"`
-	Path    string `json:"path,omitempty" yaml:"path,omitempty"`
-	Digest  string `json:"digest,omitempty" yaml:"digest,omitempty"`
+	Type    string `json:"type"              yaml:"type"`
+	Path    string `json:"path,omitempty"    yaml:"path,omitempty"`
+	Digest  string `json:"digest,omitempty"  yaml:"digest,omitempty"`
 	Summary string `json:"summary,omitempty" yaml:"summary,omitempty"`
 }
 
 type ReleasePromotionTimelineEvent struct {
-	Type     string         `json:"type" yaml:"type"`
-	At       string         `json:"at" yaml:"at"`
-	Actor    string         `json:"actor,omitempty" yaml:"actor,omitempty"`
-	Channel  ReleaseChannel `json:"channel,omitempty" yaml:"channel,omitempty"`
+	Type     string         `json:"type"               yaml:"type"`
+	At       string         `json:"at"                 yaml:"at"`
+	Actor    string         `json:"actor,omitempty"    yaml:"actor,omitempty"`
+	Channel  ReleaseChannel `json:"channel,omitempty"  yaml:"channel,omitempty"`
 	Revision string         `json:"revision,omitempty" yaml:"revision,omitempty"`
-	Reason   string         `json:"reason,omitempty" yaml:"reason,omitempty"`
-	Message  string         `json:"message,omitempty" yaml:"message,omitempty"`
+	Reason   string         `json:"reason,omitempty"   yaml:"reason,omitempty"`
+	Message  string         `json:"message,omitempty"  yaml:"message,omitempty"`
 }
 
 type ReleaseChannelDocument struct {
 	APIVersion string                     `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                     `json:"kind" yaml:"kind"`
-	Metadata   Metadata                   `json:"metadata" yaml:"metadata"`
-	Spec       ReleaseChannelDocumentSpec `json:"spec" yaml:"spec"`
+	Kind       string                     `json:"kind"       yaml:"kind"`
+	Metadata   Metadata                   `json:"metadata"   yaml:"metadata"`
+	Spec       ReleaseChannelDocumentSpec `json:"spec"       yaml:"spec"`
 }
 
 type ResolvedReleaseChannel struct {
@@ -131,77 +131,77 @@ type PromoteReleaseChannelResult struct {
 }
 
 type ReleaseCandidateRevisionSpec struct {
-	Line             string                          `json:"line" yaml:"line"`
-	Revision         string                          `json:"revision" yaml:"revision"`
-	SourceChannel    ReleaseChannel                  `json:"sourceChannel" yaml:"sourceChannel"`
-	TargetChannel    ReleaseChannel                  `json:"targetChannel" yaml:"targetChannel"`
+	Line             string                          `json:"line"                       yaml:"line"`
+	Revision         string                          `json:"revision"                   yaml:"revision"`
+	SourceChannel    ReleaseChannel                  `json:"sourceChannel"              yaml:"sourceChannel"`
+	TargetChannel    ReleaseChannel                  `json:"targetChannel"              yaml:"targetChannel"`
 	ReplacesRevision string                          `json:"replacesRevision,omitempty" yaml:"replacesRevision,omitempty"`
-	BOMPath          string                          `json:"bomPath" yaml:"bomPath"`
-	BOMDigest        string                          `json:"bomDigest" yaml:"bomDigest"`
-	ComponentDigests []ReleaseComponentDigestRef     `json:"componentDigests" yaml:"componentDigests"`
+	BOMPath          string                          `json:"bomPath"                    yaml:"bomPath"`
+	BOMDigest        string                          `json:"bomDigest"                  yaml:"bomDigest"`
+	ComponentDigests []ReleaseComponentDigestRef     `json:"componentDigests"           yaml:"componentDigests"`
 	ValidationCohort string                          `json:"validationCohort,omitempty" yaml:"validationCohort,omitempty"`
-	Evidence         []ReleasePromotionEvidenceRef   `json:"evidence,omitempty" yaml:"evidence,omitempty"`
-	Timeline         []ReleasePromotionTimelineEvent `json:"timeline,omitempty" yaml:"timeline,omitempty"`
-	CreatedAt        string                          `json:"createdAt" yaml:"createdAt"`
+	Evidence         []ReleasePromotionEvidenceRef   `json:"evidence,omitempty"         yaml:"evidence,omitempty"`
+	Timeline         []ReleasePromotionTimelineEvent `json:"timeline,omitempty"         yaml:"timeline,omitempty"`
+	CreatedAt        string                          `json:"createdAt"                  yaml:"createdAt"`
 }
 
 type ReleaseCandidateRevisionDocument struct {
 	APIVersion string                       `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                       `json:"kind" yaml:"kind"`
-	Metadata   Metadata                     `json:"metadata" yaml:"metadata"`
-	Spec       ReleaseCandidateRevisionSpec `json:"spec" yaml:"spec"`
+	Kind       string                       `json:"kind"       yaml:"kind"`
+	Metadata   Metadata                     `json:"metadata"   yaml:"metadata"`
+	Spec       ReleaseCandidateRevisionSpec `json:"spec"       yaml:"spec"`
 }
 
 type ReleasePromotionHistorySpec struct {
-	Line           string                    `json:"line" yaml:"line"`
-	Channel        ReleaseChannel            `json:"channel" yaml:"channel"`
-	Promotion      DistributionPromotionRef  `json:"promotion" yaml:"promotion"`
+	Line           string                    `json:"line"                     yaml:"line"`
+	Channel        ReleaseChannel            `json:"channel"                  yaml:"channel"`
+	Promotion      DistributionPromotionRef  `json:"promotion"                yaml:"promotion"`
 	PolicyDecision *promotionpolicy.Decision `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
-	CandidateRef   string                    `json:"candidateRef,omitempty" yaml:"candidateRef,omitempty"`
-	RecordedAt     string                    `json:"recordedAt" yaml:"recordedAt"`
+	CandidateRef   string                    `json:"candidateRef,omitempty"   yaml:"candidateRef,omitempty"`
+	RecordedAt     string                    `json:"recordedAt"               yaml:"recordedAt"`
 }
 
 type ReleasePromotionHistoryDocument struct {
 	APIVersion string                      `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                      `json:"kind" yaml:"kind"`
-	Metadata   Metadata                    `json:"metadata" yaml:"metadata"`
-	Spec       ReleasePromotionHistorySpec `json:"spec" yaml:"spec"`
+	Kind       string                      `json:"kind"       yaml:"kind"`
+	Metadata   Metadata                    `json:"metadata"   yaml:"metadata"`
+	Spec       ReleasePromotionHistorySpec `json:"spec"       yaml:"spec"`
 }
 
 type DistributionHealthProofSpec struct {
-	Line           string                           `json:"line" yaml:"line"`
-	TargetRevision string                           `json:"targetRevision" yaml:"targetRevision"`
-	Passed         bool                             `json:"passed" yaml:"passed"`
-	Summary        string                           `json:"summary,omitempty" yaml:"summary,omitempty"`
-	CollectedAt    string                           `json:"collectedAt,omitempty" yaml:"collectedAt,omitempty"`
-	Thresholds     DistributionHealthThresholds     `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+	Line           string                           `json:"line"                    yaml:"line"`
+	TargetRevision string                           `json:"targetRevision"          yaml:"targetRevision"`
+	Passed         bool                             `json:"passed"                  yaml:"passed"`
+	Summary        string                           `json:"summary,omitempty"       yaml:"summary,omitempty"`
+	CollectedAt    string                           `json:"collectedAt,omitempty"   yaml:"collectedAt,omitempty"`
+	Thresholds     DistributionHealthThresholds     `json:"thresholds,omitempty"    yaml:"thresholds,omitempty"`
 	SignalSummary  *DistributionHealthSignalSummary `json:"signalSummary,omitempty" yaml:"signalSummary,omitempty"`
-	Signals        []DistributionHealthSignal       `json:"signals,omitempty" yaml:"signals,omitempty"`
+	Signals        []DistributionHealthSignal       `json:"signals,omitempty"       yaml:"signals,omitempty"`
 }
 
 type DistributionHealthThresholds struct {
-	RequiredSignals  []string `json:"requiredSignals,omitempty" yaml:"requiredSignals,omitempty"`
+	RequiredSignals  []string `json:"requiredSignals,omitempty"  yaml:"requiredSignals,omitempty"`
 	MinPassedSignals int      `json:"minPassedSignals,omitempty" yaml:"minPassedSignals,omitempty"`
 }
 
 type DistributionHealthSignalSummary struct {
-	TotalSignals           int `json:"totalSignals" yaml:"totalSignals"`
-	PassedSignals          int `json:"passedSignals" yaml:"passedSignals"`
-	FailedSignals          int `json:"failedSignals" yaml:"failedSignals"`
-	RequiredSignals        int `json:"requiredSignals,omitempty" yaml:"requiredSignals,omitempty"`
-	PassedRequiredSignals  int `json:"passedRequiredSignals,omitempty" yaml:"passedRequiredSignals,omitempty"`
-	FailedRequiredSignals  int `json:"failedRequiredSignals,omitempty" yaml:"failedRequiredSignals,omitempty"`
+	TotalSignals           int `json:"totalSignals"                     yaml:"totalSignals"`
+	PassedSignals          int `json:"passedSignals"                    yaml:"passedSignals"`
+	FailedSignals          int `json:"failedSignals"                    yaml:"failedSignals"`
+	RequiredSignals        int `json:"requiredSignals,omitempty"        yaml:"requiredSignals,omitempty"`
+	PassedRequiredSignals  int `json:"passedRequiredSignals,omitempty"  yaml:"passedRequiredSignals,omitempty"`
+	FailedRequiredSignals  int `json:"failedRequiredSignals,omitempty"  yaml:"failedRequiredSignals,omitempty"`
 	MissingRequiredSignals int `json:"missingRequiredSignals,omitempty" yaml:"missingRequiredSignals,omitempty"`
-	MinPassedSignals       int `json:"minPassedSignals,omitempty" yaml:"minPassedSignals,omitempty"`
+	MinPassedSignals       int `json:"minPassedSignals,omitempty"       yaml:"minPassedSignals,omitempty"`
 }
 
 type DistributionHealthSignal struct {
-	Name        string `json:"name" yaml:"name"`
-	Passed      bool   `json:"passed" yaml:"passed"`
-	Required    bool   `json:"required,omitempty" yaml:"required,omitempty"`
-	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
+	Name        string `json:"name"                  yaml:"name"`
+	Passed      bool   `json:"passed"                yaml:"passed"`
+	Required    bool   `json:"required,omitempty"    yaml:"required,omitempty"`
+	Source      string `json:"source,omitempty"      yaml:"source,omitempty"`
 	EvidenceRef string `json:"evidenceRef,omitempty" yaml:"evidenceRef,omitempty"`
-	Message     string `json:"message,omitempty" yaml:"message,omitempty"`
+	Message     string `json:"message,omitempty"     yaml:"message,omitempty"`
 }
 
 type DistributionHealthProofEvaluation struct {
@@ -217,12 +217,15 @@ type DistributionHealthProofEvaluation struct {
 
 type DistributionHealthProof struct {
 	APIVersion string                      `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string                      `json:"kind" yaml:"kind"`
-	Metadata   Metadata                    `json:"metadata" yaml:"metadata"`
-	Spec       DistributionHealthProofSpec `json:"spec" yaml:"spec"`
+	Kind       string                      `json:"kind"       yaml:"kind"`
+	Metadata   Metadata                    `json:"metadata"   yaml:"metadata"`
+	Spec       DistributionHealthProofSpec `json:"spec"       yaml:"spec"`
 }
 
-func NewDistributionHealthProof(name, line, targetRevision string, passed bool) *DistributionHealthProof {
+func NewDistributionHealthProof(
+	name, line, targetRevision string,
+	passed bool,
+) *DistributionHealthProof {
 	return &DistributionHealthProof{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindDistributionHealthProof,
@@ -237,7 +240,11 @@ func NewDistributionHealthProof(name, line, targetRevision string, passed bool) 
 	}
 }
 
-func NewReleaseChannel(name, distributionLine string, channel ReleaseChannel, targetRevision, bomPath string) *ReleaseChannelDocument {
+func NewReleaseChannel(
+	name, distributionLine string,
+	channel ReleaseChannel,
+	targetRevision, bomPath string,
+) *ReleaseChannelDocument {
 	return &ReleaseChannelDocument{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindReleaseChannel,
@@ -374,10 +381,10 @@ func (p DistributionPromotionRef) Validate() error {
 
 func (r ReleaseComponentDigestRef) Validate() error {
 	if strings.TrimSpace(r.PackageName) == "" {
-		return fmt.Errorf("packageName cannot be empty")
+		return errors.New("packageName cannot be empty")
 	}
 	if strings.TrimSpace(r.Digest) == "" {
-		return fmt.Errorf("digest cannot be empty")
+		return errors.New("digest cannot be empty")
 	}
 	if _, err := digest.Parse(strings.TrimSpace(r.Digest)); err != nil {
 		return fmt.Errorf("invalid digest %q: %w", r.Digest, err)
@@ -387,7 +394,7 @@ func (r ReleaseComponentDigestRef) Validate() error {
 
 func (e ReleasePromotionEvidenceRef) Validate() error {
 	if strings.TrimSpace(e.Type) == "" {
-		return fmt.Errorf("type cannot be empty")
+		return errors.New("type cannot be empty")
 	}
 	if digestValue := strings.TrimSpace(e.Digest); digestValue != "" {
 		if _, err := digest.Parse(digestValue); err != nil {
@@ -399,10 +406,10 @@ func (e ReleasePromotionEvidenceRef) Validate() error {
 
 func (e ReleasePromotionTimelineEvent) Validate() error {
 	if strings.TrimSpace(e.Type) == "" {
-		return fmt.Errorf("type cannot be empty")
+		return errors.New("type cannot be empty")
 	}
 	if strings.TrimSpace(e.At) == "" {
-		return fmt.Errorf("at cannot be empty")
+		return errors.New("at cannot be empty")
 	}
 	if _, err := time.Parse(time.RFC3339, e.At); err != nil {
 		return fmt.Errorf("at must be RFC3339: %w", err)
@@ -421,13 +428,13 @@ func (c ReleaseCandidateRevisionDocument) Validate() error {
 		return fmt.Errorf("unsupported kind %q", c.Kind)
 	}
 	if strings.TrimSpace(c.Metadata.Name) == "" {
-		return fmt.Errorf("metadata.name cannot be empty")
+		return errors.New("metadata.name cannot be empty")
 	}
 	if strings.TrimSpace(c.Spec.Line) == "" {
-		return fmt.Errorf("spec.line cannot be empty")
+		return errors.New("spec.line cannot be empty")
 	}
 	if strings.TrimSpace(c.Spec.Revision) == "" {
-		return fmt.Errorf("spec.revision cannot be empty")
+		return errors.New("spec.revision cannot be empty")
 	}
 	if err := c.Spec.SourceChannel.ValidateRequired(); err != nil {
 		return fmt.Errorf("spec.sourceChannel: %w", err)
@@ -436,16 +443,16 @@ func (c ReleaseCandidateRevisionDocument) Validate() error {
 		return fmt.Errorf("spec.targetChannel: %w", err)
 	}
 	if strings.TrimSpace(c.Spec.BOMPath) == "" {
-		return fmt.Errorf("spec.bomPath cannot be empty")
+		return errors.New("spec.bomPath cannot be empty")
 	}
 	if strings.TrimSpace(c.Spec.BOMDigest) == "" {
-		return fmt.Errorf("spec.bomDigest cannot be empty")
+		return errors.New("spec.bomDigest cannot be empty")
 	}
 	if _, err := digest.Parse(strings.TrimSpace(c.Spec.BOMDigest)); err != nil {
 		return fmt.Errorf("spec.bomDigest: invalid digest %q: %w", c.Spec.BOMDigest, err)
 	}
 	if len(c.Spec.ComponentDigests) == 0 {
-		return fmt.Errorf("spec.componentDigests cannot be empty")
+		return errors.New("spec.componentDigests cannot be empty")
 	}
 	for i, component := range c.Spec.ComponentDigests {
 		if err := component.Validate(); err != nil {
@@ -463,7 +470,7 @@ func (c ReleaseCandidateRevisionDocument) Validate() error {
 		}
 	}
 	if strings.TrimSpace(c.Spec.CreatedAt) == "" {
-		return fmt.Errorf("spec.createdAt cannot be empty")
+		return errors.New("spec.createdAt cannot be empty")
 	}
 	if _, err := time.Parse(time.RFC3339, c.Spec.CreatedAt); err != nil {
 		return fmt.Errorf("spec.createdAt must be RFC3339: %w", err)
@@ -479,10 +486,10 @@ func (h ReleasePromotionHistoryDocument) Validate() error {
 		return fmt.Errorf("unsupported kind %q", h.Kind)
 	}
 	if strings.TrimSpace(h.Metadata.Name) == "" {
-		return fmt.Errorf("metadata.name cannot be empty")
+		return errors.New("metadata.name cannot be empty")
 	}
 	if strings.TrimSpace(h.Spec.Line) == "" {
-		return fmt.Errorf("spec.line cannot be empty")
+		return errors.New("spec.line cannot be empty")
 	}
 	if err := h.Spec.Channel.ValidateRequired(); err != nil {
 		return fmt.Errorf("spec.channel: %w", err)
@@ -491,7 +498,7 @@ func (h ReleasePromotionHistoryDocument) Validate() error {
 		return fmt.Errorf("spec.promotion: %w", err)
 	}
 	if strings.TrimSpace(h.Spec.RecordedAt) == "" {
-		return fmt.Errorf("spec.recordedAt cannot be empty")
+		return errors.New("spec.recordedAt cannot be empty")
 	}
 	if _, err := time.Parse(time.RFC3339, h.Spec.RecordedAt); err != nil {
 		return fmt.Errorf("spec.recordedAt must be RFC3339: %w", err)
@@ -521,7 +528,7 @@ func (p DistributionHealthProof) Validate() error {
 		}
 	}
 	if p.Spec.Thresholds.MinPassedSignals < 0 {
-		return fmt.Errorf("spec.thresholds.minPassedSignals must be non-negative")
+		return errors.New("spec.thresholds.minPassedSignals must be non-negative")
 	}
 	seenRequired := make(map[string]struct{}, len(p.Spec.Thresholds.RequiredSignals))
 	for i, name := range p.Spec.Thresholds.RequiredSignals {
@@ -552,7 +559,9 @@ func (p *DistributionHealthProof) Normalize() {
 	p.Spec.SignalSummary = &summary
 }
 
-func EvaluateDistributionHealthProof(proof *DistributionHealthProof) DistributionHealthProofEvaluation {
+func EvaluateDistributionHealthProof(
+	proof *DistributionHealthProof,
+) DistributionHealthProofEvaluation {
 	if proof == nil {
 		return DistributionHealthProofEvaluation{}
 	}
@@ -742,35 +751,52 @@ func ResolveReleaseChannelFile(path string) (*ResolvedReleaseChannel, error) {
 
 func validateReleaseChannelBOM(channel *ReleaseChannelDocument, doc *BOM) error {
 	if channel == nil {
-		return fmt.Errorf("release channel cannot be nil")
+		return errors.New("release channel cannot be nil")
 	}
 	if doc == nil {
-		return fmt.Errorf("BOM cannot be nil")
+		return errors.New("BOM cannot be nil")
 	}
 	if doc.Metadata.Name != channel.Distribution() {
-		return fmt.Errorf("release channel %q distribution %q does not match BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), doc.Metadata.Name)
+		return fmt.Errorf(
+			"release channel %q distribution %q does not match BOM metadata.name %q",
+			channel.Metadata.Name,
+			channel.Distribution(),
+			doc.Metadata.Name,
+		)
 	}
 	if doc.Spec.Revision != channel.Spec.TargetRevision {
-		return fmt.Errorf("release channel %q targetRevision %q does not match BOM spec.revision %q", channel.Metadata.Name, channel.Spec.TargetRevision, doc.Spec.Revision)
+		return fmt.Errorf(
+			"release channel %q targetRevision %q does not match BOM spec.revision %q",
+			channel.Metadata.Name,
+			channel.Spec.TargetRevision,
+			doc.Spec.Revision,
+		)
 	}
 	return nil
 }
 
 func verifyReleaseChannelBOMDigest(channel *ReleaseChannelDocument, actual string) error {
 	if channel == nil {
-		return fmt.Errorf("release channel cannot be nil")
+		return errors.New("release channel cannot be nil")
 	}
 	expected := strings.TrimSpace(channel.Spec.BOMDigest)
 	if expected == "" {
 		return nil
 	}
 	if actual != expected {
-		return fmt.Errorf("release channel %q BOM digest mismatch: expected %s, got %s", channel.Metadata.Name, expected, actual)
+		return fmt.Errorf(
+			"release channel %q BOM digest mismatch: expected %s, got %s",
+			channel.Metadata.Name,
+			expected,
+			actual,
+		)
 	}
 	return nil
 }
 
-func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteReleaseChannelResult, error) {
+func PromoteReleaseChannelFile(
+	opts PromoteReleaseChannelOptions,
+) (*PromoteReleaseChannelResult, error) {
 	channelPath := strings.TrimSpace(opts.ChannelPath)
 	if channelPath == "" {
 		return nil, fmt.Errorf("channel path cannot be empty")
@@ -802,9 +828,17 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 		return nil, err
 	}
 	if targetBOM.Metadata.Name != channel.Distribution() {
-		return nil, fmt.Errorf("release channel %q distribution %q does not match target BOM metadata.name %q", channel.Metadata.Name, channel.Distribution(), targetBOM.Metadata.Name)
+		return nil, fmt.Errorf(
+			"release channel %q distribution %q does not match target BOM metadata.name %q",
+			channel.Metadata.Name,
+			channel.Distribution(),
+			targetBOM.Metadata.Name,
+		)
 	}
-	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(opts.HealthProofPath, targetBOM)
+	healthProof, healthProofDigest, err := distributionHealthProofForPromotion(
+		opts.HealthProofPath,
+		targetBOM,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -821,7 +855,8 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 	}
 
 	targetBOMPathForChannel := releaseChannelRelativePath(channelPath, targetBOMPath)
-	changed := fromRevision != targetBOM.Spec.Revision || strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
+	changed := fromRevision != targetBOM.Spec.Revision ||
+		strings.TrimSpace(channel.Spec.BOMPath) != targetBOMPathForChannel
 	channel.Spec.TargetRevision = targetBOM.Spec.Revision
 	channel.Spec.BOMPath = targetBOMPathForChannel
 	channel.Spec.BOMDigest = targetBOMDigest
@@ -834,8 +869,21 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 	approvedAtValue := approvedAt.UTC().Format(time.RFC3339)
 	componentDigests := releaseComponentDigests(targetBOM)
 	storeRoot := releaseStoreRoot(opts.ReleaseStoreRoot, channelPath)
-	evidence := releasePromotionEvidence(storeRoot, opts.HealthProofPath, healthProofDigest, healthProof)
-	timeline := releasePromotionTimeline(fromRevision, targetBOM.Spec.Revision, sourceChannel, channel.Spec.Channel, reason, approvedBy, approvedAtValue)
+	evidence := releasePromotionEvidence(
+		storeRoot,
+		opts.HealthProofPath,
+		healthProofDigest,
+		healthProof,
+	)
+	timeline := releasePromotionTimeline(
+		fromRevision,
+		targetBOM.Spec.Revision,
+		sourceChannel,
+		channel.Spec.Channel,
+		reason,
+		approvedBy,
+		approvedAtValue,
+	)
 	promotion := DistributionPromotionRef{
 		FromRevision:     strings.TrimSpace(fromRevision),
 		ToRevision:       targetBOM.Spec.Revision,
@@ -873,15 +921,17 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 		Timeline:         timeline,
 		CreatedAt:        approvedAtValue,
 	})
-	promotionHistory, promotionHistoryPath := newReleasePromotionHistoryDocument(releasePromotionHistoryOptions{
-		Root:           storeRoot,
-		Line:           targetBOM.Metadata.Name,
-		Channel:        channel.Spec.Channel,
-		Promotion:      promotion,
-		PolicyDecision: decision,
-		CandidatePath:  candidatePath,
-		RecordedAt:     approvedAtValue,
-	})
+	promotionHistory, promotionHistoryPath := newReleasePromotionHistoryDocument(
+		releasePromotionHistoryOptions{
+			Root:           storeRoot,
+			Line:           targetBOM.Metadata.Name,
+			Channel:        channel.Spec.Channel,
+			Promotion:      promotion,
+			PolicyDecision: decision,
+			CandidatePath:  candidatePath,
+			RecordedAt:     approvedAtValue,
+		},
+	)
 
 	if err := channel.Validate(); err != nil {
 		return nil, fmt.Errorf("validate promoted release channel %q: %w", channelPath, err)
@@ -890,7 +940,11 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 		return nil, fmt.Errorf("validate release candidate revision %q: %w", candidatePath, err)
 	}
 	if err := promotionHistory.Validate(); err != nil {
-		return nil, fmt.Errorf("validate release promotion history %q: %w", promotionHistoryPath, err)
+		return nil, fmt.Errorf(
+			"validate release promotion history %q: %w",
+			promotionHistoryPath,
+			err,
+		)
 	}
 	if err := yamlutil.MarshalFile(candidatePath, candidate); err != nil {
 		return nil, fmt.Errorf("write release candidate revision %q: %w", candidatePath, err)
@@ -921,7 +975,12 @@ func PromoteReleaseChannelFile(opts PromoteReleaseChannelOptions) (*PromoteRelea
 	}, nil
 }
 
-func evaluateDistributionPromotion(channel *ReleaseChannelDocument, targetBOM *BOM, healthProof *DistributionHealthProof, sourceChannel ReleaseChannel) (*promotionpolicy.Decision, error) {
+func evaluateDistributionPromotion(
+	channel *ReleaseChannelDocument,
+	targetBOM *BOM,
+	healthProof *DistributionHealthProof,
+	sourceChannel ReleaseChannel,
+) (*promotionpolicy.Decision, error) {
 	if channel == nil {
 		return nil, fmt.Errorf("release channel cannot be nil")
 	}
@@ -945,12 +1004,19 @@ func evaluateDistributionPromotion(channel *ReleaseChannelDocument, targetBOM *B
 		return nil, fmt.Errorf("evaluate promotion policy: %w", err)
 	}
 	if !decision.Allowed {
-		return nil, fmt.Errorf("promotion policy blocked channel %q to revision %q: %s", channel.Metadata.Name, targetBOM.Spec.Revision, distributionPromotionViolationSummary(decision.Violations))
+		return nil, fmt.Errorf(
+			"promotion policy blocked channel %q to revision %q: %s",
+			channel.Metadata.Name,
+			targetBOM.Spec.Revision,
+			distributionPromotionViolationSummary(decision.Violations),
+		)
 	}
 	return decision, nil
 }
 
-func distributionPromotionHealthProofSummary(proof *DistributionHealthProof) promotionpolicy.HealthProofSummary {
+func distributionPromotionHealthProofSummary(
+	proof *DistributionHealthProof,
+) promotionpolicy.HealthProofSummary {
 	if proof == nil {
 		return promotionpolicy.HealthProofSummary{}
 	}
@@ -994,7 +1060,10 @@ func distributionPromotionViolationSummary(violations []promotionpolicy.Violatio
 	return strings.Join(parts, "; ")
 }
 
-func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*DistributionHealthProof, string, error) {
+func distributionHealthProofForPromotion(
+	path string,
+	targetBOM *BOM,
+) (*DistributionHealthProof, string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, "", nil
@@ -1007,20 +1076,37 @@ func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*Distribu
 		return nil, "", err
 	}
 	if proof.Spec.Line != targetBOM.Metadata.Name {
-		return nil, "", fmt.Errorf("distribution health proof %q line %q does not match target BOM metadata.name %q", proof.Metadata.Name, proof.Spec.Line, targetBOM.Metadata.Name)
+		return nil, "", fmt.Errorf(
+			"distribution health proof %q line %q does not match target BOM metadata.name %q",
+			proof.Metadata.Name,
+			proof.Spec.Line,
+			targetBOM.Metadata.Name,
+		)
 	}
 	if proof.Spec.TargetRevision != targetBOM.Spec.Revision {
-		return nil, "", fmt.Errorf("distribution health proof %q targetRevision %q does not match target BOM spec.revision %q", proof.Metadata.Name, proof.Spec.TargetRevision, targetBOM.Spec.Revision)
+		return nil, "", fmt.Errorf(
+			"distribution health proof %q targetRevision %q does not match target BOM spec.revision %q",
+			proof.Metadata.Name,
+			proof.Spec.TargetRevision,
+			targetBOM.Spec.Revision,
+		)
 	}
 	if !proof.Spec.Passed {
 		return nil, "", fmt.Errorf("distribution health proof %q did not pass", proof.Metadata.Name)
 	}
 	if len(proof.Spec.Signals) == 0 {
-		return nil, "", fmt.Errorf("distribution health proof %q has no health signals", proof.Metadata.Name)
+		return nil, "", fmt.Errorf(
+			"distribution health proof %q has no health signals",
+			proof.Metadata.Name,
+		)
 	}
 	evaluation := EvaluateDistributionHealthProof(proof)
 	if !evaluation.Passed {
-		return nil, "", fmt.Errorf("distribution health proof %q did not satisfy evidence thresholds: %s", proof.Metadata.Name, distributionHealthProofFailureSummary(evaluation))
+		return nil, "", fmt.Errorf(
+			"distribution health proof %q did not satisfy evidence thresholds: %s",
+			proof.Metadata.Name,
+			distributionHealthProofFailureSummary(evaluation),
+		)
 	}
 	return proof, digest, nil
 }
@@ -1028,16 +1114,29 @@ func distributionHealthProofForPromotion(path string, targetBOM *BOM) (*Distribu
 func distributionHealthProofFailureSummary(evaluation DistributionHealthProofEvaluation) string {
 	parts := make([]string, 0, 4)
 	if len(evaluation.FailedRequiredSignals) > 0 {
-		parts = append(parts, "failed required signal(s): "+strings.Join(evaluation.FailedRequiredSignals, ", "))
+		parts = append(
+			parts,
+			"failed required signal(s): "+strings.Join(evaluation.FailedRequiredSignals, ", "),
+		)
 	}
 	if len(evaluation.MissingRequiredSignals) > 0 {
-		parts = append(parts, "missing required signal(s): "+strings.Join(evaluation.MissingRequiredSignals, ", "))
+		parts = append(
+			parts,
+			"missing required signal(s): "+strings.Join(evaluation.MissingRequiredSignals, ", "),
+		)
 	}
 	if len(evaluation.FailedSignals) > 0 && !evaluation.HasThresholds {
 		parts = append(parts, "failed signal(s): "+strings.Join(evaluation.FailedSignals, ", "))
 	}
 	if evaluation.SignalSummary.PassedSignals < evaluation.SignalSummary.MinPassedSignals {
-		parts = append(parts, fmt.Sprintf("passed %d/%d signal(s)", evaluation.SignalSummary.PassedSignals, evaluation.SignalSummary.MinPassedSignals))
+		parts = append(
+			parts,
+			fmt.Sprintf(
+				"passed %d/%d signal(s)",
+				evaluation.SignalSummary.PassedSignals,
+				evaluation.SignalSummary.MinPassedSignals,
+			),
+		)
 	}
 	if len(parts) == 0 {
 		return "proof did not pass"
@@ -1098,7 +1197,10 @@ func releaseComponentDigests(doc *BOM) []ReleaseComponentDigestRef {
 	return out
 }
 
-func releasePromotionEvidence(storeRoot, healthProofPath, healthProofDigest string, proof *DistributionHealthProof) []ReleasePromotionEvidenceRef {
+func releasePromotionEvidence(
+	storeRoot, healthProofPath, healthProofDigest string,
+	proof *DistributionHealthProof,
+) []ReleasePromotionEvidenceRef {
 	if proof == nil {
 		return nil
 	}
@@ -1112,7 +1214,11 @@ func releasePromotionEvidence(storeRoot, healthProofPath, healthProofDigest stri
 	}
 }
 
-func releasePromotionTimeline(fromRevision, toRevision string, sourceChannel, targetChannel ReleaseChannel, reason, actor, at string) []ReleasePromotionTimelineEvent {
+func releasePromotionTimeline(
+	fromRevision, toRevision string,
+	sourceChannel, targetChannel ReleaseChannel,
+	reason, actor, at string,
+) []ReleasePromotionTimelineEvent {
 	return []ReleasePromotionTimelineEvent{
 		{
 			Type:     "candidateRecorded",
@@ -1154,12 +1260,20 @@ func promotionTimelineMessage(fromRevision, toRevision string) string {
 	return "channel target advanced from " + fromRevision + " to " + toRevision
 }
 
-func newReleaseCandidateRevisionDocument(opts releaseCandidateRevisionOptions) (*ReleaseCandidateRevisionDocument, string) {
+func newReleaseCandidateRevisionDocument(
+	opts releaseCandidateRevisionOptions,
+) (*ReleaseCandidateRevisionDocument, string) {
 	name := releaseMetadataSafeName(opts.Line + "-" + opts.Revision + "-candidate")
 	if name == "" {
 		name = "candidate"
 	}
-	path := filepath.Join(opts.Root, "candidates", strings.TrimSpace(opts.Line), strings.TrimSpace(opts.Revision), "candidate.yaml")
+	path := filepath.Join(
+		opts.Root,
+		"candidates",
+		strings.TrimSpace(opts.Line),
+		strings.TrimSpace(opts.Revision),
+		"candidate.yaml",
+	)
 	return &ReleaseCandidateRevisionDocument{
 		APIVersion: distribution.APIVersion,
 		Kind:       distribution.KindReleaseCandidateRevision,
@@ -1183,13 +1297,23 @@ func newReleaseCandidateRevisionDocument(opts releaseCandidateRevisionOptions) (
 	}, path
 }
 
-func newReleasePromotionHistoryDocument(opts releasePromotionHistoryOptions) (*ReleasePromotionHistoryDocument, string) {
+func newReleasePromotionHistoryDocument(
+	opts releasePromotionHistoryOptions,
+) (*ReleasePromotionHistoryDocument, string) {
 	recordedAt := strings.TrimSpace(opts.RecordedAt)
-	name := releaseMetadataSafeName(recordedAt + "-" + opts.Line + "-" + string(opts.Channel) + "-" + opts.Promotion.ToRevision)
+	name := releaseMetadataSafeName(
+		recordedAt + "-" + opts.Line + "-" + string(opts.Channel) + "-" + opts.Promotion.ToRevision,
+	)
 	if name == "" {
 		name = "promotion"
 	}
-	path := filepath.Join(opts.Root, "promotions", strings.TrimSpace(opts.Line), string(opts.Channel), name+".yaml")
+	path := filepath.Join(
+		opts.Root,
+		"promotions",
+		strings.TrimSpace(opts.Line),
+		string(opts.Channel),
+		name+".yaml",
+	)
 	candidateRef := ""
 	if strings.TrimSpace(opts.CandidatePath) != "" {
 		candidateRef = releaseStoreRelativePath(opts.Root, opts.CandidatePath)

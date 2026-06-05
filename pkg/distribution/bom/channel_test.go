@@ -25,10 +25,9 @@ import (
 	"testing"
 	"time"
 
+	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 	"github.com/opencontainers/go-digest"
 	"sigs.k8s.io/yaml"
-
-	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
 
 func TestReleaseChannelValidate(t *testing.T) {
@@ -105,7 +104,13 @@ func TestReleaseChannelValidate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := NewReleaseChannel("default-platform-beta", "default-platform", ChannelBeta, "rev-20240423", "bom.yaml")
+			doc := NewReleaseChannel(
+				"default-platform-beta",
+				"default-platform",
+				ChannelBeta,
+				"rev-20240423",
+				"bom.yaml",
+			)
 			if tt.mutate != nil {
 				tt.mutate(doc)
 			}
@@ -193,7 +198,12 @@ func TestDistributionHealthProofValidate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+			proof := NewDistributionHealthProof(
+				"default-platform-rev-20240424",
+				"default-platform",
+				"rev-20240424",
+				true,
+			)
 			if tt.mutate != nil {
 				tt.mutate(proof)
 			}
@@ -231,7 +241,12 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 		{
 			name: "legacy proof requires every signal to pass",
 			proof: func() *DistributionHealthProof {
-				proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+				proof := NewDistributionHealthProof(
+					"default-platform-rev-20240424",
+					"default-platform",
+					"rev-20240424",
+					true,
+				)
 				proof.Spec.Signals = []DistributionHealthSignal{
 					{Name: "node-readiness", Passed: true},
 					{Name: "optional-warning", Passed: false},
@@ -246,7 +261,12 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 		{
 			name: "threshold proof allows failed optional signal",
 			proof: func() *DistributionHealthProof {
-				proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+				proof := NewDistributionHealthProof(
+					"default-platform-rev-20240424",
+					"default-platform",
+					"rev-20240424",
+					true,
+				)
 				proof.Spec.Thresholds = DistributionHealthThresholds{
 					RequiredSignals:  []string{"node-readiness"},
 					MinPassedSignals: 1,
@@ -265,7 +285,12 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 		{
 			name: "threshold proof rejects missing required signal",
 			proof: func() *DistributionHealthProof {
-				proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+				proof := NewDistributionHealthProof(
+					"default-platform-rev-20240424",
+					"default-platform",
+					"rev-20240424",
+					true,
+				)
 				proof.Spec.Thresholds = DistributionHealthThresholds{
 					RequiredSignals:  []string{"node-readiness", "runtime-preflight"},
 					MinPassedSignals: 1,
@@ -283,7 +308,12 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 		{
 			name: "threshold proof rejects minimum passed count",
 			proof: func() *DistributionHealthProof {
-				proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+				proof := NewDistributionHealthProof(
+					"default-platform-rev-20240424",
+					"default-platform",
+					"rev-20240424",
+					true,
+				)
 				proof.Spec.Thresholds = DistributionHealthThresholds{
 					RequiredSignals:  []string{"node-readiness"},
 					MinPassedSignals: 2,
@@ -302,7 +332,12 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 		{
 			name: "signal required flag contributes to required set",
 			proof: func() *DistributionHealthProof {
-				proof := NewDistributionHealthProof("default-platform-rev-20240424", "default-platform", "rev-20240424", true)
+				proof := NewDistributionHealthProof(
+					"default-platform-rev-20240424",
+					"default-platform",
+					"rev-20240424",
+					true,
+				)
 				proof.Spec.Thresholds.MinPassedSignals = 1
 				proof.Spec.Signals = []DistributionHealthSignal{
 					{Name: "node-readiness", Passed: false, Required: true},
@@ -324,10 +359,22 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 			if got, want := evaluation.Passed, tt.wantPassed; got != want {
 				t.Fatalf("Passed = %v, want %v; evaluation=%#v", got, want, evaluation)
 			}
-			if got, want := evaluation.FailedRequiredSignals, tt.wantFailedRequired; strings.Join(got, ",") != strings.Join(want, ",") {
+			if got, want := evaluation.FailedRequiredSignals, tt.wantFailedRequired; strings.Join(
+				got,
+				",",
+			) != strings.Join(
+				want,
+				",",
+			) {
 				t.Fatalf("FailedRequiredSignals = %#v, want %#v", got, want)
 			}
-			if got, want := evaluation.MissingRequiredSignals, tt.wantMissingRequired; strings.Join(got, ",") != strings.Join(want, ",") {
+			if got, want := evaluation.MissingRequiredSignals, tt.wantMissingRequired; strings.Join(
+				got,
+				",",
+			) != strings.Join(
+				want,
+				",",
+			) {
 				t.Fatalf("MissingRequiredSignals = %#v, want %#v", got, want)
 			}
 			if got, want := evaluation.SignalSummary.PassedSignals, tt.wantPassedSignals; got != want {
@@ -337,7 +384,12 @@ func TestDistributionHealthProofEvaluate(t *testing.T) {
 				t.Fatalf("MinPassedSignals = %d, want %d", got, want)
 			}
 			if got, want := len(evaluation.FailedSignals), tt.wantFailedSignalCount; got != want {
-				t.Fatalf("len(FailedSignals) = %d, want %d: %#v", got, want, evaluation.FailedSignals)
+				t.Fatalf(
+					"len(FailedSignals) = %d, want %d: %#v",
+					got,
+					want,
+					evaluation.FailedSignals,
+				)
 			}
 		})
 	}
@@ -352,7 +404,13 @@ func TestResolveReleaseChannelFile(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := NewReleaseChannel("default-platform-beta", "default-platform", ChannelBeta, "rev-20240423", "bom.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-beta",
+		"default-platform",
+		ChannelBeta,
+		"rev-20240423",
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -381,7 +439,13 @@ func TestResolveReleaseChannelFileRejectsMismatchedBOMDigest(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := NewReleaseChannel("default-platform-beta", "default-platform", ChannelBeta, "rev-20240423", "bom.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-beta",
+		"default-platform",
+		ChannelBeta,
+		"rev-20240423",
+		"bom.yaml",
+	)
 	channel.Spec.BOMDigest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -415,7 +479,13 @@ func TestResolveReleaseChannelLookupFromDirectory(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(bomData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -449,7 +519,13 @@ func TestResolveReleaseChannelLookupFromHTTP(t *testing.T) {
 	bomDoc := validBOM()
 	bomData := []byte(bomDoc.String())
 	bomDigest := digest.Canonical.FromBytes(bomData).String()
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "/boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"/boms/rev-20240423.yaml",
+	)
 	channel.Spec.BOMDigest = bomDigest
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -502,7 +578,13 @@ func TestReleaseMetadataServiceServesChannelLookup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../../releases/default-platform/rev-20240423/bom.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../../releases/default-platform/rev-20240423/bom.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(bomData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -544,8 +626,20 @@ func TestReleaseMetadataServicePromotesWithHealthProof(t *testing.T) {
 	oldBOM := validBOM()
 	newBOM := validBOM()
 	newBOM.Spec.Revision = "rev-20240424"
-	oldBOMPath := filepath.Join(root, "releases", "default-platform", oldBOM.Spec.Revision, "bom.yaml")
-	newBOMPath := filepath.Join(root, "releases", "default-platform", newBOM.Spec.Revision, "bom.yaml")
+	oldBOMPath := filepath.Join(
+		root,
+		"releases",
+		"default-platform",
+		oldBOM.Spec.Revision,
+		"bom.yaml",
+	)
+	newBOMPath := filepath.Join(
+		root,
+		"releases",
+		"default-platform",
+		newBOM.Spec.Revision,
+		"bom.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(oldBOMPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(oldBOM) error = %v", err)
 	}
@@ -566,7 +660,13 @@ func TestReleaseMetadataServicePromotesWithHealthProof(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, oldBOM.Spec.Revision, "../../releases/default-platform/"+oldBOM.Spec.Revision+"/bom.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		oldBOM.Spec.Revision,
+		"../../releases/default-platform/"+oldBOM.Spec.Revision+"/bom.yaml",
+	)
 	channel.Spec.BOMDigest = digest.Canonical.FromBytes(oldBOMData).String()
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
@@ -598,7 +698,11 @@ healthProof:
       - name: node-readiness
         passed: true
 `)
-	resp, err := http.Post(server.URL+"/v1/distributions/default-platform/channels/stable/promotions", "application/yaml", strings.NewReader(string(body)))
+	resp, err := http.Post(
+		server.URL+"/v1/distributions/default-platform/channels/stable/promotions",
+		"application/yaml",
+		strings.NewReader(string(body)),
+	)
 	if err != nil {
 		t.Fatalf("Post(promotion) error = %v", err)
 	}
@@ -628,7 +732,8 @@ healthProof:
 	if got, want := loaded.Spec.TargetRevision, "rev-20240424"; got != want {
 		t.Fatalf("promoted targetRevision = %q, want %q", got, want)
 	}
-	if got := loaded.Spec.BOMDigest; !strings.HasPrefix(got, "sha256:") || got == channel.Spec.BOMDigest {
+	if got := loaded.Spec.BOMDigest; !strings.HasPrefix(got, "sha256:") ||
+		got == channel.Spec.BOMDigest {
 		t.Fatalf("promoted bomDigest = %q, want new sha256 digest", got)
 	}
 	if got, want := len(loaded.Spec.PromotionHistory), 1; got != want {
@@ -693,7 +798,13 @@ func TestResolveReleaseChannelLookupRequiresDigestPinnedBOM(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(channel) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -719,7 +830,13 @@ func TestResolveReleaseChannelFileRejectsMismatchedRevision(t *testing.T) {
 		t.Fatalf("MarshalFile(bom) error = %v", err)
 	}
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := NewReleaseChannel("default-platform-beta", "default-platform", ChannelBeta, "rev-missing", "bom.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-beta",
+		"default-platform",
+		ChannelBeta,
+		"rev-missing",
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -754,7 +871,13 @@ func TestResolveReleaseChannelFileUsesAbsoluteBOMPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(channelPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-beta", "default-platform", ChannelBeta, "rev-20240423", bomPath)
+	channel := NewReleaseChannel(
+		"default-platform-beta",
+		"default-platform",
+		ChannelBeta,
+		"rev-20240423",
+		bomPath,
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -796,7 +919,12 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 	}
 	newBOMDigest := digest.Canonical.FromBytes(newBOMData).String()
 	healthProofPath := filepath.Join(root, "proofs", "rev-20240424-health.yaml")
-	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", newBOM.Metadata.Name, newBOM.Spec.Revision, true)
+	healthProof := NewDistributionHealthProof(
+		"default-platform-rev-20240424",
+		newBOM.Metadata.Name,
+		newBOM.Spec.Revision,
+		true,
+	)
 	healthProof.Spec.Summary = "beta cohort passed"
 	healthProof.Spec.CollectedAt = "2024-04-24T09:30:00Z"
 	healthProof.Spec.Signals = []DistributionHealthSignal{
@@ -806,7 +934,13 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, oldBOM.Spec.Revision, "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		oldBOM.Spec.Revision,
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -896,7 +1030,10 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 		t.Fatalf("promotionHistory[0].healthProofSummary = %q, want %q", got, want)
 	}
 	if !strings.HasPrefix(entry.HealthProofDigest, "sha256:") {
-		t.Fatalf("promotionHistory[0].healthProofDigest = %q, want sha256 digest", entry.HealthProofDigest)
+		t.Fatalf(
+			"promotionHistory[0].healthProofDigest = %q, want sha256 digest",
+			entry.HealthProofDigest,
+		)
 	}
 	if got, want := len(entry.Evidence), 1; got != want {
 		t.Fatalf("len(promotionHistory[0].evidence) = %d, want %d", got, want)
@@ -988,11 +1125,22 @@ func TestPromoteReleaseChannelFileRejectsFailedHealthProof(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof := NewDistributionHealthProof(
+		"default-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
 	healthProof.Spec.Signals = []DistributionHealthSignal{
 		{Name: "node-readiness", Passed: false, Message: "one canary node not ready"},
 	}
@@ -1027,11 +1175,22 @@ func TestPromoteReleaseChannelFileRejectsEmptyHealthProofSignals(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof := NewDistributionHealthProof(
+		"default-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
 	}
@@ -1063,11 +1222,22 @@ func TestPromoteReleaseChannelFileRejectsMissingRequiredHealthProofSignal(t *tes
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof := NewDistributionHealthProof(
+		"default-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
 	healthProof.Spec.Thresholds = DistributionHealthThresholds{
 		RequiredSignals:  []string{"node-readiness", "runtime-preflight"},
 		MinPassedSignals: 1,
@@ -1105,7 +1275,13 @@ func TestPromoteReleaseChannelFileRejectsMissingHealthProofForStable(t *testing.
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
@@ -1147,11 +1323,22 @@ func TestPromoteReleaseChannelFileRejectsAlphaCandidateForStable(t *testing.T) {
 	if err := yamlutil.MarshalFile(targetBOMPath, targetBOM); err != nil {
 		t.Fatalf("MarshalFile(targetBOM) error = %v", err)
 	}
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "../boms/rev-20240423.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"../boms/rev-20240423.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}
-	healthProof := NewDistributionHealthProof("default-platform-rev-20240424", targetBOM.Metadata.Name, targetBOM.Spec.Revision, true)
+	healthProof := NewDistributionHealthProof(
+		"default-platform-rev-20240424",
+		targetBOM.Metadata.Name,
+		targetBOM.Spec.Revision,
+		true,
+	)
 	healthProof.Spec.Signals = []DistributionHealthSignal{{Name: "node-readiness", Passed: true}}
 	if err := yamlutil.MarshalFile(healthProofPath, healthProof); err != nil {
 		t.Fatalf("MarshalFile(healthProof) error = %v", err)
@@ -1169,7 +1356,10 @@ func TestPromoteReleaseChannelFileRejectsAlphaCandidateForStable(t *testing.T) {
 		t.Fatal("PromoteReleaseChannelFile() error = nil, want source channel policy error")
 	}
 	if !strings.Contains(err.Error(), "sourceChannelBlocked") {
-		t.Fatalf("PromoteReleaseChannelFile() error = %v, want source channel policy violation", err)
+		t.Fatalf(
+			"PromoteReleaseChannelFile() error = %v, want source channel policy violation",
+			err,
+		)
 	}
 }
 
@@ -1178,7 +1368,13 @@ func TestPromoteReleaseChannelFileRejectsMismatchedLine(t *testing.T) {
 
 	root := t.TempDir()
 	channelPath := filepath.Join(root, "channel.yaml")
-	channel := NewReleaseChannel("default-platform-stable", "default-platform", ChannelStable, "rev-20240423", "bom.yaml")
+	channel := NewReleaseChannel(
+		"default-platform-stable",
+		"default-platform",
+		ChannelStable,
+		"rev-20240423",
+		"bom.yaml",
+	)
 	if err := yamlutil.MarshalFile(channelPath, channel); err != nil {
 		t.Fatalf("MarshalFile(channel) error = %v", err)
 	}

@@ -27,7 +27,16 @@ import (
 func TestRenderPlanCollectsTrackedK8sObjects(t *testing.T) {
 	t.Parallel()
 
-	root := filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node", "packages", "cilium")
+	root := filepath.Join(
+		"..",
+		"..",
+		"..",
+		"scripts",
+		"poc",
+		"minimal-single-node",
+		"packages",
+		"cilium",
+	)
 	pkg, err := packageformat.LoadDir(root)
 	if err != nil {
 		t.Fatalf("LoadDir() error = %v", err)
@@ -82,8 +91,12 @@ func TestRenderPlanCollectsTrackedK8sObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlanFromResolved() error = %v", err)
 	}
-	plan.LocalResources = []LocalResource{{Path: localResourcePath, RelativePath: "grafana-admin-secret.yaml"}}
-	plan.Components[1].LocalPatches = []LocalPatch{{Path: localPatchPath, RelativePath: "cilium-config.patch.yaml"}}
+	plan.LocalResources = []LocalResource{
+		{Path: localResourcePath, RelativePath: "grafana-admin-secret.yaml"},
+	}
+	plan.Components[1].LocalPatches = []LocalPatch{
+		{Path: localPatchPath, RelativePath: "cilium-config.patch.yaml"},
+	}
 
 	out := t.TempDir()
 	bundle, err := RenderPlan(plan, SourceMap{
@@ -129,7 +142,14 @@ func TestRenderPlanCollectsTrackedK8sObjects(t *testing.T) {
 		t.Fatalf("tracked host paths missing expected entries: %+v", bundle.Spec.TrackedHostPaths)
 	}
 
-	renderedManifestPath := filepath.Join(out, "components", "cilium", "files", "manifests", "cilium.yaml")
+	renderedManifestPath := filepath.Join(
+		out,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
 	data, err := os.ReadFile(renderedManifestPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%q) error = %v", renderedManifestPath, err)
@@ -142,7 +162,16 @@ func TestRenderPlanCollectsTrackedK8sObjects(t *testing.T) {
 func TestRenderPlanCollectsLocalInputTrackedHostPath(t *testing.T) {
 	t.Parallel()
 
-	root := filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node", "packages", "kubernetes")
+	root := filepath.Join(
+		"..",
+		"..",
+		"..",
+		"scripts",
+		"poc",
+		"minimal-single-node",
+		"packages",
+		"kubernetes",
+	)
 	pkg, err := packageformat.LoadDir(root)
 	if err != nil {
 		t.Fatalf("LoadDir() error = %v", err)
@@ -189,7 +218,12 @@ func TestRenderPlanCollectsLocalInputTrackedHostPath(t *testing.T) {
 	}
 
 	plan, err := BuildPlanFromResolved(doc, map[string]*packageformat.ComponentPackage{
-		"containerd": packageformat.New("containerd-runtime", "containerd", "v1.7.18", packageformat.ClassRootfs),
+		"containerd": packageformat.New(
+			"containerd-runtime",
+			"containerd",
+			"v1.7.18",
+			packageformat.ClassRootfs,
+		),
 		"kubernetes": pkg,
 	})
 	if err != nil {
@@ -222,7 +256,10 @@ func TestRenderPlanCollectsLocalInputTrackedHostPath(t *testing.T) {
 		}
 	}
 	if tracked == nil {
-		t.Fatalf("tracked host paths missing /etc/kubernetes/kubeadm.yaml: %+v", bundle.Spec.TrackedHostPaths)
+		t.Fatalf(
+			"tracked host paths missing /etc/kubernetes/kubeadm.yaml: %+v",
+			bundle.Spec.TrackedHostPaths,
+		)
 	}
 	if got, want := tracked.Ownership, InventoryOwnershipLocal; got != want {
 		t.Fatalf("tracked ownership = %q, want %q", got, want)
@@ -252,7 +289,12 @@ func TestRenderPlanCollectsSingleFileRootfsTrackedHostPath(t *testing.T) {
 		t.Fatalf("WriteFile(package.yaml) error = %v", err)
 	}
 
-	pkg := packageformat.New("kubernetes-rootfs", "kubernetes", "v1.30.3", packageformat.ClassRootfs)
+	pkg := packageformat.New(
+		"kubernetes-rootfs",
+		"kubernetes",
+		"v1.30.3",
+		packageformat.ClassRootfs,
+	)
 	pkg.Spec.Contents = []packageformat.Content{
 		{
 			Name: "kubelet",
@@ -289,7 +331,10 @@ func TestRenderPlanCollectsSingleFileRootfsTrackedHostPath(t *testing.T) {
 	}
 
 	if len(bundle.Spec.TrackedHostPaths) != 1 {
-		t.Fatalf("len(bundle.Spec.TrackedHostPaths) = %d, want 1", len(bundle.Spec.TrackedHostPaths))
+		t.Fatalf(
+			"len(bundle.Spec.TrackedHostPaths) = %d, want 1",
+			len(bundle.Spec.TrackedHostPaths),
+		)
 	}
 	if got, want := bundle.Spec.TrackedHostPaths[0].HostPath, "/usr/bin/kubelet"; got != want {
 		t.Fatalf("tracked host path = %q, want %q", got, want)
@@ -299,7 +344,16 @@ func TestRenderPlanCollectsSingleFileRootfsTrackedHostPath(t *testing.T) {
 func TestRenderPlanCollectsGeneratedHostPaths(t *testing.T) {
 	t.Parallel()
 
-	root := filepath.Join("..", "..", "..", "scripts", "poc", "minimal-single-node", "packages", "kubernetes")
+	root := filepath.Join(
+		"..",
+		"..",
+		"..",
+		"scripts",
+		"poc",
+		"minimal-single-node",
+		"packages",
+		"kubernetes",
+	)
 	pkg, err := packageformat.LoadDir(root)
 	if err != nil {
 		t.Fatalf("LoadDir() error = %v", err)
@@ -333,7 +387,12 @@ func TestRenderPlanCollectsGeneratedHostPaths(t *testing.T) {
 	}
 
 	plan, err := BuildPlanFromResolved(doc, map[string]*packageformat.ComponentPackage{
-		"containerd": packageformat.New("containerd-runtime", "containerd", "v1.7.18", packageformat.ClassRootfs),
+		"containerd": packageformat.New(
+			"containerd-runtime",
+			"containerd",
+			"v1.7.18",
+			packageformat.ClassRootfs,
+		),
 		"kubernetes": pkg,
 	})
 	if err != nil {
@@ -399,7 +458,12 @@ scheduler:
 		}
 	}
 	if got, want := len(tracked), 3; got != want {
-		t.Fatalf("generated tracked host paths = %d, want %d: %+v", got, want, bundle.Spec.TrackedHostPaths)
+		t.Fatalf(
+			"generated tracked host paths = %d, want %d: %+v",
+			got,
+			want,
+			bundle.Spec.TrackedHostPaths,
+		)
 	}
 	for hostPath, entry := range tracked {
 		if got, want := entry.Source, InventorySourceGeneratedHook; got != want {
@@ -433,14 +497,22 @@ scheduler:
 		t.Fatalf("apiserver generated.expectedCommand = %q, want %q", got, want)
 	}
 	if got, want := apiserver.Generated.ExpectedArgs["service-cluster-ip-range"], "10.96.0.0/12"; got != want {
-		t.Fatalf("apiserver generated.expectedArgs[service-cluster-ip-range] = %q, want %q", got, want)
+		t.Fatalf(
+			"apiserver generated.expectedArgs[service-cluster-ip-range] = %q, want %q",
+			got,
+			want,
+		)
 	}
 	if got, want := apiserver.Generated.ExpectedArgs["audit-policy-file"], "/etc/kubernetes/audit-policy.yaml"; got != want {
 		t.Fatalf("apiserver generated.expectedArgs[audit-policy-file] = %q, want %q", got, want)
 	}
 	for _, mountPath := range []string{"/etc/kubernetes", "/etc/kubernetes/pki", "/etc/localtime"} {
 		if !containsString(apiserver.Generated.ExpectedVolumeMounts, mountPath) {
-			t.Fatalf("apiserver generated.expectedVolumeMounts missing %q: %+v", mountPath, apiserver.Generated.ExpectedVolumeMounts)
+			t.Fatalf(
+				"apiserver generated.expectedVolumeMounts missing %q: %+v",
+				mountPath,
+				apiserver.Generated.ExpectedVolumeMounts,
+			)
 		}
 	}
 
@@ -462,7 +534,11 @@ scheduler:
 	}
 	for _, mountPath := range []string{"/etc/kubernetes/pki", "/etc/localtime"} {
 		if !containsString(controllerManager.Generated.ExpectedVolumeMounts, mountPath) {
-			t.Fatalf("controller-manager generated.expectedVolumeMounts missing %q: %+v", mountPath, controllerManager.Generated.ExpectedVolumeMounts)
+			t.Fatalf(
+				"controller-manager generated.expectedVolumeMounts missing %q: %+v",
+				mountPath,
+				controllerManager.Generated.ExpectedVolumeMounts,
+			)
 		}
 	}
 
@@ -480,7 +556,11 @@ scheduler:
 		t.Fatalf("scheduler generated.expectedArgs[bind-address] = %q, want %q", got, want)
 	}
 	if !containsString(scheduler.Generated.ExpectedVolumeMounts, "/etc/localtime") {
-		t.Fatalf("scheduler generated.expectedVolumeMounts missing %q: %+v", "/etc/localtime", scheduler.Generated.ExpectedVolumeMounts)
+		t.Fatalf(
+			"scheduler generated.expectedVolumeMounts missing %q: %+v",
+			"/etc/localtime",
+			scheduler.Generated.ExpectedVolumeMounts,
+		)
 	}
 }
 
@@ -500,7 +580,12 @@ metadata:
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
 
-	pkg := packageformat.New("cilium-application", "cilium", "v1.16.0", packageformat.ClassApplication)
+	pkg := packageformat.New(
+		"cilium-application",
+		"cilium",
+		"v1.16.0",
+		packageformat.ClassApplication,
+	)
 	pkg.Spec.Contents = []packageformat.Content{{
 		Name: "cilium-manifest",
 		Type: packageformat.ContentManifest,
@@ -564,7 +649,10 @@ metadata:
 		}
 	}
 	if tracked == nil {
-		t.Fatalf("tracked host paths missing declared generated output: %+v", bundle.Spec.TrackedHostPaths)
+		t.Fatalf(
+			"tracked host paths missing declared generated output: %+v",
+			bundle.Spec.TrackedHostPaths,
+		)
 	}
 	if got, want := tracked.Component, "cilium"; got != want {
 		t.Fatalf("tracked component = %q, want %q", got, want)
@@ -594,7 +682,10 @@ metadata:
 		t.Fatalf("generated.expectedArgs[cluster-name] = %q, want %q", got, want)
 	}
 	if !containsString(tracked.Generated.ExpectedVolumeMounts, "/var/run/cilium") {
-		t.Fatalf("generated.expectedVolumeMounts missing cilium socket: %+v", tracked.Generated.ExpectedVolumeMounts)
+		t.Fatalf(
+			"generated.expectedVolumeMounts missing cilium socket: %+v",
+			tracked.Generated.ExpectedVolumeMounts,
+		)
 	}
 }
 

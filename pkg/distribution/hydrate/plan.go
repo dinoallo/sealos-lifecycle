@@ -31,52 +31,52 @@ const (
 )
 
 type Plan struct {
-	BOMName                string                              `json:"bomName" yaml:"bomName"`
-	Revision               string                              `json:"revision" yaml:"revision"`
-	Channel                bom.ReleaseChannel                  `json:"channel" yaml:"channel"`
-	BOMLocalPatchPolicy    string                              `json:"bomLocalPatchPolicy,omitempty" yaml:"bomLocalPatchPolicy,omitempty"`
-	LocalPatchPolicy       *ownership.LocalPatchPolicyDocument `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
+	BOMName                string                              `json:"bomName"                          yaml:"bomName"`
+	Revision               string                              `json:"revision"                         yaml:"revision"`
+	Channel                bom.ReleaseChannel                  `json:"channel"                          yaml:"channel"`
+	BOMLocalPatchPolicy    string                              `json:"bomLocalPatchPolicy,omitempty"    yaml:"bomLocalPatchPolicy,omitempty"`
+	LocalPatchPolicy       *ownership.LocalPatchPolicyDocument `json:"localPatchPolicy,omitempty"       yaml:"localPatchPolicy,omitempty"`
 	LocalPatchPolicySource ownership.LocalPatchPolicySource    `json:"localPatchPolicySource,omitempty" yaml:"localPatchPolicySource,omitempty"`
-	LocalResources         []LocalResource                     `json:"localResources,omitempty" yaml:"localResources,omitempty"`
-	Components             []ComponentPlan                     `json:"components" yaml:"components"`
+	LocalResources         []LocalResource                     `json:"localResources,omitempty"         yaml:"localResources,omitempty"`
+	Components             []ComponentPlan                     `json:"components"                       yaml:"components"`
 }
 
 type LocalPatch struct {
-	Path         string `json:"path" yaml:"path"`
+	Path         string `json:"path"                   yaml:"path"`
 	RelativePath string `json:"relativePath,omitempty" yaml:"relativePath,omitempty"`
 }
 
 type LocalResource struct {
-	Path         string `json:"path" yaml:"path"`
+	Path         string `json:"path"                   yaml:"path"`
 	RelativePath string `json:"relativePath,omitempty" yaml:"relativePath,omitempty"`
 }
 
 type ComponentPlan struct {
-	Name              string                         `json:"name" yaml:"name"`
-	PackageName       string                         `json:"packageName" yaml:"packageName"`
-	Version           string                         `json:"version" yaml:"version"`
-	Class             packageformat.PackageClass     `json:"class" yaml:"class"`
-	Artifact          string                         `json:"artifact" yaml:"artifact"`
-	Dependencies      []string                       `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Inputs            []packageformat.Input          `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	GeneratedOutputs  packageformat.GeneratedOutputs `json:"generatedOutputs,omitempty" yaml:"generatedOutputs,omitempty"`
-	LocalPatchPolicy  string                         `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
-	InputBindings     map[string]string              `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
+	Name              string                         `json:"name"                        yaml:"name"`
+	PackageName       string                         `json:"packageName"                 yaml:"packageName"`
+	Version           string                         `json:"version"                     yaml:"version"`
+	Class             packageformat.PackageClass     `json:"class"                       yaml:"class"`
+	Artifact          string                         `json:"artifact"                    yaml:"artifact"`
+	Dependencies      []string                       `json:"dependencies,omitempty"      yaml:"dependencies,omitempty"`
+	Inputs            []packageformat.Input          `json:"inputs,omitempty"            yaml:"inputs,omitempty"`
+	GeneratedOutputs  packageformat.GeneratedOutputs `json:"generatedOutputs,omitempty"  yaml:"generatedOutputs,omitempty"`
+	LocalPatchPolicy  string                         `json:"localPatchPolicy,omitempty"  yaml:"localPatchPolicy,omitempty"`
+	InputBindings     map[string]string              `json:"inputBindings,omitempty"     yaml:"inputBindings,omitempty"`
 	HostInputBindings map[string]map[string]string   `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
-	LocalPatches      []LocalPatch                   `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
-	Steps             []Step                         `json:"steps" yaml:"steps"`
+	LocalPatches      []LocalPatch                   `json:"localPatches,omitempty"      yaml:"localPatches,omitempty"`
+	Steps             []Step                         `json:"steps"                       yaml:"steps"`
 }
 
 type Step struct {
-	Name           string                        `json:"name" yaml:"name"`
-	Kind           StepKind                      `json:"kind" yaml:"kind"`
-	Path           string                        `json:"path" yaml:"path"`
-	ContentType    packageformat.ContentType     `json:"contentType,omitempty" yaml:"contentType,omitempty"`
-	HookPhase      packageformat.HookPhase       `json:"hookPhase,omitempty" yaml:"hookPhase,omitempty"`
-	Target         packageformat.ExecutionTarget `json:"target,omitempty" yaml:"target,omitempty"`
-	MediaType      string                        `json:"mediaType,omitempty" yaml:"mediaType,omitempty"`
-	Required       bool                          `json:"required,omitempty" yaml:"required,omitempty"`
-	Args           []string                      `json:"args,omitempty" yaml:"args,omitempty"`
+	Name           string                        `json:"name"                     yaml:"name"`
+	Kind           StepKind                      `json:"kind"                     yaml:"kind"`
+	Path           string                        `json:"path"                     yaml:"path"`
+	ContentType    packageformat.ContentType     `json:"contentType,omitempty"    yaml:"contentType,omitempty"`
+	HookPhase      packageformat.HookPhase       `json:"hookPhase,omitempty"      yaml:"hookPhase,omitempty"`
+	Target         packageformat.ExecutionTarget `json:"target,omitempty"         yaml:"target,omitempty"`
+	MediaType      string                        `json:"mediaType,omitempty"      yaml:"mediaType,omitempty"`
+	Required       bool                          `json:"required,omitempty"       yaml:"required,omitempty"`
+	Args           []string                      `json:"args,omitempty"           yaml:"args,omitempty"`
 	TimeoutSeconds int32                         `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
@@ -91,7 +91,10 @@ func BuildPlan(doc *bom.BOM, loader packageformat.Loader) (*Plan, error) {
 	return BuildPlanFromResolved(doc, resolved)
 }
 
-func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage) (*Plan, error) {
+func BuildPlanFromResolved(
+	doc *bom.BOM,
+	resolved map[string]*packageformat.ComponentPackage,
+) (*Plan, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("bom cannot be nil")
 	}
@@ -142,35 +145,43 @@ func BuildPlanFromResolved(doc *bom.BOM, resolved map[string]*packageformat.Comp
 	return plan, nil
 }
 
-func clonePackageGeneratedOutputs(outputs packageformat.GeneratedOutputs) packageformat.GeneratedOutputs {
+func clonePackageGeneratedOutputs(
+	outputs packageformat.GeneratedOutputs,
+) packageformat.GeneratedOutputs {
 	if len(outputs.HostPaths) == 0 {
 		return packageformat.GeneratedOutputs{}
 	}
 	cloned := packageformat.GeneratedOutputs{
 		HostPaths: make([]packageformat.GeneratedHostPathOutput, 0, len(outputs.HostPaths)),
 	}
-	for _, hostPath := range outputs.HostPaths {
-		item := hostPath
-		if len(hostPath.ExpectedArgs) > 0 {
-			item.ExpectedArgs = make(map[string]string, len(hostPath.ExpectedArgs))
-			for key, value := range hostPath.ExpectedArgs {
-				item.ExpectedArgs[key] = value
+	for _, item := range outputs.HostPaths {
+		if len(item.ExpectedArgs) > 0 {
+			expectedArgs := make(map[string]string, len(item.ExpectedArgs))
+			for key, value := range item.ExpectedArgs {
+				expectedArgs[key] = value
 			}
+			item.ExpectedArgs = expectedArgs
 		}
-		item.ExpectedVolumeMounts = append([]string(nil), hostPath.ExpectedVolumeMounts...)
+		item.ExpectedVolumeMounts = append([]string(nil), item.ExpectedVolumeMounts...)
 		cloned.HostPaths = append(cloned.HostPaths, item)
 	}
 	return cloned
 }
 
-func buildDependencySet(componentIndex map[string]bom.Package, resolved map[string]*packageformat.ComponentPackage) (map[string][]string, error) {
+func buildDependencySet(
+	componentIndex map[string]bom.Package,
+	resolved map[string]*packageformat.ComponentPackage,
+) (map[string][]string, error) {
 	dependenciesByComponent := make(map[string][]string, len(componentIndex))
 	for name, component := range componentIndex {
 		pkg, ok := resolved[name]
 		if !ok {
 			return nil, fmt.Errorf("resolved package missing for component %q", name)
 		}
-		dependencies := make(map[string]struct{}, len(component.Dependencies)+len(pkg.Spec.Dependencies))
+		dependencies := make(
+			map[string]struct{},
+			len(component.Dependencies)+len(pkg.Spec.Dependencies),
+		)
 		for _, dependency := range component.Dependencies {
 			dependencies[dependency] = struct{}{}
 		}
@@ -180,7 +191,11 @@ func buildDependencySet(componentIndex map[string]bom.Package, resolved map[stri
 				if dependency.Optional {
 					continue
 				}
-				return nil, fmt.Errorf("component %q requires missing dependency %q", name, dependency.Name)
+				return nil, fmt.Errorf(
+					"component %q requires missing dependency %q",
+					name,
+					dependency.Name,
+				)
 			}
 			if dependency.Version != "" && target.Version != dependency.Version {
 				return nil, fmt.Errorf(
@@ -212,7 +227,11 @@ func topoSortDependencies(dependenciesByComponent map[string][]string) ([]string
 	for name, dependencies := range dependenciesByComponent {
 		for _, dependency := range dependencies {
 			if _, ok := indegree[dependency]; !ok {
-				return nil, fmt.Errorf("component %q depends on unknown component %q", name, dependency)
+				return nil, fmt.Errorf(
+					"component %q depends on unknown component %q",
+					name,
+					dependency,
+				)
 			}
 			indegree[name]++
 			reverse[dependency] = append(reverse[dependency], name)

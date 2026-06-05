@@ -15,13 +15,13 @@
 package packageformat
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strings"
 
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/distribution"
+	"sigs.k8s.io/yaml"
 )
 
 type PackageClass string
@@ -72,49 +72,49 @@ const (
 )
 
 type Metadata struct {
-	Name   string            `json:"name" yaml:"name"`
+	Name   string            `json:"name"             yaml:"name"`
 	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 }
 
 type Platform struct {
-	OS   string `json:"os" yaml:"os"`
+	OS   string `json:"os"   yaml:"os"`
 	Arch string `json:"arch" yaml:"arch"`
 }
 
 type Dependency struct {
-	Name     string `json:"name" yaml:"name"`
-	Version  string `json:"version,omitempty" yaml:"version,omitempty"`
+	Name     string `json:"name"               yaml:"name"`
+	Version  string `json:"version,omitempty"  yaml:"version,omitempty"`
 	Optional bool   `json:"optional,omitempty" yaml:"optional,omitempty"`
 }
 
 type Compatibility struct {
 	Kubernetes string     `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
-	Sealos     string     `json:"sealos,omitempty" yaml:"sealos,omitempty"`
-	Platforms  []Platform `json:"platforms,omitempty" yaml:"platforms,omitempty"`
+	Sealos     string     `json:"sealos,omitempty"     yaml:"sealos,omitempty"`
+	Platforms  []Platform `json:"platforms,omitempty"  yaml:"platforms,omitempty"`
 }
 
 type Input struct {
-	Name     string    `json:"name" yaml:"name"`
-	Type     InputType `json:"type" yaml:"type"`
-	Path     string    `json:"path" yaml:"path"`
-	Format   string    `json:"format,omitempty" yaml:"format,omitempty"`
+	Name     string    `json:"name"               yaml:"name"`
+	Type     InputType `json:"type"               yaml:"type"`
+	Path     string    `json:"path"               yaml:"path"`
+	Format   string    `json:"format,omitempty"   yaml:"format,omitempty"`
 	Required bool      `json:"required,omitempty" yaml:"required,omitempty"`
 }
 
 type Content struct {
-	Name      string      `json:"name" yaml:"name"`
-	Type      ContentType `json:"type" yaml:"type"`
-	Path      string      `json:"path" yaml:"path"`
+	Name      string      `json:"name"                yaml:"name"`
+	Type      ContentType `json:"type"                yaml:"type"`
+	Path      string      `json:"path"                yaml:"path"`
 	MediaType string      `json:"mediaType,omitempty" yaml:"mediaType,omitempty"`
-	Required  bool        `json:"required,omitempty" yaml:"required,omitempty"`
+	Required  bool        `json:"required,omitempty"  yaml:"required,omitempty"`
 }
 
 type Hook struct {
-	Name           string          `json:"name" yaml:"name"`
-	Phase          HookPhase       `json:"phase" yaml:"phase"`
-	Target         ExecutionTarget `json:"target" yaml:"target"`
-	Path           string          `json:"path" yaml:"path"`
-	Args           []string        `json:"args,omitempty" yaml:"args,omitempty"`
+	Name           string          `json:"name"                     yaml:"name"`
+	Phase          HookPhase       `json:"phase"                    yaml:"phase"`
+	Target         ExecutionTarget `json:"target"                   yaml:"target"`
+	Path           string          `json:"path"                     yaml:"path"`
+	Args           []string        `json:"args,omitempty"           yaml:"args,omitempty"`
 	TimeoutSeconds int32           `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
@@ -123,39 +123,39 @@ type GeneratedOutputs struct {
 }
 
 type GeneratedHostPathOutput struct {
-	Name                 string            `json:"name,omitempty" yaml:"name,omitempty"`
-	HostPath             string            `json:"hostPath" yaml:"hostPath"`
-	Tool                 string            `json:"tool" yaml:"tool"`
-	Hook                 string            `json:"hook,omitempty" yaml:"hook,omitempty"`
-	APIVersion           string            `json:"apiVersion" yaml:"apiVersion"`
-	Kind                 string            `json:"kind" yaml:"kind"`
-	Namespace            string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	ObjectName           string            `json:"objectName" yaml:"objectName"`
-	ContainerName        string            `json:"containerName,omitempty" yaml:"containerName,omitempty"`
-	ExpectedImage        string            `json:"expectedImage,omitempty" yaml:"expectedImage,omitempty"`
-	ExpectedCommand      string            `json:"expectedCommand,omitempty" yaml:"expectedCommand,omitempty"`
-	ExpectedArgs         map[string]string `json:"expectedArgs,omitempty" yaml:"expectedArgs,omitempty"`
+	Name                 string            `json:"name,omitempty"                 yaml:"name,omitempty"`
+	HostPath             string            `json:"hostPath"                       yaml:"hostPath"`
+	Tool                 string            `json:"tool"                           yaml:"tool"`
+	Hook                 string            `json:"hook,omitempty"                 yaml:"hook,omitempty"`
+	APIVersion           string            `json:"apiVersion"                     yaml:"apiVersion"`
+	Kind                 string            `json:"kind"                           yaml:"kind"`
+	Namespace            string            `json:"namespace,omitempty"            yaml:"namespace,omitempty"`
+	ObjectName           string            `json:"objectName"                     yaml:"objectName"`
+	ContainerName        string            `json:"containerName,omitempty"        yaml:"containerName,omitempty"`
+	ExpectedImage        string            `json:"expectedImage,omitempty"        yaml:"expectedImage,omitempty"`
+	ExpectedCommand      string            `json:"expectedCommand,omitempty"      yaml:"expectedCommand,omitempty"`
+	ExpectedArgs         map[string]string `json:"expectedArgs,omitempty"         yaml:"expectedArgs,omitempty"`
 	ExpectedVolumeMounts []string          `json:"expectedVolumeMounts,omitempty" yaml:"expectedVolumeMounts,omitempty"`
 }
 
 type Spec struct {
-	Component        string           `json:"component" yaml:"component"`
-	Version          string           `json:"version" yaml:"version"`
-	Class            PackageClass     `json:"class" yaml:"class"`
-	Dependencies     []Dependency     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Compatibility    Compatibility    `json:"compatibility,omitempty" yaml:"compatibility,omitempty"`
-	Inputs           []Input          `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Contents         []Content        `json:"contents" yaml:"contents"`
-	Hooks            []Hook           `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+	Component        string           `json:"component"                  yaml:"component"`
+	Version          string           `json:"version"                    yaml:"version"`
+	Class            PackageClass     `json:"class"                      yaml:"class"`
+	Dependencies     []Dependency     `json:"dependencies,omitempty"     yaml:"dependencies,omitempty"`
+	Compatibility    Compatibility    `json:"compatibility,omitempty"    yaml:"compatibility,omitempty"`
+	Inputs           []Input          `json:"inputs,omitempty"           yaml:"inputs,omitempty"`
+	Contents         []Content        `json:"contents"                   yaml:"contents"`
+	Hooks            []Hook           `json:"hooks,omitempty"            yaml:"hooks,omitempty"`
 	GeneratedOutputs GeneratedOutputs `json:"generatedOutputs,omitempty" yaml:"generatedOutputs,omitempty"`
 	LocalPatchPolicy string           `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
 }
 
 type ComponentPackage struct {
 	APIVersion string   `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string   `json:"kind" yaml:"kind"`
-	Metadata   Metadata `json:"metadata" yaml:"metadata"`
-	Spec       Spec     `json:"spec" yaml:"spec"`
+	Kind       string   `json:"kind"       yaml:"kind"`
+	Metadata   Metadata `json:"metadata"   yaml:"metadata"`
+	Spec       Spec     `json:"spec"       yaml:"spec"`
 }
 
 func New(name, component, version string, class PackageClass) *ComponentPackage {
@@ -277,7 +277,11 @@ func (s Spec) Validate() error {
 			return fmt.Errorf("generatedOutputs.hostPaths[%d]: %w", i, err)
 		}
 		if _, ok := generatedHostPaths[output.HostPath]; ok {
-			return fmt.Errorf("generatedOutputs.hostPaths[%d]: duplicate hostPath %q", i, output.HostPath)
+			return fmt.Errorf(
+				"generatedOutputs.hostPaths[%d]: duplicate hostPath %q",
+				i,
+				output.HostPath,
+			)
 		}
 		generatedHostPaths[output.HostPath] = struct{}{}
 	}
@@ -298,7 +302,7 @@ func (s Spec) Validate() error {
 
 func (o GeneratedHostPathOutput) Validate() error {
 	if strings.TrimSpace(o.HostPath) == "" {
-		return fmt.Errorf("hostPath cannot be empty")
+		return errors.New("hostPath cannot be empty")
 	}
 	if !strings.HasPrefix(o.HostPath, "/") {
 		return fmt.Errorf("hostPath must be absolute, got %q", o.HostPath)
@@ -311,16 +315,16 @@ func (o GeneratedHostPathOutput) Validate() error {
 		return fmt.Errorf("hostPath must be clean, got %q", o.HostPath)
 	}
 	if strings.TrimSpace(o.Tool) == "" {
-		return fmt.Errorf("tool cannot be empty")
+		return errors.New("tool cannot be empty")
 	}
 	if strings.TrimSpace(o.APIVersion) == "" {
-		return fmt.Errorf("apiVersion cannot be empty")
+		return errors.New("apiVersion cannot be empty")
 	}
 	if strings.TrimSpace(o.Kind) == "" {
-		return fmt.Errorf("kind cannot be empty")
+		return errors.New("kind cannot be empty")
 	}
 	if strings.TrimSpace(o.ObjectName) == "" {
-		return fmt.Errorf("objectName cannot be empty")
+		return errors.New("objectName cannot be empty")
 	}
 	return nil
 }
@@ -336,7 +340,13 @@ func (c PackageClass) Validate() error {
 
 func (t ContentType) Validate() error {
 	switch t {
-	case ContentRootfs, ContentManifest, ContentChart, ContentPatch, ContentFile, ContentValues, ContentHook:
+	case ContentRootfs,
+		ContentManifest,
+		ContentChart,
+		ContentPatch,
+		ContentFile,
+		ContentValues,
+		ContentHook:
 		return nil
 	default:
 		return fmt.Errorf("invalid content type %q", t)

@@ -22,9 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/labring/sealos/pkg/distribution/bom"
+	"github.com/spf13/cobra"
 )
 
 func newSyncReleaseMetadataCmd() *cobra.Command {
@@ -64,15 +63,21 @@ func newSyncReleaseMetadataServeCmd() *cobra.Command {
 				defer cancel()
 				_ = server.Shutdown(ctx)
 			}()
-			fmt.Fprintf(cmd.OutOrStdout(), "release metadata service listening on http://%s\n", server.Addr)
+			fmt.Fprintf(
+				cmd.OutOrStdout(),
+				"release metadata service listening on http://%s\n",
+				server.Addr,
+			)
 			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&flags.releaseSource, "release-source", "", "local release metadata directory to serve")
-	cmd.Flags().StringVar(&flags.listen, "listen", "127.0.0.1:8080", "address for the release metadata service")
+	cmd.Flags().
+		StringVar(&flags.releaseSource, "release-source", "", "local release metadata directory to serve")
+	cmd.Flags().
+		StringVar(&flags.listen, "listen", "127.0.0.1:8080", "address for the release metadata service")
 	if err := cmd.MarkFlagRequired("release-source"); err != nil {
 		panic(err)
 	}
