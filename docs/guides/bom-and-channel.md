@@ -407,7 +407,8 @@ The same policy is available locally through `sealos sync promote` and through
 the release metadata service promotion endpoint. Both paths advance one
 `ReleaseChannel` file to a target BOM after checking target-channel policy,
 requiring health proof for beta/stable targets, and recording an approver,
-reason, timestamp, proof digest, and promotion history entry.
+reason, timestamp, proof digest, component digests, validation cohort,
+candidate record, and promotion history entry.
 
 ## Day 0 Selection
 
@@ -585,6 +586,15 @@ target BOM path relative to the channel file when possible. Existing render,
 validate, agent, and controller paths continue to consume the same channel file
 through `--release-channel` or `releaseChannelPath`.
 
+The same promotion also persists release-source audit records:
+
+- `candidates/<line>/<revision>/candidate.yaml` records the BOM digest,
+  component artifact digests, replaced revision, source/target channels,
+  optional validation cohort, evidence references, and timeline.
+- `promotions/<line>/<channel>/<timestamp>-<revision>.yaml` records the
+  approved promotion, policy decision, candidate reference, approver, evidence,
+  and timeline.
+
 `sealos sync promote` also returns a `policyDecision` object in its structured
 output. The decision records the evaluated transition, target channel rule,
 health-proof requirement, required/missing/failed health signals, minimum
@@ -716,8 +726,6 @@ line, not as "whatever the cluster currently drifted into."
 ## What Still Needs To Be Designed Or Implemented
 
 - The final API-backed `ReleaseChannel` schema and storage contract
-- API-backed channel advancement history and audit storage beyond the current
-  local `spec.promotionHistory[]` field
 - Health-proof ingestion or collection beyond the current local
   `DistributionHealthProof` file gate for `sealos sync promote`
 - Whether `BOM.spec.channel` should become optional first and then be removed

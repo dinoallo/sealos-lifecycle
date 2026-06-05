@@ -34,26 +34,29 @@ type ReleaseMetadataService struct {
 }
 
 type ReleasePromotionRequest struct {
-	TargetRevision  string                   `json:"targetRevision" yaml:"targetRevision"`
-	SourceChannel   ReleaseChannel           `json:"sourceChannel,omitempty" yaml:"sourceChannel,omitempty"`
-	HealthProof     *DistributionHealthProof `json:"healthProof,omitempty" yaml:"healthProof,omitempty"`
-	HealthProofPath string                   `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
-	Reason          string                   `json:"reason" yaml:"reason"`
-	ApprovedBy      string                   `json:"approvedBy" yaml:"approvedBy"`
-	ApprovedAt      string                   `json:"approvedAt,omitempty" yaml:"approvedAt,omitempty"`
+	TargetRevision   string                   `json:"targetRevision" yaml:"targetRevision"`
+	SourceChannel    ReleaseChannel           `json:"sourceChannel,omitempty" yaml:"sourceChannel,omitempty"`
+	HealthProof      *DistributionHealthProof `json:"healthProof,omitempty" yaml:"healthProof,omitempty"`
+	HealthProofPath  string                   `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
+	ValidationCohort string                   `json:"validationCohort,omitempty" yaml:"validationCohort,omitempty"`
+	Reason           string                   `json:"reason" yaml:"reason"`
+	ApprovedBy       string                   `json:"approvedBy" yaml:"approvedBy"`
+	ApprovedAt       string                   `json:"approvedAt,omitempty" yaml:"approvedAt,omitempty"`
 }
 
 type ReleasePromotionResponse struct {
-	Line            string                    `json:"line" yaml:"line"`
-	Channel         string                    `json:"channel" yaml:"channel"`
-	ReleaseChannel  string                    `json:"releaseChannelPath" yaml:"releaseChannelPath"`
-	BOMPath         string                    `json:"bomPath" yaml:"bomPath"`
-	FromRevision    string                    `json:"fromRevision" yaml:"fromRevision"`
-	ToRevision      string                    `json:"toRevision" yaml:"toRevision"`
-	Changed         bool                      `json:"changed" yaml:"changed"`
-	Promotion       DistributionPromotionRef  `json:"promotion" yaml:"promotion"`
-	PolicyDecision  *promotionpolicy.Decision `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
-	HealthProofPath string                    `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
+	Line                 string                    `json:"line" yaml:"line"`
+	Channel              string                    `json:"channel" yaml:"channel"`
+	ReleaseChannel       string                    `json:"releaseChannelPath" yaml:"releaseChannelPath"`
+	BOMPath              string                    `json:"bomPath" yaml:"bomPath"`
+	FromRevision         string                    `json:"fromRevision" yaml:"fromRevision"`
+	ToRevision           string                    `json:"toRevision" yaml:"toRevision"`
+	Changed              bool                      `json:"changed" yaml:"changed"`
+	Promotion            DistributionPromotionRef  `json:"promotion" yaml:"promotion"`
+	PolicyDecision       *promotionpolicy.Decision `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
+	HealthProofPath      string                    `json:"healthProofPath,omitempty" yaml:"healthProofPath,omitempty"`
+	CandidatePath        string                    `json:"candidatePath,omitempty" yaml:"candidatePath,omitempty"`
+	PromotionHistoryPath string                    `json:"promotionHistoryPath,omitempty" yaml:"promotionHistoryPath,omitempty"`
 }
 
 func NewReleaseMetadataHandler(source string) (http.Handler, error) {
@@ -141,16 +144,18 @@ func (s *ReleaseMetadataService) servePromotion(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeReleaseMetadataYAML(w, r, ReleasePromotionResponse{
-		Line:            result.Channel.Distribution(),
-		Channel:         string(result.Channel.Spec.Channel),
-		ReleaseChannel:  result.ChannelPath,
-		BOMPath:         result.BOMPath,
-		FromRevision:    result.FromRevision,
-		ToRevision:      result.ToRevision,
-		Changed:         result.Changed,
-		Promotion:       result.Promotion,
-		PolicyDecision:  result.Decision,
-		HealthProofPath: healthProofPath,
+		Line:                 result.Channel.Distribution(),
+		Channel:              string(result.Channel.Spec.Channel),
+		ReleaseChannel:       result.ChannelPath,
+		BOMPath:              result.BOMPath,
+		FromRevision:         result.FromRevision,
+		ToRevision:           result.ToRevision,
+		Changed:              result.Changed,
+		Promotion:            result.Promotion,
+		PolicyDecision:       result.Decision,
+		HealthProofPath:      healthProofPath,
+		CandidatePath:        result.CandidatePath,
+		PromotionHistoryPath: result.PromotionHistoryPath,
 	})
 }
 
@@ -185,13 +190,15 @@ func (s *ReleaseMetadataService) promote(line string, channel ReleaseChannel, re
 		}
 	}
 	result, err := PromoteReleaseChannelFile(PromoteReleaseChannelOptions{
-		ChannelPath:     channelPath,
-		TargetBOMPath:   targetBOMPath,
-		SourceChannel:   request.SourceChannel,
-		HealthProofPath: healthProofPath,
-		Reason:          request.Reason,
-		ApprovedBy:      request.ApprovedBy,
-		ApprovedAt:      approvedAt,
+		ChannelPath:      channelPath,
+		TargetBOMPath:    targetBOMPath,
+		ReleaseStoreRoot: s.Source,
+		SourceChannel:    request.SourceChannel,
+		ValidationCohort: request.ValidationCohort,
+		HealthProofPath:  healthProofPath,
+		Reason:           request.Reason,
+		ApprovedBy:       request.ApprovedBy,
+		ApprovedAt:       approvedAt,
 	})
 	if err != nil {
 		return nil, "", err

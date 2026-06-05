@@ -514,6 +514,7 @@ func TestSyncPromoteCmd(t *testing.T) {
 		"--target-bom", targetBOMPath,
 		"--source-channel", string(bom.ChannelBeta),
 		"--health-proof", healthProofPath,
+		"--validation-cohort", "beta-cohort-a",
 		"--reason", "beta cohort passed",
 		"--approved-by", "release-team",
 		"--approved-at", "2024-04-24T10:30:00Z",
@@ -551,6 +552,12 @@ func TestSyncPromoteCmd(t *testing.T) {
 	if got, want := out.Promotion.BOMPath, "../boms/rev-20240424.yaml"; got != want {
 		t.Fatalf("promotion.bomPath = %q, want %q", got, want)
 	}
+	if got, want := out.Promotion.BOMDigest, targetBOMDigest; got != want {
+		t.Fatalf("promotion.bomDigest = %q, want %q", got, want)
+	}
+	if got, want := out.Promotion.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("promotion.validationCohort = %q, want %q", got, want)
+	}
 	if got, want := out.Promotion.HealthProofPath, "../proofs/rev-20240424-health.yaml"; got != want {
 		t.Fatalf("promotion.healthProofPath = %q, want %q", got, want)
 	}
@@ -574,6 +581,26 @@ func TestSyncPromoteCmd(t *testing.T) {
 	}
 	if !out.PolicyDecision.Transition.HealthProofRequired {
 		t.Fatal("policyDecision.transition.healthProofRequired = false, want true")
+	}
+	if got, want := out.CandidatePath, filepath.Join(root, "candidates", targetBOM.Metadata.Name, targetBOM.Spec.Revision, "candidate.yaml"); got != want {
+		t.Fatalf("candidatePath = %q, want %q", got, want)
+	}
+	if out.PromotionHistoryPath == "" {
+		t.Fatal("promotionHistoryPath is empty")
+	}
+	candidate, err := bom.LoadReleaseCandidateRevisionFile(out.CandidatePath)
+	if err != nil {
+		t.Fatalf("LoadReleaseCandidateRevisionFile() error = %v", err)
+	}
+	if got, want := candidate.Spec.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("candidate.validationCohort = %q, want %q", got, want)
+	}
+	history, err := bom.LoadReleasePromotionHistoryFile(out.PromotionHistoryPath)
+	if err != nil {
+		t.Fatalf("LoadReleasePromotionHistoryFile() error = %v", err)
+	}
+	if got, want := history.Spec.CandidateRef, "candidates/default-platform/rev-20240424/candidate.yaml"; got != want {
+		t.Fatalf("history.candidateRef = %q, want %q", got, want)
 	}
 
 	loaded, err := bom.LoadReleaseChannelFile(channelPath)

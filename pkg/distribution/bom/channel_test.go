@@ -15,15 +15,18 @@
 package bom
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/opencontainers/go-digest"
+	"sigs.k8s.io/yaml"
 
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
 )
@@ -577,6 +580,7 @@ func TestReleaseMetadataServicePromotesWithHealthProof(t *testing.T) {
 
 	body := []byte(`targetRevision: rev-20240424
 sourceChannel: beta
+validationCohort: beta-cohort-a
 reason: beta cohort passed
 approvedBy: release-service
 approvedAt: "2024-04-24T10:30:00Z"
@@ -602,6 +606,20 @@ healthProof:
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("promotion status = %s, want 200", resp.Status)
 	}
+	responseData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(promotion response) error = %v", err)
+	}
+	var promotionResponse ReleasePromotionResponse
+	if err := yaml.Unmarshal(responseData, &promotionResponse); err != nil {
+		t.Fatalf("Unmarshal(promotion response) error = %v\nresponse=%s", err, string(responseData))
+	}
+	if got, want := promotionResponse.CandidatePath, filepath.Join(root, "candidates", "default-platform", "rev-20240424", "candidate.yaml"); got != want {
+		t.Fatalf("promotion response candidatePath = %q, want %q", got, want)
+	}
+	if promotionResponse.PromotionHistoryPath == "" {
+		t.Fatal("promotion response promotionHistoryPath is empty")
+	}
 
 	loaded, err := LoadReleaseChannelFile(channelPath)
 	if err != nil {
@@ -617,6 +635,9 @@ healthProof:
 		t.Fatalf("len(promotionHistory) = %d, want %d", got, want)
 	}
 	entry := loaded.Spec.PromotionHistory[0]
+	if got, want := entry.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("promotion validationCohort = %q, want %q", got, want)
+	}
 	if got, want := entry.HealthProofSummary, "beta cohort passed"; got != want {
 		t.Fatalf("promotion healthProofSummary = %q, want %q", got, want)
 	}
@@ -625,6 +646,23 @@ healthProof:
 	}
 	if _, err := os.Stat(filepath.Join(root, "proofs", "default-platform", "rev-20240424", "default-platform-rev-20240424.yaml")); err != nil {
 		t.Fatalf("health proof file missing: %v", err)
+	}
+	candidate, err := LoadReleaseCandidateRevisionFile(promotionResponse.CandidatePath)
+	if err != nil {
+		t.Fatalf("LoadReleaseCandidateRevisionFile() error = %v", err)
+	}
+	if got, want := candidate.Spec.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("candidate validationCohort = %q, want %q", got, want)
+	}
+	history, err := LoadReleasePromotionHistoryFile(promotionResponse.PromotionHistoryPath)
+	if err != nil {
+		t.Fatalf("LoadReleasePromotionHistoryFile() error = %v", err)
+	}
+	if got, want := history.Spec.Promotion.ApprovedBy, "release-service"; got != want {
+		t.Fatalf("history promotion approvedBy = %q, want %q", got, want)
+	}
+	if got, want := history.Spec.CandidateRef, "candidates/default-platform/rev-20240424/candidate.yaml"; got != want {
+		t.Fatalf("history candidateRef = %q, want %q", got, want)
 	}
 
 	resolved, err := ResolveReleaseChannelLookup(ReleaseChannelLookupOptions{
@@ -775,12 +813,13 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 
 	approvedAt := time.Date(2024, 4, 24, 10, 30, 0, 0, time.UTC)
 	result, err := PromoteReleaseChannelFile(PromoteReleaseChannelOptions{
-		ChannelPath:     channelPath,
-		TargetBOMPath:   newBOMPath,
-		HealthProofPath: healthProofPath,
-		Reason:          "beta cohort passed",
-		ApprovedBy:      "release-team",
-		ApprovedAt:      approvedAt,
+		ChannelPath:      channelPath,
+		TargetBOMPath:    newBOMPath,
+		HealthProofPath:  healthProofPath,
+		ValidationCohort: "beta-cohort-a",
+		Reason:           "beta cohort passed",
+		ApprovedBy:       "release-team",
+		ApprovedAt:       approvedAt,
 	})
 	if err != nil {
 		t.Fatalf("PromoteReleaseChannelFile() error = %v", err)
@@ -808,7 +847,7 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 		t.Fatalf("len(promotionHistory) = %d, want %d", got, want)
 	}
 	entry := result.Channel.Spec.PromotionHistory[0]
-	if got, want := result.Promotion, entry; got != want {
+	if got, want := result.Promotion, entry; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Promotion = %#v, want %#v", got, want)
 	}
 	if got, want := entry.FromRevision, "rev-20240423"; got != want {
@@ -819,6 +858,27 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 	}
 	if got, want := entry.BOMPath, "../boms/rev-20240424.yaml"; got != want {
 		t.Fatalf("promotionHistory[0].bomPath = %q, want %q", got, want)
+	}
+	if got, want := entry.BOMDigest, newBOMDigest; got != want {
+		t.Fatalf("promotionHistory[0].bomDigest = %q, want %q", got, want)
+	}
+	if got, want := entry.SourceChannel, ChannelStable; got != want {
+		t.Fatalf("promotionHistory[0].sourceChannel = %q, want %q", got, want)
+	}
+	if got, want := entry.TargetChannel, ChannelStable; got != want {
+		t.Fatalf("promotionHistory[0].targetChannel = %q, want %q", got, want)
+	}
+	if got, want := entry.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("promotionHistory[0].validationCohort = %q, want %q", got, want)
+	}
+	if got, want := len(entry.ComponentDigests), len(newBOM.Spec.Packages); got != want {
+		t.Fatalf("len(promotionHistory[0].componentDigests) = %d, want %d", got, want)
+	}
+	if got, want := entry.ComponentDigests[0].PackageName, "calico"; got != want {
+		t.Fatalf("promotionHistory[0].componentDigests[0].packageName = %q, want %q", got, want)
+	}
+	if got, want := entry.ComponentDigests[0].Digest, newBOM.Spec.Packages[0].Artifact.Digest; got != want {
+		t.Fatalf("promotionHistory[0].componentDigests[0].digest = %q, want %q", got, want)
 	}
 	if got, want := entry.Reason, "beta cohort passed"; got != want {
 		t.Fatalf("promotionHistory[0].reason = %q, want %q", got, want)
@@ -838,11 +898,67 @@ func TestPromoteReleaseChannelFile(t *testing.T) {
 	if !strings.HasPrefix(entry.HealthProofDigest, "sha256:") {
 		t.Fatalf("promotionHistory[0].healthProofDigest = %q, want sha256 digest", entry.HealthProofDigest)
 	}
+	if got, want := len(entry.Evidence), 1; got != want {
+		t.Fatalf("len(promotionHistory[0].evidence) = %d, want %d", got, want)
+	}
+	if got, want := entry.Evidence[0].Type, "healthProof"; got != want {
+		t.Fatalf("promotionHistory[0].evidence[0].type = %q, want %q", got, want)
+	}
+	if got, want := entry.Evidence[0].Path, "proofs/rev-20240424-health.yaml"; got != want {
+		t.Fatalf("promotionHistory[0].evidence[0].path = %q, want %q", got, want)
+	}
+	if got, want := len(entry.Timeline), 3; got != want {
+		t.Fatalf("len(promotionHistory[0].timeline) = %d, want %d", got, want)
+	}
+	if got, want := entry.Timeline[2].Type, "channelPromoted"; got != want {
+		t.Fatalf("promotionHistory[0].timeline[2].type = %q, want %q", got, want)
+	}
 	if result.HealthProof == nil {
 		t.Fatal("HealthProof = nil, want loaded proof")
 	}
 	if got, want := result.HealthProof.Spec.TargetRevision, "rev-20240424"; got != want {
 		t.Fatalf("HealthProof targetRevision = %q, want %q", got, want)
+	}
+	if got, want := result.CandidatePath, filepath.Join(root, "candidates", "default-platform", "rev-20240424", "candidate.yaml"); got != want {
+		t.Fatalf("CandidatePath = %q, want %q", got, want)
+	}
+	candidate, err := LoadReleaseCandidateRevisionFile(result.CandidatePath)
+	if err != nil {
+		t.Fatalf("LoadReleaseCandidateRevisionFile() error = %v", err)
+	}
+	if got, want := candidate.Spec.BOMDigest, newBOMDigest; got != want {
+		t.Fatalf("candidate.bomDigest = %q, want %q", got, want)
+	}
+	if got, want := candidate.Spec.BOMPath, "boms/rev-20240424.yaml"; got != want {
+		t.Fatalf("candidate.bomPath = %q, want %q", got, want)
+	}
+	if got, want := candidate.Spec.ReplacesRevision, "rev-20240423"; got != want {
+		t.Fatalf("candidate.replacesRevision = %q, want %q", got, want)
+	}
+	if got, want := candidate.Spec.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("candidate.validationCohort = %q, want %q", got, want)
+	}
+	if got, want := len(candidate.Spec.ComponentDigests), len(newBOM.Spec.Packages); got != want {
+		t.Fatalf("len(candidate.componentDigests) = %d, want %d", got, want)
+	}
+	if got, want := len(candidate.Spec.Evidence), 1; got != want {
+		t.Fatalf("len(candidate.evidence) = %d, want %d", got, want)
+	}
+	if result.PromotionHistoryPath == "" {
+		t.Fatal("PromotionHistoryPath is empty")
+	}
+	history, err := LoadReleasePromotionHistoryFile(result.PromotionHistoryPath)
+	if err != nil {
+		t.Fatalf("LoadReleasePromotionHistoryFile() error = %v", err)
+	}
+	if got, want := history.Spec.CandidateRef, "candidates/default-platform/rev-20240424/candidate.yaml"; got != want {
+		t.Fatalf("history.candidateRef = %q, want %q", got, want)
+	}
+	if got, want := history.Spec.Promotion.ValidationCohort, "beta-cohort-a"; got != want {
+		t.Fatalf("history.promotion.validationCohort = %q, want %q", got, want)
+	}
+	if history.Spec.PolicyDecision == nil || !history.Spec.PolicyDecision.Allowed {
+		t.Fatalf("history.policyDecision = %#v, want allowed decision", history.Spec.PolicyDecision)
 	}
 
 	resolved, err := ResolveReleaseChannelFile(channelPath)

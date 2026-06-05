@@ -261,6 +261,7 @@ func newSyncPromoteCmd() *cobra.Command {
 		targetBOMFile      string
 		sourceChannel      string
 		healthProofFile    string
+		validationCohort   string
 		reason             string
 		approvedBy         string
 		approvedAt         string
@@ -283,27 +284,30 @@ func newSyncPromoteCmd() *cobra.Command {
 			}
 
 			result, err := bom.PromoteReleaseChannelFile(bom.PromoteReleaseChannelOptions{
-				ChannelPath:     flags.releaseChannelFile,
-				TargetBOMPath:   flags.targetBOMFile,
-				SourceChannel:   bom.ReleaseChannel(strings.TrimSpace(flags.sourceChannel)),
-				HealthProofPath: flags.healthProofFile,
-				Reason:          flags.reason,
-				ApprovedBy:      flags.approvedBy,
-				ApprovedAt:      approvedAt,
+				ChannelPath:      flags.releaseChannelFile,
+				TargetBOMPath:    flags.targetBOMFile,
+				SourceChannel:    bom.ReleaseChannel(strings.TrimSpace(flags.sourceChannel)),
+				ValidationCohort: flags.validationCohort,
+				HealthProofPath:  flags.healthProofFile,
+				Reason:           flags.reason,
+				ApprovedBy:       flags.approvedBy,
+				ApprovedAt:       approvedAt,
 			})
 			if err != nil {
 				return err
 			}
 			out := syncPromoteOutput{
-				ReleaseChannelPath: result.ChannelPath,
-				BOMPath:            result.BOMPath,
-				Line:               result.Channel.Distribution(),
-				Channel:            string(result.Channel.Spec.Channel),
-				FromRevision:       result.FromRevision,
-				ToRevision:         result.ToRevision,
-				Changed:            result.Changed,
-				Promotion:          result.Promotion,
-				PolicyDecision:     result.Decision,
+				ReleaseChannelPath:   result.ChannelPath,
+				BOMPath:              result.BOMPath,
+				Line:                 result.Channel.Distribution(),
+				Channel:              string(result.Channel.Spec.Channel),
+				FromRevision:         result.FromRevision,
+				ToRevision:           result.ToRevision,
+				Changed:              result.Changed,
+				Promotion:            result.Promotion,
+				PolicyDecision:       result.Decision,
+				CandidatePath:        result.CandidatePath,
+				PromotionHistoryPath: result.PromotionHistoryPath,
 			}
 			return writeSyncOutput(cmd, out, flags.output, "promotion result")
 		},
@@ -312,6 +316,7 @@ func newSyncPromoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
 	cmd.Flags().StringVar(&flags.sourceChannel, "source-channel", "", "release channel that produced the target BOM; defaults to the target channel")
 	cmd.Flags().StringVar(&flags.healthProofFile, "health-proof", "", "DistributionHealthProof file that must pass when the target channel policy requires proof")
+	cmd.Flags().StringVar(&flags.validationCohort, "validation-cohort", "", "validation cohort name recorded with the candidate revision and promotion history")
 	cmd.Flags().StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
 	cmd.Flags().StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
 	cmd.Flags().StringVar(&flags.approvedAt, "approved-at", "", "approval timestamp in RFC3339 format; defaults to the current time")
@@ -332,15 +337,17 @@ func newSyncPromoteCmd() *cobra.Command {
 }
 
 type syncPromoteOutput struct {
-	ReleaseChannelPath string                       `json:"releaseChannelPath" yaml:"releaseChannelPath"`
-	BOMPath            string                       `json:"bomPath" yaml:"bomPath"`
-	Line               string                       `json:"line" yaml:"line"`
-	Channel            string                       `json:"channel" yaml:"channel"`
-	FromRevision       string                       `json:"fromRevision" yaml:"fromRevision"`
-	ToRevision         string                       `json:"toRevision" yaml:"toRevision"`
-	Changed            bool                         `json:"changed" yaml:"changed"`
-	Promotion          bom.DistributionPromotionRef `json:"promotion" yaml:"promotion"`
-	PolicyDecision     *promotionpolicy.Decision    `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
+	ReleaseChannelPath   string                       `json:"releaseChannelPath" yaml:"releaseChannelPath"`
+	BOMPath              string                       `json:"bomPath" yaml:"bomPath"`
+	Line                 string                       `json:"line" yaml:"line"`
+	Channel              string                       `json:"channel" yaml:"channel"`
+	FromRevision         string                       `json:"fromRevision" yaml:"fromRevision"`
+	ToRevision           string                       `json:"toRevision" yaml:"toRevision"`
+	Changed              bool                         `json:"changed" yaml:"changed"`
+	Promotion            bom.DistributionPromotionRef `json:"promotion" yaml:"promotion"`
+	PolicyDecision       *promotionpolicy.Decision    `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
+	CandidatePath        string                       `json:"candidatePath,omitempty" yaml:"candidatePath,omitempty"`
+	PromotionHistoryPath string                       `json:"promotionHistoryPath,omitempty" yaml:"promotionHistoryPath,omitempty"`
 }
 
 func newSyncPolicyApprovalScanCmd() *cobra.Command {

@@ -140,6 +140,17 @@ At minimum, a candidate should record:
 - the clusters or cohorts used for validation
 - the approval decision and timestamp
 
+The local-file MVP records this metadata in two release-source documents.
+`ReleaseCandidateRevision` lives at
+`candidates/<line>/<revision>/candidate.yaml` and stores the BOM digest,
+component artifact digests, replacement relation, source/target channels,
+optional validation cohort, evidence references, and timeline. Each accepted
+channel advancement also writes `ReleasePromotionHistory` under
+`promotions/<line>/<channel>/`, including the approver, policy decision,
+candidate reference, evidence, and promotion timeline. The mutable
+`ReleaseChannel.spec.promotionHistory[]` field keeps a compact compatible
+summary for existing channel readers.
+
 ## Health Proof Model
 
 Health proof is the runtime evidence used to decide whether a candidate is safe
@@ -219,6 +230,6 @@ This keeps the architecture flexible without weakening ownership boundaries.
 - How should health signals be normalized across heterogeneous hardware and
   network environments?
 - What minimum evidence threshold should each channel require before promotion?
-- Where should candidate and promotion metadata live in the first
-  implementation: registry metadata, Git, BOM annotations, or a dedicated
-  status store?
+- Whether later registry-backed release services should mirror the local-file
+  candidate and promotion history store or replace it with server-side status
+  objects.
