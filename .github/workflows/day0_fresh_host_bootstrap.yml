@@ -31,6 +31,9 @@ concurrency:
   group: day0-fresh-host-bootstrap-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   publish-render:
     name: Publish And Render Release Target
@@ -123,15 +126,13 @@ jobs:
             --release-line "${release_line}" \
             --channel "${release_channel}" \
             --local-repo "${WORKDIR}/local-repo" >/dev/null
-          sudo scripts/poc/minimal-single-node/render.sh \
-            --sealos-bin ./bin/linux_amd64/sealos \
-            --cluster "${CLUSTER_NAME}" \
+          sudo ./bin/linux_amd64/sealos sync render \
             --runtime-root "${WORKDIR}/runtime" \
-            --local-repo "${WORKDIR}/local-repo" \
-            --package-mode release \
+            --cluster "${CLUSTER_NAME}" \
             --release-source "${release_source}" \
             --release-line "${release_line}" \
-            --channel "${release_channel}" >"${WORKDIR}/render.yaml"
+            --channel "${release_channel}" \
+            --local-repo "${WORKDIR}/local-repo" >"${WORKDIR}/render.yaml"
           awk -F': ' '$1 == "bundlePath" { print $2; exit }' "${WORKDIR}/render.yaml" >"${WORKDIR}/bundle.path"
           awk -F': ' '$1 == "appliedRevisionPath" { print $2; exit }' "${WORKDIR}/render.yaml" >"${WORKDIR}/applied-revision.path"
           cat "${WORKDIR}/render.yaml"
@@ -189,22 +190,209 @@ jobs:
     env:
       CLUSTER_NAME: ${{ inputs.cluster_name }}
       WORKDIR: /var/tmp/sealos-day0-bootstrap
+      RUNTIME_ROOT: /var/lib/sealos/runtime
+      DISTRIBUTION_ROOT: /var/lib/sealos/distribution
+      LOCAL_REPO: /var/lib/sealos/distribution/${{ inputs.cluster_name }}/local-repo
+      KUBECONFIG_PATH: /etc/kubernetes/admin.conf
+      REGISTRY_PORT: "5065"
+      RELEASE_LINE: minimal-single-node
+      RELEASE_CHANNEL: alpha
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Golang with cache
+        uses: magnetikonline/action-golang-cache@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+
+      - name: Install build dependencies
+        run: sudo apt update && sudo apt install -y libgpgme-dev libbtrfs-dev libdevmapper-dev curl conntrack socat
+
+      - name: Build sealos
+        run: make build BINS=sealos
+
+      - name: Check host prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in systemctl modprobe sysctl swapon conntrack crictl socat curl; do
+            command -v "${name}" >/dev/null
+          done
+          if swapon --noheadings --show | grep -q .; then
+            echo "swap must be disabled before Day 0 apply" >&2
+            exit 1
+          fi
+          state="$(systemctl is-system-running 2>/dev/null || true)"
+          case "${state}" in
+            running|degraded)
+              ;;
+            *)
+              echo "systemd is not ready for host mutation (state: ${state:-unknown})" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Cleanup previous Day 0 state
         run: |
           sudo scripts/poc/day0-cleanup.sh \
             --cluster "${CLUSTER_NAME}" \
-            --runtime-root /var/lib/sealos/runtime \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --distribution-root "${DISTRIBUTION_ROOT}" \
+            --local-repo "${LOCAL_REPO}" \
             --workdir "${WORKDIR}"
 
-      - name: Run protected bootstrap
+      - name: Initialize protected workflow paths
+        shell: bash
         run: |
-          sudo scripts/poc/minimal-single-node/bootstrap.sh \
+          set -euo pipefail
+          install -d -m 0755 "${WORKDIR}"
+          sudo install -d -m 0755 "${LOCAL_REPO}"
+
+      - name: Start local package registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${WORKDIR}/registry"
+          ./bin/linux_amd64/sealos registry serve filesystem "${WORKDIR}/registry" --port "${REGISTRY_PORT}" >"${WORKDIR}/registry.log" 2>&1 &
+          echo "$!" >"${WORKDIR}/registry.pid"
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:${REGISTRY_PORT}/v2/" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "${WORKDIR}/registry.log"
+          exit 1
+
+      - name: Publish package release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo scripts/poc/minimal-single-node/publish-oci.sh \
+            --sealos-bin ./bin/linux_amd64/sealos \
+            --registry-prefix "localhost:${REGISTRY_PORT}/${CLUSTER_NAME}" \
+            --workdir "${WORKDIR}/oci" \
+            --release-line "${RELEASE_LINE}" \
+            --channel "${RELEASE_CHANNEL}" >"${WORKDIR}/publish.env"
+          cat "${WORKDIR}/publish.env"
+
+      - name: Render release target
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          . "${WORKDIR}/publish.env"
+          set +a
+          sudo ./bin/linux_amd64/sealos sync local-repo init \
+            --runtime-root "${RUNTIME_ROOT}" \
             --cluster "${CLUSTER_NAME}" \
-            --assets-workdir "${WORKDIR}" \
-            --runtime-root /var/lib/sealos/runtime \
-            --release-line minimal-single-node \
-            --channel alpha
+            --release-source "${release_source}" \
+            --release-line "${release_line}" \
+            --channel "${release_channel}" \
+            --output-dir "${LOCAL_REPO}" \
+            --overwrite >/dev/null
+          sudo install -D -m 0644 \
+            scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
+            "${LOCAL_REPO}/inputs/containerd/containerd-config.toml"
+          sudo install -D -m 0644 \
+            scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
+            "${LOCAL_REPO}/inputs/kubernetes/kubeadm-cluster-config.yaml"
+          sudo install -D -m 0644 \
+            scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
+            "${LOCAL_REPO}/inputs/cilium/cilium-values.yaml"
+          sudo ./bin/linux_amd64/sealos sync local-repo doctor \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --cluster "${CLUSTER_NAME}" \
+            --release-source "${release_source}" \
+            --release-line "${release_line}" \
+            --channel "${release_channel}" \
+            --local-repo "${LOCAL_REPO}" | tee "${WORKDIR}/local-repo-doctor.yaml"
+          sudo ./bin/linux_amd64/sealos sync validate \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --cluster "${CLUSTER_NAME}" \
+            --release-source "${release_source}" \
+            --release-line "${release_line}" \
+            --channel "${release_channel}" \
+            --local-repo "${LOCAL_REPO}" | tee "${WORKDIR}/source-validate.yaml"
+          sudo ./bin/linux_amd64/sealos sync render \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --cluster "${CLUSTER_NAME}" \
+            --release-source "${release_source}" \
+            --release-line "${release_line}" \
+            --channel "${release_channel}" \
+            --local-repo "${LOCAL_REPO}" | tee "${WORKDIR}/render.yaml"
+          awk -F': ' '$1 == "bundlePath" { print $2; exit }' "${WORKDIR}/render.yaml" >"${WORKDIR}/bundle.path"
+          awk -F': ' '$1 == "appliedRevisionPath" { print $2; exit }' "${WORKDIR}/render.yaml" >"${WORKDIR}/applied-revision.path"
+
+      - name: Record rendered bundle preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="$(cat "${WORKDIR}/bundle.path")"
+          set +e
+          sudo ./bin/linux_amd64/sealos sync preflight \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --cluster "${CLUSTER_NAME}" \
+            --bundle-dir "${bundle_dir}" \
+            --kubeconfig "${KUBECONFIG_PATH}" | tee "${WORKDIR}/preflight.yaml"
+          status="${PIPESTATUS[0]}"
+          set -e
+          if [[ "${status}" -ne 0 ]]; then
+            echo "sync preflight recorded a non-zero status before Day 0 apply: ${status}"
+          fi
+
+      - name: Apply rendered bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="$(cat "${WORKDIR}/bundle.path")"
+          sudo ./bin/linux_amd64/sealos sync apply \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --cluster "${CLUSTER_NAME}" \
+            --bundle-dir "${bundle_dir}" \
+            --kubeconfig "${KUBECONFIG_PATH}" | tee "${WORKDIR}/apply.yaml"
+
+      - name: Validate cluster and sync status
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="$(cat "${WORKDIR}/bundle.path")"
+          sudo test -f "${KUBECONFIG_PATH}"
+          sudo kubectl --kubeconfig "${KUBECONFIG_PATH}" get nodes -o wide | tee "${WORKDIR}/nodes.txt"
+          sudo kubectl --kubeconfig "${KUBECONFIG_PATH}" wait --for=condition=Ready nodes --all --timeout=240s
+          sudo kubectl --kubeconfig "${KUBECONFIG_PATH}" -n kube-system rollout status ds/cilium --timeout=240s
+          sudo kubectl --kubeconfig "${KUBECONFIG_PATH}" -n kube-system rollout status deploy/cilium-operator --timeout=240s
+          sudo kubectl --kubeconfig "${KUBECONFIG_PATH}" -n kube-system rollout status deploy/coredns --timeout=240s
+          sudo kubectl --kubeconfig "${KUBECONFIG_PATH}" get pods -A | tee "${WORKDIR}/pods.txt"
+          sudo ./bin/linux_amd64/sealos sync status \
+            --runtime-root "${RUNTIME_ROOT}" \
+            --cluster "${CLUSTER_NAME}" \
+            --bundle-dir "${bundle_dir}" \
+            --kubeconfig "${KUBECONFIG_PATH}" | tee "${WORKDIR}/status.yaml"
+
+      - name: Stop local package registry
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -f "${WORKDIR}/registry.pid" ]]; then
+            kill "$(cat "${WORKDIR}/registry.pid")" >/dev/null 2>&1 || true
+          fi
+
+      - name: Prepare protected apply artifacts
+        if: ${{ always() && inputs.upload_artifacts }}
+        shell: bash
+        run: |
+          if [[ -d "${WORKDIR}" ]]; then
+            sudo chown -R "$(id -u):$(id -g)" "${WORKDIR}"
+            chmod -R u+rwX "${WORKDIR}"
+          fi
+
+      - name: Upload protected apply artifacts
+        if: ${{ always() && inputs.upload_artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: day0-bootstrap-apply-${{ github.run_id }}
+          path: ${{ env.WORKDIR }}
+          if-no-files-found: warn
+          retention-days: 7

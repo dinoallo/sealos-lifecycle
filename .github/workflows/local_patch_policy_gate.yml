@@ -42,6 +42,9 @@ concurrency:
   group: local-patch-policy-gate-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   verify-local-patch-policy:
     runs-on: ubuntu-24.04

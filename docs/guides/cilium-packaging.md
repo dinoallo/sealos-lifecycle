@@ -34,12 +34,15 @@ design sketch.
   [scripts/poc/minimal-single-node/packages/cilium/hooks/healthcheck.sh](../../scripts/poc/minimal-single-node/packages/cilium/hooks/healthcheck.sh)
 - OCI packaging CLI:
   [cmd/sealos/cmd/sync_package.go](../../cmd/sealos/cmd/sync_package.go)
-- PoC asset fetcher:
+- Development and release-build helper scripts:
   [scripts/poc/minimal-single-node/fetch-assets.sh](../../scripts/poc/minimal-single-node/fetch-assets.sh)
-- PoC asset stager:
   [scripts/poc/minimal-single-node/stage-assets.sh](../../scripts/poc/minimal-single-node/stage-assets.sh)
-- PoC OCI publisher:
   [scripts/poc/minimal-single-node/publish-oci.sh](../../scripts/poc/minimal-single-node/publish-oci.sh)
+
+These helper scripts are for package authoring, fixture generation, and
+release-build automation. They are not the Day 0 operator install interface;
+the scriptless install path is documented in
+[Day 0 install](./day-0-install.md).
 
 ## What The Current Cilium Package Contains
 
@@ -130,8 +133,8 @@ That is enough to inspect, build, push, and render the package today.
 
 ### Option B: Regenerate The Manifest From Cilium CLI
 
-The PoC helper script can regenerate the manifest from the checked-in values
-file:
+Package authors can regenerate the manifest from the checked-in values file
+with the development helper:
 
 ```bash
 scripts/poc/minimal-single-node/fetch-assets.sh
@@ -155,7 +158,9 @@ install -D -m 0644 /path/to/cilium.yaml \
 If you want to use the repo helper instead, note that
 `scripts/poc/minimal-single-node/stage-assets.sh` is a full PoC asset stager,
 not a Cilium-only helper. It validates the runtime and Kubernetes binary inputs
-for the whole three-package PoC before staging Cilium assets.
+for the whole three-package PoC before staging Cilium assets. Normal Day 0
+installers should not run `fetch-assets.sh` or `stage-assets.sh`; they should
+consume a published, digest-pinned BOM or `ReleaseChannel`.
 
 ## Step 3: Inspect The Package Metadata
 
@@ -237,7 +242,7 @@ resolution still uses the digest-derived pull-if-missing cache; cache GC,
 prewarming, and registry-outage runbooks are separate operational tasks, not
 part of package publishing.
 
-The PoC wrapper script that does this for all three components is:
+The release-build fixture that does this for all three PoC components is:
 
 ```bash
 scripts/poc/minimal-single-node/publish-oci.sh \
@@ -251,6 +256,9 @@ Internally, that script:
 3. runs `sealos sync package build`
 4. runs `sealos sync package push`
 5. writes an OCI-backed BOM
+
+This script is useful when CI or a package author needs to manufacture a local
+release source for testing. It is not a cluster installation wrapper.
 
 ## Step 6: Reference Cilium From A BOM
 
@@ -277,11 +285,11 @@ That keeps package selection deterministic.
 
 ## Step 7: Render The Bundle
 
-There are two useful ways to render the PoC bundle.
+There are two useful development ways to render the PoC bundle.
 
 ### Render From Local Package Directories
 
-Use the helper wrapper:
+Use the helper wrapper while iterating on package directories:
 
 ```bash
 scripts/poc/minimal-single-node/render.sh --package-mode local
@@ -306,6 +314,10 @@ scripts/poc/minimal-single-node/render.sh --package-mode oci
 
 In OCI mode, the render path resolves Cilium from the BOM artifact reference
 instead of a local `--package-source` override.
+
+For the operator-facing 0-to-1 PoC, use the Day 0 guide flow instead: select a
+release source, run `sealos sync local-repo init`, validate the source, run
+`sealos sync render`, then apply the rendered bundle.
 
 The rendered bundle currently carries Cilium payloads under
 `components/cilium/`, with package-relative content copied under
@@ -377,3 +389,7 @@ Today, Cilium packaging in this repo means:
 6. reference the pushed image and digest from a BOM
 7. render the final bundle from either local package directories or OCI package
    artifacts
+
+That is package and release-build work. Day 0 installation starts after those
+assets already exist and runs through BOM or `ReleaseChannel` selection, render,
+apply, and validation.

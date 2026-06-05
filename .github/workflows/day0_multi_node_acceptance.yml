@@ -26,6 +26,9 @@ concurrency:
   group: day0-multinode-acceptance-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   acceptance:
     name: Multi-Node Render And Apply Contract

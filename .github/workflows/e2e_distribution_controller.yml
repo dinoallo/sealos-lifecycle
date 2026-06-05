@@ -57,6 +57,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GO_VERSION: "1.25"
   DEFAULT_CONTROLLER_IMAGE: "example.com/sealos-agent:v0.0.0"
 

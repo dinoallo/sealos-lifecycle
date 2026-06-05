@@ -23,6 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # Common versions
   GO_VERSION: "1.25"
   PROJECT_PATH: "."

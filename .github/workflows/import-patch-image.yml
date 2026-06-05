@@ -1,6 +1,7 @@
 name: Import Patch Images Package
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # Common versions
   GO_VERSION: "1.25"
   GO_BUILD_TAGS: "containers_image_openpgp,netgo,static,osusergo,exclude_graphdriver_devicemapper,exclude_graphdriver_btrfs"

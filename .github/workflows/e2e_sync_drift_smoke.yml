@@ -48,6 +48,9 @@ concurrency:
   group: e2e-sync-drift-smoke-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   call-sync-drift-smoke:
     uses: ./.github/workflows/e2e_sync_drift_smoke_reusable.yml
