@@ -6,7 +6,7 @@
 
 ## 概述
 
-这份 walkthrough 解释当前单节点仓库里，`sealos sync` 这一组命令是如何处理
+这份 walkthrough 解释当前仓库里，`sealos sync` 这一组命令是如何处理
 desired-state drift 的。
 
 它刻意描述的是今天已经存在的实现，不是未来的 controller 设计。按当前仓库，
@@ -21,7 +21,11 @@ desired-state drift 的。
 
 - `global` object 或 host file drift 会被当成 `globalBaseline`-owned
 - `local` object 或 host file drift 会被当成 local-owned
-- generated projection 会被报告，但当前不会被直接 `commit` 或 `revert`
+- multi-node host-file commit/revert 已经支持显式选择 tracked host path；
+  local-input commit 会沿用 host-scoped input provenance
+- package 声明或从保留 kubeadm input 发现的 generated projection 会带结构化
+  路由 metadata；只有很窄的 `repairable=true` control-plane host-path 子集有
+  直接 repair path
 
 ## 相关文档
 
@@ -103,7 +107,7 @@ sealos sync apply \
 | package-owned direct host file | `Orphan` | `globalBaseline` | 回退它，或者去更新 global baseline |
 | local input 绑定出来的 direct host file | `Dirty` | `localInput` | 如果是有意改动就 commit，否则 revert |
 | 缺失的 local-owned object 或 file | `Dirty` | `localOverlay` 或 `localInput` | 用 revert 恢复；当前 MVP 不会 commit 缺失 projection |
-| generated static Pod projection | 通常是 `Orphan` | `localInput`、`globalBaseline` 或 `manualReview` | 跟着 remediation hint 走；当前 MVP 不会直接 commit/revert |
+| generated static Pod projection | 通常是 `Orphan` | `localInput`、`globalBaseline` 或 `manualReview` | 跟着 remediation hint 走；只有 `repairable=true` control-plane host path 有 direct repair |
 
 一个实用规则是：
 
@@ -211,6 +215,9 @@ sealos sync status \
 
 - `action`
 - `changeOwner`
+- generated projection 路由元数据（如果存在）：
+  `projectionClass`、`generator`、`generatedKind`、`generatedName` 和
+  `repairable`
 - `nextSteps[]`
 - `allowedCommands[]`
 - `commandGuidance[]`
@@ -226,6 +233,11 @@ sealos sync status \
   - 说明 drift 属于某个已声明的 local input binding，常见于 host-side 文件
 - `changeOwner=manualReview`
   - 说明 Sealos 还不能安全自动归类这个 generated projection
+
+对于 generated host-path projection，remediation block 还会标出 generator
+和 generated object 形态。`repairable=true` 表示当前 CLI 对这类 generated
+projection 有已知 repair path；`repairable=false` 表示它已经能被跟踪和路由，
+但修复仍要通过 local input、package/BOM baseline 或人工 review 完成。
 
 这里的 command guidance 不是静态列表，它会被实际求值。当前单节点 MVP 里，
 最重要的前提是：
@@ -362,10 +374,33 @@ sealos sync revert \
   --scope local
 ```
 
+multi-node host path 场景下，可以加 `--host` 精确选择一个 execution host。如果同一个
+host path 被多个 component 跟踪，还要再加 `--component`。对于有 host-scoped
+input binding 的 local-input host path，被选中的 host 会从自己的 host-scoped
+desired payload 回退：
+
+```bash
+sealos sync revert \
+  --cluster demo \
+  --bundle-dir docs/examples/sync-drift-minimal/bundle \
+  --kubeconfig /etc/kubernetes/admin.conf \
+  --host-root / \
+  --scope local \
+  --host-path /etc/kubernetes/kubeadm.yaml \
+  --host 192.168.0.240:22
+```
+
 当前 MVP 里要记住几件事：
 
 - 缺失的 local-owned object 或 file 可以被 `revert` 恢复
-- generated projection 会被报告，但不会被直接回退
+- direct host-path revert 可以精确选择 local 或 remote host；多 component
+  同 path 时需要 `--component`
+- data-plane-sensitive objects 在 mutation 前需要先走
+  [Data plane protection](./data-plane-protection-runbook.md) gate
+- generated projection 会从
+  `ComponentPackage.spec.generatedOutputs.hostPaths[]` 声明或已知 kubeadm
+  static Pod 发现中被报告；只有 remediation 显示 `repairable=true` 的已建模
+  control-plane host path 可以直接 repair
 - local-scope revert 会拒绝明显属于 global-owned 的选择
 
 ## 第 6 步：再跑一遍 `diff` 或 `status`
@@ -421,6 +456,8 @@ sealos sync status \
 - local patch drift
 - 来自已声明 local input 的 direct host-file drift
 - 本来就应该被丢弃的 `globalBaseline`-owned object 或 file drift
+- 已建模 generated host-path drift，包括 kubeadm static Pod 之外由 package
+  声明的 generated Kubernetes-object host file
 
 如果你想直接看一套和这条闭环对应的最小样例目录，可以用：
 [docs/examples/sync-drift-minimal](../examples/sync-drift-minimal/README.zh-CN.md)。

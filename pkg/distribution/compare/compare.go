@@ -27,14 +27,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/labring/sealos/pkg/distribution/hydrate"
+	"github.com/labring/sealos/pkg/distribution/ownership"
+	"github.com/labring/sealos/pkg/distribution/state"
 	"github.com/opencontainers/go-digest"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
-
-	"github.com/labring/sealos/pkg/distribution/hydrate"
-	"github.com/labring/sealos/pkg/distribution/ownership"
-	"github.com/labring/sealos/pkg/distribution/state"
 )
 
 type ObjectPresence string
@@ -52,82 +51,87 @@ const (
 )
 
 type ObjectStatus struct {
-	Tracked       hydrate.TrackedK8sObject   `json:"tracked" yaml:"tracked"`
-	Fragments     []hydrate.TrackedK8sObject `json:"fragments,omitempty" yaml:"fragments,omitempty"`
-	Presence      ObjectPresence             `json:"presence" yaml:"presence"`
-	Comparison    ObjectComparison           `json:"comparison,omitempty" yaml:"comparison,omitempty"`
-	State         state.ClusterState         `json:"state" yaml:"state"`
+	Tracked       hydrate.TrackedK8sObject   `json:"tracked"                 yaml:"tracked"`
+	Fragments     []hydrate.TrackedK8sObject `json:"fragments,omitempty"     yaml:"fragments,omitempty"`
+	Presence      ObjectPresence             `json:"presence"                yaml:"presence"`
+	Comparison    ObjectComparison           `json:"comparison,omitempty"    yaml:"comparison,omitempty"`
+	State         state.ClusterState         `json:"state"                   yaml:"state"`
 	DesiredDigest string                     `json:"desiredDigest,omitempty" yaml:"desiredDigest,omitempty"`
-	LiveDigest    string                     `json:"liveDigest,omitempty" yaml:"liveDigest,omitempty"`
-	Mismatches    []FieldMismatch            `json:"mismatches,omitempty" yaml:"mismatches,omitempty"`
-	Remediation   *HostPathRemediation       `json:"remediation,omitempty" yaml:"remediation,omitempty"`
+	LiveDigest    string                     `json:"liveDigest,omitempty"    yaml:"liveDigest,omitempty"`
+	Mismatches    []FieldMismatch            `json:"mismatches,omitempty"    yaml:"mismatches,omitempty"`
+	Remediation   *HostPathRemediation       `json:"remediation,omitempty"   yaml:"remediation,omitempty"`
 }
 
 type HostPathStatus struct {
-	Host          string                  `json:"host,omitempty" yaml:"host,omitempty"`
-	Tracked       hydrate.TrackedHostPath `json:"tracked" yaml:"tracked"`
-	Presence      ObjectPresence          `json:"presence" yaml:"presence"`
-	Comparison    ObjectComparison        `json:"comparison,omitempty" yaml:"comparison,omitempty"`
-	State         state.ClusterState      `json:"state" yaml:"state"`
+	Host          string                  `json:"host,omitempty"          yaml:"host,omitempty"`
+	Tracked       hydrate.TrackedHostPath `json:"tracked"                 yaml:"tracked"`
+	Presence      ObjectPresence          `json:"presence"                yaml:"presence"`
+	Comparison    ObjectComparison        `json:"comparison,omitempty"    yaml:"comparison,omitempty"`
+	State         state.ClusterState      `json:"state"                   yaml:"state"`
 	DesiredDigest string                  `json:"desiredDigest,omitempty" yaml:"desiredDigest,omitempty"`
-	LiveDigest    string                  `json:"liveDigest,omitempty" yaml:"liveDigest,omitempty"`
-	Mismatches    []HostPathMismatch      `json:"mismatches,omitempty" yaml:"mismatches,omitempty"`
-	Remediation   *HostPathRemediation    `json:"remediation,omitempty" yaml:"remediation,omitempty"`
+	LiveDigest    string                  `json:"liveDigest,omitempty"    yaml:"liveDigest,omitempty"`
+	Mismatches    []HostPathMismatch      `json:"mismatches,omitempty"    yaml:"mismatches,omitempty"`
+	Remediation   *HostPathRemediation    `json:"remediation,omitempty"   yaml:"remediation,omitempty"`
 }
 
 type HostPathMismatch struct {
-	Reason  string             `json:"reason" yaml:"reason"`
+	Reason  string             `json:"reason"            yaml:"reason"`
 	Desired string             `json:"desired,omitempty" yaml:"desired,omitempty"`
-	Live    string             `json:"live,omitempty" yaml:"live,omitempty"`
-	State   state.ClusterState `json:"state,omitempty" yaml:"state,omitempty"`
+	Live    string             `json:"live,omitempty"    yaml:"live,omitempty"`
+	State   state.ClusterState `json:"state,omitempty"   yaml:"state,omitempty"`
 }
 
 type HostPathRemediation struct {
-	Action              string                    `json:"action" yaml:"action"`
-	ChangeOwner         string                    `json:"changeOwner,omitempty" yaml:"changeOwner,omitempty"`
-	Source              string                    `json:"source,omitempty" yaml:"source,omitempty"`
-	PolicyName          string                    `json:"policyName,omitempty" yaml:"policyName,omitempty"`
+	Action              string                    `json:"action"                        yaml:"action"`
+	ChangeOwner         string                    `json:"changeOwner,omitempty"         yaml:"changeOwner,omitempty"`
+	Source              string                    `json:"source,omitempty"              yaml:"source,omitempty"`
+	ProjectionClass     string                    `json:"projectionClass,omitempty"     yaml:"projectionClass,omitempty"`
+	Generator           string                    `json:"generator,omitempty"           yaml:"generator,omitempty"`
+	GeneratedKind       string                    `json:"generatedKind,omitempty"       yaml:"generatedKind,omitempty"`
+	GeneratedName       string                    `json:"generatedName,omitempty"       yaml:"generatedName,omitempty"`
+	Repairable          *bool                     `json:"repairable,omitempty"          yaml:"repairable,omitempty"`
+	PolicyName          string                    `json:"policyName,omitempty"          yaml:"policyName,omitempty"`
 	PolicyEligiblePaths []string                  `json:"policyEligiblePaths,omitempty" yaml:"policyEligiblePaths,omitempty"`
-	SafeDirectRevert    bool                      `json:"safeDirectRevert" yaml:"safeDirectRevert"`
-	SafeCommit          bool                      `json:"safeCommit" yaml:"safeCommit"`
-	Message             string                    `json:"message,omitempty" yaml:"message,omitempty"`
-	NextSteps           []string                  `json:"nextSteps,omitempty" yaml:"nextSteps,omitempty"`
-	AllowedCommands     []string                  `json:"allowedCommands,omitempty" yaml:"allowedCommands,omitempty"`
-	CommandGuidance     []HostPathCommandGuidance `json:"commandGuidance,omitempty" yaml:"commandGuidance,omitempty"`
+	SafeDirectRevert    bool                      `json:"safeDirectRevert"              yaml:"safeDirectRevert"`
+	SafeCommit          bool                      `json:"safeCommit"                    yaml:"safeCommit"`
+	Message             string                    `json:"message,omitempty"             yaml:"message,omitempty"`
+	NextSteps           []string                  `json:"nextSteps,omitempty"           yaml:"nextSteps,omitempty"`
+	AllowedCommands     []string                  `json:"allowedCommands,omitempty"     yaml:"allowedCommands,omitempty"`
+	CommandGuidance     []HostPathCommandGuidance `json:"commandGuidance,omitempty"     yaml:"commandGuidance,omitempty"`
 }
 
 type HostPathCommandGuidance struct {
-	Command       string   `json:"command" yaml:"command"`
+	Command       string   `json:"command"                 yaml:"command"`
 	Preconditions []string `json:"preconditions,omitempty" yaml:"preconditions,omitempty"`
-	Availability  string   `json:"availability,omitempty" yaml:"availability,omitempty"`
-	Reason        string   `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Availability  string   `json:"availability,omitempty"  yaml:"availability,omitempty"`
+	Reason        string   `json:"reason,omitempty"        yaml:"reason,omitempty"`
 }
 
 type FieldMismatch struct {
-	Path           string                     `json:"path" yaml:"path"`
-	Reason         string                     `json:"reason" yaml:"reason"`
-	Ownership      hydrate.InventoryOwnership `json:"ownership,omitempty" yaml:"ownership,omitempty"`
-	PolicyName     string                     `json:"policyName,omitempty" yaml:"policyName,omitempty"`
+	Path           string                     `json:"path"                     yaml:"path"`
+	Reason         string                     `json:"reason"                   yaml:"reason"`
+	Ownership      hydrate.InventoryOwnership `json:"ownership,omitempty"      yaml:"ownership,omitempty"`
+	PolicyName     string                     `json:"policyName,omitempty"     yaml:"policyName,omitempty"`
 	PolicyEligible bool                       `json:"policyEligible,omitempty" yaml:"policyEligible,omitempty"`
-	State          state.ClusterState         `json:"state,omitempty" yaml:"state,omitempty"`
-	Desired        string                     `json:"desired,omitempty" yaml:"desired,omitempty"`
-	Live           string                     `json:"live,omitempty" yaml:"live,omitempty"`
+	State          state.ClusterState         `json:"state,omitempty"          yaml:"state,omitempty"`
+	Desired        string                     `json:"desired,omitempty"        yaml:"desired,omitempty"`
+	Live           string                     `json:"live,omitempty"           yaml:"live,omitempty"`
 }
 
 type Summary struct {
-	Total   int `json:"total" yaml:"total"`
+	Total   int `json:"total"   yaml:"total"`
 	Present int `json:"present" yaml:"present"`
 	Missing int `json:"missing" yaml:"missing"`
 	Matched int `json:"matched" yaml:"matched"`
 	Drifted int `json:"drifted" yaml:"drifted"`
-	Clean   int `json:"clean" yaml:"clean"`
-	Dirty   int `json:"dirty" yaml:"dirty"`
-	Orphan  int `json:"orphan" yaml:"orphan"`
+	Clean   int `json:"clean"   yaml:"clean"`
+	Dirty   int `json:"dirty"   yaml:"dirty"`
+	Orphan  int `json:"orphan"  yaml:"orphan"`
 }
 
 type Result struct {
-	Summary   Summary          `json:"summary" yaml:"summary"`
-	Objects   []ObjectStatus   `json:"objects" yaml:"objects"`
+	Summary   Summary          `json:"summary"             yaml:"summary"`
+	Objects   []ObjectStatus   `json:"objects"             yaml:"objects"`
 	HostPaths []HostPathStatus `json:"hostPaths,omitempty" yaml:"hostPaths,omitempty"`
 }
 
@@ -148,7 +152,7 @@ type trackedObjectGroup struct {
 }
 
 type desiredProjection struct {
-	merged     interface{}
+	merged     any
 	kind       string
 	ownership  pathOwnershipIndex
 	policy     ownership.LocalPatchPolicy
@@ -157,11 +161,20 @@ type desiredProjection struct {
 
 type pathOwnershipIndex map[string]hydrate.InventoryOwnership
 
-func CompareBundle(bundle *hydrate.Bundle, bundleRoot string, resolver ObjectResolver) (*Result, error) {
+func CompareBundle(
+	bundle *hydrate.Bundle,
+	bundleRoot string,
+	resolver ObjectResolver,
+) (*Result, error) {
 	return CompareBundleWithOptions(bundle, bundleRoot, resolver, CompareOptions{})
 }
 
-func CompareBundleWithOptions(bundle *hydrate.Bundle, bundleRoot string, resolver ObjectResolver, opts CompareOptions) (*Result, error) {
+func CompareBundleWithOptions(
+	bundle *hydrate.Bundle,
+	bundleRoot string,
+	resolver ObjectResolver,
+	opts CompareOptions,
+) (*Result, error) {
 	if bundle == nil {
 		return nil, fmt.Errorf("bundle cannot be nil")
 	}
@@ -182,13 +195,24 @@ func CompareBundleWithOptions(bundle *hydrate.Bundle, bundleRoot string, resolve
 	}
 	if !opts.SkipObjects {
 		for _, group := range groupTrackedObjects(bundle.Spec.TrackedK8sObjects) {
-			projection, err := compileDesiredProjection(bundleRoot, group.fragments, policyDoc.Spec, policyDoc.EffectiveName())
+			projection, err := compileDesiredProjection(
+				bundleRoot,
+				group.fragments,
+				policyDoc.Spec,
+				policyDoc.EffectiveName(),
+			)
 			if err != nil {
 				return nil, err
 			}
 			desiredDigest, err := digestNormalizedValue(projection.merged)
 			if err != nil {
-				return nil, fmt.Errorf("normalize desired object %s %s/%s: %w", group.primary.Kind, group.primary.Namespace, group.primary.Name, err)
+				return nil, fmt.Errorf(
+					"normalize desired object %s %s/%s: %w",
+					group.primary.Kind,
+					group.primary.Namespace,
+					group.primary.Name,
+					err,
+				)
 			}
 
 			status := ObjectStatus{
@@ -199,7 +223,12 @@ func CompareBundleWithOptions(bundle *hydrate.Bundle, bundleRoot string, resolve
 				DesiredDigest: desiredDigest,
 			}
 
-			liveRaw, err := resolver.Get(group.primary.APIVersion, group.primary.Kind, group.primary.Namespace, group.primary.Name)
+			liveRaw, err := resolver.Get(
+				group.primary.APIVersion,
+				group.primary.Kind,
+				group.primary.Namespace,
+				group.primary.Name,
+			)
 			if err != nil {
 				if isNotFound(err) {
 					status.Presence = ObjectPresenceMissing
@@ -213,12 +242,24 @@ func CompareBundleWithOptions(bundle *hydrate.Bundle, bundleRoot string, resolve
 
 			liveDigest, err := normalizedObjectDigest(liveRaw)
 			if err != nil {
-				return nil, fmt.Errorf("normalize live object %s %s/%s: %w", group.primary.Kind, group.primary.Namespace, group.primary.Name, err)
+				return nil, fmt.Errorf(
+					"normalize live object %s %s/%s: %w",
+					group.primary.Kind,
+					group.primary.Namespace,
+					group.primary.Name,
+					err,
+				)
 			}
 			status.LiveDigest = liveDigest
 			mismatches, err := projection.mismatches(liveRaw)
 			if err != nil {
-				return nil, fmt.Errorf("compare owned fields for %s %s/%s: %w", group.primary.Kind, group.primary.Namespace, group.primary.Name, err)
+				return nil, fmt.Errorf(
+					"compare owned fields for %s %s/%s: %w",
+					group.primary.Kind,
+					group.primary.Namespace,
+					group.primary.Name,
+					err,
+				)
 			}
 			if len(mismatches) == 0 {
 				status.Comparison = ObjectComparisonMatched
@@ -313,13 +354,24 @@ func DesiredObjectYAML(bundleRoot string, object ObjectStatus) ([]byte, error) {
 		fragments = []hydrate.TrackedK8sObject{object.Tracked}
 	}
 
-	projection, err := compileDesiredProjection(bundleRoot, fragments, ownership.DefaultLocalPatchPolicy(), ownership.DefaultLocalPatchPolicyName)
+	projection, err := compileDesiredProjection(
+		bundleRoot,
+		fragments,
+		ownership.DefaultLocalPatchPolicy(),
+		ownership.DefaultLocalPatchPolicyName,
+	)
 	if err != nil {
 		return nil, err
 	}
 	data, err := yaml.Marshal(projection.merged)
 	if err != nil {
-		return nil, fmt.Errorf("marshal desired object %s %s/%s: %w", object.Tracked.Kind, object.Tracked.Namespace, object.Tracked.Name, err)
+		return nil, fmt.Errorf(
+			"marshal desired object %s %s/%s: %w",
+			object.Tracked.Kind,
+			object.Tracked.Namespace,
+			object.Tracked.Name,
+			err,
+		)
 	}
 	return data, nil
 }
@@ -343,10 +395,18 @@ func groupTrackedObjects(tracked []hydrate.TrackedK8sObject) []trackedObjectGrou
 }
 
 func trackedObjectKey(object hydrate.TrackedK8sObject) string {
-	return strings.Join([]string{object.APIVersion, object.Kind, object.Namespace, object.Name}, "\x00")
+	return strings.Join(
+		[]string{object.APIVersion, object.Kind, object.Namespace, object.Name},
+		"\x00",
+	)
 }
 
-func compileDesiredProjection(bundleRoot string, fragments []hydrate.TrackedK8sObject, policy ownership.LocalPatchPolicy, policyName string) (*desiredProjection, error) {
+func compileDesiredProjection(
+	bundleRoot string,
+	fragments []hydrate.TrackedK8sObject,
+	policy ownership.LocalPatchPolicy,
+	policyName string,
+) (*desiredProjection, error) {
 	if len(fragments) == 0 {
 		return nil, fmt.Errorf("desired projection fragments cannot be empty")
 	}
@@ -374,9 +434,22 @@ func compileDesiredProjection(bundleRoot string, fragments []hydrate.TrackedK8sO
 		}
 		value, err := normalizedObjectValue(raw)
 		if err != nil {
-			return nil, fmt.Errorf("normalize desired fragment %s %s/%s from %q: %w", fragment.Kind, fragment.Namespace, fragment.Name, fragment.Path, err)
+			return nil, fmt.Errorf(
+				"normalize desired fragment %s %s/%s from %q: %w",
+				fragment.Kind,
+				fragment.Namespace,
+				fragment.Name,
+				fragment.Path,
+				err,
+			)
 		}
-		projection.merged = mergeDesiredValue(nil, projection.merged, value, fragment.Ownership, projection.ownership)
+		projection.merged = mergeDesiredValue(
+			nil,
+			projection.merged,
+			value,
+			fragment.Ownership,
+			projection.ownership,
+		)
 	}
 	return projection, nil
 }
@@ -400,10 +473,15 @@ func (p *desiredProjection) mismatches(liveRaw []byte) ([]FieldMismatch, error) 
 	if err != nil {
 		return nil, err
 	}
-	return p.ownership.annotateMismatches(p.kind, p.policy, p.policyName, diffOwnedFieldsAtPath(nil, p.merged, live)), nil
+	return p.ownership.annotateMismatches(
+		p.kind,
+		p.policy,
+		p.policyName,
+		diffOwnedFieldsAtPath(nil, p.merged, live),
+	), nil
 }
 
-func digestNormalizedValue(value interface{}) (string, error) {
+func digestNormalizedValue(value any) (string, error) {
 	if value == nil {
 		return "", fmt.Errorf("normalized value cannot be nil")
 	}
@@ -444,7 +522,12 @@ func (p pathOwnershipIndex) maxState() state.ClusterState {
 	return current
 }
 
-func (p pathOwnershipIndex) annotateMismatches(kind string, policy ownership.LocalPatchPolicy, policyName string, mismatches []FieldMismatch) []FieldMismatch {
+func (p pathOwnershipIndex) annotateMismatches(
+	kind string,
+	policy ownership.LocalPatchPolicy,
+	policyName string,
+	mismatches []FieldMismatch,
+) []FieldMismatch {
 	if len(mismatches) == 0 {
 		return nil
 	}
@@ -453,7 +536,8 @@ func (p pathOwnershipIndex) annotateMismatches(kind string, policy ownership.Loc
 		mismatchOwnership := p.resolve(mismatch.Path)
 		mismatch.Ownership = mismatchOwnership
 		mismatch.State = driftStateForOwnership(mismatchOwnership)
-		if len(normalizeLocalPatchPolicyPath(mismatch.Path)) > 0 && policy.IsAllowed(kind, normalizeLocalPatchPolicyPath(mismatch.Path)) {
+		if len(normalizeLocalPatchPolicyPath(mismatch.Path)) > 0 &&
+			policy.IsAllowed(kind, normalizeLocalPatchPolicyPath(mismatch.Path)) {
 			mismatch.PolicyName = policyName
 			mismatch.PolicyEligible = true
 		}
@@ -472,7 +556,8 @@ func (p pathOwnershipIndex) resolve(path string) hydrate.InventoryOwnership {
 		if candidate == "" {
 			continue
 		}
-		if path == candidate || strings.HasPrefix(path, candidate+".") || strings.HasPrefix(path, candidate+"[") {
+		if path == candidate || strings.HasPrefix(path, candidate+".") ||
+			strings.HasPrefix(path, candidate+"[") {
 			if len(candidate) > len(best) {
 				best = candidate
 				bestOwnership = ownership
@@ -528,7 +613,13 @@ func desiredTrackedObject(bundleRoot string, tracked hydrate.TrackedK8sObject) (
 				return doc, nil
 			}
 		}
-		return nil, fmt.Errorf("tracked object %s %s/%s not found under %q", tracked.Kind, tracked.Namespace, tracked.Name, tracked.Path)
+		return nil, fmt.Errorf(
+			"tracked object %s %s/%s not found under %q",
+			tracked.Kind,
+			tracked.Namespace,
+			tracked.Name,
+			tracked.Path,
+		)
 	}
 
 	doc, ok, err := findTrackedObjectInFile(targetPath, tracked)
@@ -536,12 +627,21 @@ func desiredTrackedObject(bundleRoot string, tracked hydrate.TrackedK8sObject) (
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("tracked object %s %s/%s not found in %q", tracked.Kind, tracked.Namespace, tracked.Name, tracked.Path)
+		return nil, fmt.Errorf(
+			"tracked object %s %s/%s not found in %q",
+			tracked.Kind,
+			tracked.Namespace,
+			tracked.Name,
+			tracked.Path,
+		)
 	}
 	return doc, nil
 }
 
-func compareTrackedHostPath(bundleRoot, hostRoot, host string, tracked hydrate.TrackedHostPath) (HostPathStatus, error) {
+func compareTrackedHostPath(
+	bundleRoot, hostRoot, host string,
+	tracked hydrate.TrackedHostPath,
+) (HostPathStatus, error) {
 	if isGeneratedTrackedHostPath(tracked) {
 		return compareGeneratedTrackedHostPath(hostRoot, tracked)
 	}
@@ -553,7 +653,12 @@ func compareTrackedHostPath(bundleRoot, hostRoot, host string, tracked hydrate.T
 	}
 	desiredDigest, expected, err := digestTrackedHostPath(desiredPath, tracked.Type)
 	if err != nil {
-		return HostPathStatus{}, fmt.Errorf("normalize desired host path %q from %q: %w", tracked.HostPath, desiredBundlePath, err)
+		return HostPathStatus{}, fmt.Errorf(
+			"normalize desired host path %q from %q: %w",
+			tracked.HostPath,
+			desiredBundlePath,
+			err,
+		)
 	}
 
 	status := HostPathStatus{
@@ -575,11 +680,17 @@ func compareTrackedHostPath(bundleRoot, hostRoot, host string, tracked hydrate.T
 			status.Remediation = directHostPathRemediation(status)
 			return status, nil
 		}
-		return HostPathStatus{}, fmt.Errorf("normalize live host path %q: %w", tracked.HostPath, err)
+		return HostPathStatus{}, fmt.Errorf(
+			"normalize live host path %q: %w",
+			tracked.HostPath,
+			err,
+		)
 	}
 	status.LiveDigest = liveDigest
 
-	if mismatches := diffTrackedHostPath(expected, actual, driftStateForOwnership(tracked.Ownership)); len(mismatches) > 0 {
+	if mismatches := diffTrackedHostPath(expected, actual, driftStateForOwnership(tracked.Ownership)); len(
+		mismatches,
+	) > 0 {
 		status.Comparison = ObjectComparisonDrifted
 		status.State = driftStateForOwnership(tracked.Ownership)
 		status.Mismatches = mismatches
@@ -605,7 +716,10 @@ func isGeneratedTrackedHostPath(tracked hydrate.TrackedHostPath) bool {
 		tracked.Generated != nil
 }
 
-func compareGeneratedTrackedHostPath(hostRoot string, tracked hydrate.TrackedHostPath) (HostPathStatus, error) {
+func compareGeneratedTrackedHostPath(
+	hostRoot string,
+	tracked hydrate.TrackedHostPath,
+) (HostPathStatus, error) {
 	desiredDigest, err := digestGeneratedHostPathExpectation(tracked)
 	if err != nil {
 		return HostPathStatus{}, err
@@ -629,7 +743,11 @@ func compareGeneratedTrackedHostPath(hostRoot string, tracked hydrate.TrackedHos
 			status.Remediation = generatedHostPathRemediation(tracked, status)
 			return status, nil
 		}
-		return HostPathStatus{}, fmt.Errorf("stat generated host path %q: %w", tracked.HostPath, err)
+		return HostPathStatus{}, fmt.Errorf(
+			"stat generated host path %q: %w",
+			tracked.HostPath,
+			err,
+		)
 	}
 	actualType, ok := modeToHostPathType(info.Mode())
 	if !ok {
@@ -668,7 +786,11 @@ func compareGeneratedTrackedHostPath(hostRoot string, tracked hydrate.TrackedHos
 
 	raw, err := os.ReadFile(livePath)
 	if err != nil {
-		return HostPathStatus{}, fmt.Errorf("read generated host path %q: %w", tracked.HostPath, err)
+		return HostPathStatus{}, fmt.Errorf(
+			"read generated host path %q: %w",
+			tracked.HostPath,
+			err,
+		)
 	}
 	liveDigest, err := normalizedObjectDigest(raw)
 	if err != nil {
@@ -696,7 +818,11 @@ func compareGeneratedTrackedHostPath(hostRoot string, tracked hydrate.TrackedHos
 		status.Remediation = generatedHostPathRemediation(tracked, status)
 		return status, nil
 	}
-	mismatches := diffGeneratedHostPathSemantics(liveValue, tracked.Generated, driftStateForOwnership(tracked.Ownership))
+	mismatches := diffGeneratedHostPathSemantics(
+		liveValue,
+		tracked.Generated,
+		driftStateForOwnership(tracked.Ownership),
+	)
 	if len(mismatches) == 0 {
 		status.Comparison = ObjectComparisonMatched
 		status.State = state.StateClean
@@ -711,9 +837,12 @@ func compareGeneratedTrackedHostPath(hostRoot string, tracked hydrate.TrackedHos
 
 func digestGeneratedHostPathExpectation(tracked hydrate.TrackedHostPath) (string, error) {
 	if tracked.Generated == nil {
-		return "", fmt.Errorf("generated host path %q is missing semantic metadata", tracked.HostPath)
+		return "", fmt.Errorf(
+			"generated host path %q is missing semantic metadata",
+			tracked.HostPath,
+		)
 	}
-	value := map[string]interface{}{
+	value := map[string]any{
 		"tool":            tracked.Generated.Tool,
 		"hook":            tracked.Generated.Hook,
 		"apiVersion":      tracked.Generated.APIVersion,
@@ -730,14 +859,18 @@ func digestGeneratedHostPathExpectation(tracked hydrate.TrackedHostPath) (string
 	return digestNormalizedValue(value)
 }
 
-func diffGeneratedHostPathSemantics(live interface{}, semantics *hydrate.GeneratedHostPathSemantics, driftState state.ClusterState) []HostPathMismatch {
+func diffGeneratedHostPathSemantics(
+	live any,
+	semantics *hydrate.GeneratedHostPathSemantics,
+	driftState state.ClusterState,
+) []HostPathMismatch {
 	if semantics == nil {
 		return []HostPathMismatch{{
 			Reason: "missingSemanticExpectation",
 			State:  driftState,
 		}}
 	}
-	liveObject, ok := live.(map[string]interface{})
+	liveObject, ok := live.(map[string]any)
 	if !ok {
 		return []HostPathMismatch{{
 			Reason:  "typeMismatch",
@@ -767,7 +900,7 @@ func diffGeneratedHostPathSemantics(live interface{}, semantics *hydrate.Generat
 		return mismatches
 	}
 
-	metadata, _ := liveObject["metadata"].(map[string]interface{})
+	metadata, _ := liveObject["metadata"].(map[string]any)
 	if name, _ := metadata["name"].(string); name != semantics.Name {
 		mismatches = append(mismatches, HostPathMismatch{
 			Reason:  "identityMismatch",
@@ -792,10 +925,10 @@ func diffGeneratedHostPathSemantics(live interface{}, semantics *hydrate.Generat
 		return nil
 	}
 
-	spec, _ := liveObject["spec"].(map[string]interface{})
-	containers, _ := spec["containers"].([]interface{})
+	spec, _ := liveObject["spec"].(map[string]any)
+	containers, _ := spec["containers"].([]any)
 	for _, item := range containers {
-		container, ok := item.(map[string]interface{})
+		container, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -875,8 +1008,8 @@ func diffGeneratedHostPathSemantics(live interface{}, semantics *hydrate.Generat
 	}}
 }
 
-func stringSliceField(value interface{}) ([]string, bool) {
-	items, ok := value.([]interface{})
+func stringSliceField(value any) ([]string, bool) {
+	items, ok := value.([]any)
 	if !ok {
 		return nil, false
 	}
@@ -913,11 +1046,11 @@ func parseCommandArgs(command []string) map[string]string {
 	return args
 }
 
-func volumeMountPaths(container map[string]interface{}) []string {
-	mounts, _ := container["volumeMounts"].([]interface{})
+func volumeMountPaths(container map[string]any) []string {
+	mounts, _ := container["volumeMounts"].([]any)
 	paths := make([]string, 0, len(mounts))
 	for _, item := range mounts {
-		mount, ok := item.(map[string]interface{})
+		mount, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -970,9 +1103,17 @@ func objectRemediation(status ObjectStatus) *HostPathRemediation {
 			CommandGuidance: []HostPathCommandGuidance{
 				{Command: "sync diff", Availability: "unknown"},
 				{Command: "sync status", Availability: "unknown"},
-				{Command: "sync revert", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+				{
+					Command:       "sync revert",
+					Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+					Availability:  "unknown",
+				},
 				{Command: "sync render", Availability: "unknown"},
-				{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+				{
+					Command:       "sync apply",
+					Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+					Availability:  "unknown",
+				},
 				{Command: "sync package build", Availability: "unknown"},
 				{Command: "sync package push", Availability: "unknown"},
 			},
@@ -1015,9 +1156,17 @@ func objectRemediation(status ObjectStatus) *HostPathRemediation {
 		CommandGuidance: []HostPathCommandGuidance{
 			{Command: "sync diff", Availability: "unknown"},
 			{Command: "sync status", Availability: "unknown"},
-			{Command: "sync revert", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+			{
+				Command:       "sync revert",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
 			{Command: "sync render", Availability: "unknown"},
-			{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+			{
+				Command:       "sync apply",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
 		},
 	}
 	if hasLocalPatchFragment(status) && len(policyEligiblePaths) > 0 {
@@ -1025,12 +1174,20 @@ func objectRemediation(status ObjectStatus) *HostPathRemediation {
 		remediation.PolicyEligiblePaths = policyEligiblePaths
 	}
 	if status.Presence == ObjectPresencePresent {
-		remediation.AllowedCommands = insertAllowedCommand(remediation.AllowedCommands, 2, "sync commit")
-		remediation.CommandGuidance = insertCommandGuidance(remediation.CommandGuidance, 2, HostPathCommandGuidance{
-			Command:       "sync commit",
-			Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
-			Availability:  "unknown",
-		})
+		remediation.AllowedCommands = insertAllowedCommand(
+			remediation.AllowedCommands,
+			2,
+			"sync commit",
+		)
+		remediation.CommandGuidance = insertCommandGuidance(
+			remediation.CommandGuidance,
+			2,
+			HostPathCommandGuidance{
+				Command:       "sync commit",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
+		)
 		remediation.NextSteps[1] = "If the live drift should be kept, run sync commit; if it should be discarded, run sync revert."
 	} else {
 		remediation.Message = "review the cluster-local desired object overlay; sync revert can restore a missing local-owned object, while manual local repo edits should be rerendered and applied"
@@ -1068,9 +1225,17 @@ func directHostPathRemediation(status HostPathStatus) *HostPathRemediation {
 			CommandGuidance: []HostPathCommandGuidance{
 				{Command: "sync diff", Availability: "unknown"},
 				{Command: "sync status", Availability: "unknown"},
-				{Command: "sync revert", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+				{
+					Command:       "sync revert",
+					Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+					Availability:  "unknown",
+				},
 				{Command: "sync render", Availability: "unknown"},
-				{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+				{
+					Command:       "sync apply",
+					Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+					Availability:  "unknown",
+				},
 				{Command: "sync package build", Availability: "unknown"},
 				{Command: "sync package push", Availability: "unknown"},
 			},
@@ -1102,18 +1267,34 @@ func directHostPathRemediation(status HostPathStatus) *HostPathRemediation {
 		CommandGuidance: []HostPathCommandGuidance{
 			{Command: "sync diff", Availability: "unknown"},
 			{Command: "sync status", Availability: "unknown"},
-			{Command: "sync revert", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+			{
+				Command:       "sync revert",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
 			{Command: "sync render", Availability: "unknown"},
-			{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+			{
+				Command:       "sync apply",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
 		},
 	}
 	if status.Presence == ObjectPresencePresent {
-		remediation.AllowedCommands = insertAllowedCommand(remediation.AllowedCommands, 2, "sync commit")
-		remediation.CommandGuidance = insertCommandGuidance(remediation.CommandGuidance, 2, HostPathCommandGuidance{
-			Command:       "sync commit",
-			Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
-			Availability:  "unknown",
-		})
+		remediation.AllowedCommands = insertAllowedCommand(
+			remediation.AllowedCommands,
+			2,
+			"sync commit",
+		)
+		remediation.CommandGuidance = insertCommandGuidance(
+			remediation.CommandGuidance,
+			2,
+			HostPathCommandGuidance{
+				Command:       "sync commit",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
+		)
 	} else {
 		remediation.SafeCommit = false
 		remediation.Message = "review the cluster-local input that owns this host projection; sync revert can restore a missing local-owned file, while manual local repo edits should be rerendered and applied"
@@ -1241,7 +1422,11 @@ func insertAllowedCommand(values []string, index int, value string) []string {
 	return values
 }
 
-func insertCommandGuidance(values []HostPathCommandGuidance, index int, value HostPathCommandGuidance) []HostPathCommandGuidance {
+func insertCommandGuidance(
+	values []HostPathCommandGuidance,
+	index int,
+	value HostPathCommandGuidance,
+) []HostPathCommandGuidance {
 	if index < 0 || index >= len(values) {
 		return append(values, value)
 	}
@@ -1249,8 +1434,12 @@ func insertCommandGuidance(values []HostPathCommandGuidance, index int, value Ho
 	return values
 }
 
-func generatedHostPathRemediation(tracked hydrate.TrackedHostPath, status HostPathStatus) *HostPathRemediation {
-	if tracked.ProjectionClass != hydrate.HostPathProjectionClassGenerated || tracked.Generated == nil {
+func generatedHostPathRemediation(
+	tracked hydrate.TrackedHostPath,
+	status HostPathStatus,
+) *HostPathRemediation {
+	if tracked.ProjectionClass != hydrate.HostPathProjectionClassGenerated ||
+		tracked.Generated == nil {
 		return nil
 	}
 	if status.State == state.StateClean {
@@ -1261,6 +1450,7 @@ func generatedHostPathRemediation(tracked hydrate.TrackedHostPath, status HostPa
 	if tracked.Generated.Tool == "kubeadm" {
 		source = "rendered kubeadm config (files/etc/kubernetes/kubeadm.yaml)"
 	}
+	base := generatedHostPathRemediationBase(tracked, source)
 
 	manualReview := false
 	for _, mismatch := range status.Mismatches {
@@ -1271,89 +1461,134 @@ func generatedHostPathRemediation(tracked hydrate.TrackedHostPath, status HostPa
 	}
 
 	if manualReview {
-		return &HostPathRemediation{
-			Action:           "manualReviewGeneratedProjection",
-			ChangeOwner:      "manualReview",
-			Source:           source,
-			SafeDirectRevert: false,
-			SafeCommit:       false,
-			Message:          "inspect the live generated projection and its bootstrap source before rerendering; direct sync commit/revert is not supported for generated projections",
-			NextSteps: []string{
-				"Inspect the live generated static Pod manifest and identify why Sealos could not classify it semantically.",
-				"Compare the live projection with the rendered kubeadm input and the selected BOM/package baseline.",
-				"After manual review, fix the bootstrap input or baseline source, then rerender and apply again.",
-			},
-			AllowedCommands: []string{
-				"sync diff",
-				"sync status",
-				"sync render",
-				"sync apply",
-			},
-			CommandGuidance: []HostPathCommandGuidance{
-				{Command: "sync diff", Availability: "unknown"},
-				{Command: "sync status", Availability: "unknown"},
-				{Command: "sync render", Availability: "unknown"},
-				{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
+		remediation := base
+		remediation.Action = "manualReviewGeneratedProjection"
+		remediation.ChangeOwner = "manualReview"
+		remediation.SafeDirectRevert = false
+		remediation.SafeCommit = false
+		remediation.Message = "inspect the live generated projection and its bootstrap source before rerendering; direct sync commit/revert is not supported for generated projections"
+		remediation.NextSteps = []string{
+			"Inspect the live generated static Pod manifest and identify why Sealos could not classify it semantically.",
+			"Compare the live projection with the rendered kubeadm input and the selected BOM/package baseline.",
+			"After manual review, fix the bootstrap input or baseline source, then rerender and apply again.",
+		}
+		remediation.AllowedCommands = []string{
+			"sync diff",
+			"sync status",
+			"sync render",
+			"sync apply",
+		}
+		remediation.CommandGuidance = []HostPathCommandGuidance{
+			{Command: "sync diff", Availability: "unknown"},
+			{Command: "sync status", Availability: "unknown"},
+			{Command: "sync render", Availability: "unknown"},
+			{
+				Command:       "sync apply",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
 			},
 		}
+		return &remediation
 	}
 
 	if generatedProjectionNeedsLocalInputChange(status.Mismatches) {
-		return &HostPathRemediation{
-			Action:           "updateLocalBootstrapInputAndRerender",
-			ChangeOwner:      "localInput",
-			Source:           source,
-			SafeDirectRevert: false,
-			SafeCommit:       false,
-			Message:          "update the cluster-local bootstrap input that produced this generated projection, then rerender and sync apply; direct sync commit/revert is not supported for generated projections",
-			NextSteps: []string{
-				"Update the cluster-local bootstrap input that feeds the rendered kubeadm config.",
-				"Rerender the bundle so the generated projection expectation is recalculated from the new local input.",
-				"Re-run diff or status, then apply the refreshed desired state.",
-			},
-			AllowedCommands: []string{
-				"sync render",
-				"sync diff",
-				"sync status",
-				"sync apply",
-			},
-			CommandGuidance: []HostPathCommandGuidance{
-				{Command: "sync render", Availability: "unknown"},
-				{Command: "sync diff", Availability: "unknown"},
-				{Command: "sync status", Availability: "unknown"},
-				{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
-			},
+		remediation := base
+		remediation.Action = "updateLocalBootstrapInputAndRerender"
+		remediation.ChangeOwner = "localInput"
+		remediation.SafeDirectRevert = false
+		remediation.SafeCommit = false
+		remediation.Message = "update the cluster-local bootstrap input that produced this generated projection, then rerender and sync apply; direct sync commit/revert is not supported for generated projections"
+		remediation.NextSteps = []string{
+			"Update the cluster-local bootstrap input that feeds the rendered kubeadm config.",
+			"Rerender the bundle so the generated projection expectation is recalculated from the new local input.",
+			"Re-run diff or status, then apply the refreshed desired state.",
 		}
-	}
-
-	return &HostPathRemediation{
-		Action:           "reviewDistributionBaselineForGeneratedProjection",
-		ChangeOwner:      "globalBaseline",
-		Source:           source,
-		SafeDirectRevert: false,
-		SafeCommit:       false,
-		Message:          "review the selected BOM/package baseline and bootstrap flow for this generated projection; direct sync commit/revert is not supported for generated projections",
-		NextSteps: []string{
-			"Review the selected BOM revision and package baseline that define this generated projection.",
-			"If the baseline is wrong, update the package content or BOM selection and rerender the desired state.",
-			"Re-run diff or status, then apply the refreshed bundle.",
-		},
-		AllowedCommands: []string{
+		remediation.AllowedCommands = []string{
 			"sync render",
 			"sync diff",
 			"sync status",
 			"sync apply",
-			"sync package build",
-			"sync package push",
-		},
-		CommandGuidance: []HostPathCommandGuidance{
+		}
+		remediation.CommandGuidance = []HostPathCommandGuidance{
 			{Command: "sync render", Availability: "unknown"},
 			{Command: "sync diff", Availability: "unknown"},
 			{Command: "sync status", Availability: "unknown"},
-			{Command: "sync apply", Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"}, Availability: "unknown"},
-			{Command: "sync package build", Availability: "unknown"},
-			{Command: "sync package push", Availability: "unknown"},
+			{
+				Command:       "sync apply",
+				Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+				Availability:  "unknown",
+			},
+		}
+		return &remediation
+	}
+
+	remediation := base
+	remediation.Action = "reviewDistributionBaselineForGeneratedProjection"
+	remediation.ChangeOwner = "globalBaseline"
+	remediation.SafeDirectRevert = false
+	remediation.SafeCommit = false
+	remediation.Message = "review the selected BOM/package baseline and bootstrap flow for this generated projection; direct sync commit/revert is not supported for generated projections"
+	remediation.NextSteps = []string{
+		"Review the selected BOM revision and package baseline that define this generated projection.",
+		"If the baseline is wrong, update the package content or BOM selection and rerender the desired state.",
+		"Re-run diff or status, then apply the refreshed bundle.",
+	}
+	remediation.AllowedCommands = []string{
+		"sync render",
+		"sync diff",
+		"sync status",
+		"sync apply",
+		"sync package build",
+		"sync package push",
+	}
+	remediation.CommandGuidance = []HostPathCommandGuidance{
+		{Command: "sync render", Availability: "unknown"},
+		{Command: "sync diff", Availability: "unknown"},
+		{Command: "sync status", Availability: "unknown"},
+		{
+			Command:       "sync apply",
+			Preconditions: []string{"bundleMatchesRecordedDesiredStateDigest"},
+			Availability:  "unknown",
 		},
+		{Command: "sync package build", Availability: "unknown"},
+		{Command: "sync package push", Availability: "unknown"},
+	}
+	return &remediation
+}
+
+func generatedHostPathRemediationBase(
+	tracked hydrate.TrackedHostPath,
+	source string,
+) HostPathRemediation {
+	repairable := isRepairableGeneratedHostPath(tracked)
+	remediation := HostPathRemediation{
+		Source:          source,
+		ProjectionClass: string(tracked.ProjectionClass),
+		Repairable:      &repairable,
+	}
+	if tracked.Generated != nil {
+		remediation.Generator = tracked.Generated.Tool
+		remediation.GeneratedKind = tracked.Generated.Kind
+		remediation.GeneratedName = tracked.Generated.Name
+	}
+	return remediation
+}
+
+func isRepairableGeneratedHostPath(tracked hydrate.TrackedHostPath) bool {
+	if tracked.ProjectionClass != hydrate.HostPathProjectionClassGenerated ||
+		tracked.Generated == nil {
+		return false
+	}
+	if tracked.Generated.Tool != "kubeadm" {
+		return false
+	}
+	switch strings.TrimSpace(tracked.HostPath) {
+	case "/etc/kubernetes/manifests/kube-apiserver.yaml",
+		"/etc/kubernetes/manifests/kube-controller-manager.yaml",
+		"/etc/kubernetes/manifests/kube-scheduler.yaml":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1383,13 +1618,13 @@ func generatedHostPathIdentityString(semantics *hydrate.GeneratedHostPathSemanti
 	return strings.Join(parts, " ")
 }
 
-func generatedHostPathIdentityFromObject(object map[string]interface{}) string {
+func generatedHostPathIdentityFromObject(object map[string]any) string {
 	if object == nil {
 		return "<invalid object>"
 	}
 	apiVersion, _ := object["apiVersion"].(string)
 	kind, _ := object["kind"].(string)
-	metadata, _ := object["metadata"].(map[string]interface{})
+	metadata, _ := object["metadata"].(map[string]any)
 	name, _ := metadata["name"].(string)
 	namespace, _ := metadata["namespace"].(string)
 	parts := []string{apiVersion, kind, name}
@@ -1406,7 +1641,10 @@ type trackedHostPathProjection struct {
 	Target string
 }
 
-func digestTrackedHostPath(path string, expectedType hydrate.HostPathType) (string, trackedHostPathProjection, error) {
+func digestTrackedHostPath(
+	path string,
+	expectedType hydrate.HostPathType,
+) (string, trackedHostPathProjection, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", trackedHostPathProjection{}, err
@@ -1441,7 +1679,10 @@ func digestTrackedHostPath(path string, expectedType hydrate.HostPathType) (stri
 		}
 		projection.Target = target
 	default:
-		return "", trackedHostPathProjection{}, fmt.Errorf("unsupported host path type %q", actualType)
+		return "", trackedHostPathProjection{}, fmt.Errorf(
+			"unsupported host path type %q",
+			actualType,
+		)
 	}
 	return digestHostPathProjection(projection), projection, nil
 }
@@ -1458,7 +1699,7 @@ func modeToHostPathType(mode os.FileMode) (hydrate.HostPathType, bool) {
 }
 
 func digestHostPathProjection(projection trackedHostPathProjection) string {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"type": projection.Type,
 		"mode": projection.Mode.Perm().String(),
 	}
@@ -1472,7 +1713,10 @@ func digestHostPathProjection(projection trackedHostPathProjection) string {
 	return digest.Canonical.FromBytes(data).String()
 }
 
-func diffTrackedHostPath(desired, live trackedHostPathProjection, driftState state.ClusterState) []HostPathMismatch {
+func diffTrackedHostPath(
+	desired, live trackedHostPathProjection,
+	driftState state.ClusterState,
+) []HostPathMismatch {
 	mismatches := make([]HostPathMismatch, 0)
 	if desired.Type != live.Type {
 		return []HostPathMismatch{{
@@ -1531,7 +1775,11 @@ func resolveLiveHostPath(hostRoot, trackedHostPath string) (string, error) {
 		return "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("tracked host path %q escapes host root %q", trackedHostPath, hostRoot)
+		return "", fmt.Errorf(
+			"tracked host path %q escapes host root %q",
+			trackedHostPath,
+			hostRoot,
+		)
 	}
 	return resolved, nil
 }
@@ -1576,7 +1824,8 @@ func objectIdentity(raw []byte) (struct {
 		Name      string `json:"name" yaml:"name"`
 		Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	} `json:"metadata" yaml:"metadata"`
-}, error) {
+}, error,
+) {
 	var meta struct {
 		APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 		Kind       string `json:"kind" yaml:"kind"`
@@ -1592,7 +1841,7 @@ func objectIdentity(raw []byte) (struct {
 }
 
 func normalizedObjectDigest(raw []byte) (string, error) {
-	var object map[string]interface{}
+	var object map[string]any
 	if err := yaml.Unmarshal(raw, &object); err != nil {
 		return "", fmt.Errorf("unmarshal object: %w", err)
 	}
@@ -1628,8 +1877,8 @@ func ownedFieldMismatches(desiredRaw, liveRaw []byte) ([]FieldMismatch, error) {
 	return diffOwnedFieldsAtPath(nil, desired, live), nil
 }
 
-func normalizedObjectValue(raw []byte) (interface{}, error) {
-	var object map[string]interface{}
+func normalizedObjectValue(raw []byte) (any, error) {
+	var object map[string]any
 	if err := yaml.Unmarshal(raw, &object); err != nil {
 		return nil, fmt.Errorf("unmarshal object: %w", err)
 	}
@@ -1640,10 +1889,10 @@ func normalizedObjectValue(raw []byte) (interface{}, error) {
 	return object, nil
 }
 
-func diffOwnedFieldsAtPath(path []string, desired, live interface{}) []FieldMismatch {
+func diffOwnedFieldsAtPath(path []string, desired, live any) []FieldMismatch {
 	switch desiredTyped := desired.(type) {
-	case map[string]interface{}:
-		liveTyped, ok := live.(map[string]interface{})
+	case map[string]any:
+		liveTyped, ok := live.(map[string]any)
 		if !ok {
 			return []FieldMismatch{newMismatch(path, "typeMismatch", desired, live)}
 		}
@@ -1657,8 +1906,8 @@ func diffOwnedFieldsAtPath(path []string, desired, live interface{}) []FieldMism
 			mismatches = append(mismatches, diffOwnedFieldsAtPath(appendPath(path, key), desiredValue, liveValue)...)
 		}
 		return mismatches
-	case []interface{}:
-		liveTyped, ok := live.([]interface{})
+	case []any:
+		liveTyped, ok := live.([]any)
 		if !ok {
 			return []FieldMismatch{newMismatch(path, "typeMismatch", desired, live)}
 		}
@@ -1695,17 +1944,17 @@ type mergeKey struct {
 	selector string
 }
 
-type mergeKeyMatcher func(item map[string]interface{}) (mergeKey, bool)
+type mergeKeyMatcher func(item map[string]any) (mergeKey, bool)
 
-func compareMergeKeyList(path []string, desired, live []interface{}) ([]FieldMismatch, bool) {
+func compareMergeKeyList(path []string, desired, live []any) ([]FieldMismatch, bool) {
 	matcher := mergeKeyMatcherForPath(path)
 	if matcher == nil {
 		return nil, false
 	}
 
-	liveIndex := make(map[string]interface{}, len(live))
+	liveIndex := make(map[string]any, len(live))
 	for _, item := range live {
-		liveMap, ok := item.(map[string]interface{})
+		liveMap, ok := item.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -1714,14 +1963,16 @@ func compareMergeKeyList(path []string, desired, live []interface{}) ([]FieldMis
 			return nil, false
 		}
 		if _, exists := liveIndex[key.key]; exists {
-			return []FieldMismatch{newMismatch(path, "duplicateMergeKey", key.selector, key.selector)}, true
+			return []FieldMismatch{
+				newMismatch(path, "duplicateMergeKey", key.selector, key.selector),
+			}, true
 		}
 		liveIndex[key.key] = liveMap
 	}
 
 	mismatches := make([]FieldMismatch, 0)
 	for _, item := range desired {
-		desiredMap, ok := item.(map[string]interface{})
+		desiredMap, ok := item.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -1737,7 +1988,9 @@ func compareMergeKeyList(path []string, desired, live []interface{}) ([]FieldMis
 			})
 			continue
 		}
-		mismatches = append(mismatches, diffOwnedFieldsAtPath(selectorPath(path, key.selector), desiredMap, liveItem)...)
+		mismatches = append(
+			mismatches,
+			diffOwnedFieldsAtPath(selectorPath(path, key.selector), desiredMap, liveItem)...)
 	}
 	return mismatches, true
 }
@@ -1760,7 +2013,7 @@ func mergeKeyMatcherForPath(path []string) mergeKeyMatcher {
 }
 
 func fieldKeyMatcher(field string) mergeKeyMatcher {
-	return func(item map[string]interface{}) (mergeKey, bool) {
+	return func(item map[string]any) (mergeKey, bool) {
 		value, ok := item[field]
 		if !ok {
 			return mergeKey{}, false
@@ -1773,7 +2026,7 @@ func fieldKeyMatcher(field string) mergeKeyMatcher {
 	}
 }
 
-func portKeyMatcher(item map[string]interface{}) (mergeKey, bool) {
+func portKeyMatcher(item map[string]any) (mergeKey, bool) {
 	if value, ok := item["containerPort"]; ok {
 		key := stringifyMergeKey(value)
 		if protocol, ok := item["protocol"]; ok {
@@ -1804,7 +2057,7 @@ func portKeyMatcher(item map[string]interface{}) (mergeKey, bool) {
 	return mergeKey{}, false
 }
 
-func stringifyMergeKey(value interface{}) string {
+func stringifyMergeKey(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
@@ -1848,7 +2101,7 @@ func pathString(path []string) string {
 	return strings.Join(path, ".")
 }
 
-func newMismatch(path []string, reason string, desired, live interface{}) FieldMismatch {
+func newMismatch(path []string, reason string, desired, live any) FieldMismatch {
 	return FieldMismatch{
 		Path:    pathString(path),
 		Reason:  reason,
@@ -1857,7 +2110,7 @@ func newMismatch(path []string, reason string, desired, live interface{}) FieldM
 	}
 }
 
-func formatMismatchValue(value interface{}) string {
+func formatMismatchValue(value any) string {
 	if value == nil {
 		return ""
 	}
@@ -1868,13 +2121,18 @@ func formatMismatchValue(value interface{}) string {
 	return string(data)
 }
 
-func mergeDesiredValue(path []string, base, overlay interface{}, ownership hydrate.InventoryOwnership, index pathOwnershipIndex) interface{} {
+func mergeDesiredValue(
+	path []string,
+	base, overlay any,
+	ownership hydrate.InventoryOwnership,
+	index pathOwnershipIndex,
+) any {
 	index[pathString(path)] = ownership
 
 	switch overlayTyped := overlay.(type) {
-	case map[string]interface{}:
-		result := make(map[string]interface{}, len(overlayTyped))
-		if baseTyped, ok := base.(map[string]interface{}); ok {
+	case map[string]any:
+		result := make(map[string]any, len(overlayTyped))
+		if baseTyped, ok := base.(map[string]any); ok {
 			for key, value := range baseTyped {
 				result[key] = cloneValue(value)
 			}
@@ -1883,13 +2141,13 @@ func mergeDesiredValue(path []string, base, overlay interface{}, ownership hydra
 			result[key] = mergeDesiredValue(appendPath(path, key), result[key], value, ownership, index)
 		}
 		return result
-	case []interface{}:
-		if baseTyped, ok := base.([]interface{}); ok {
+	case []any:
+		if baseTyped, ok := base.([]any); ok {
 			if merged, handled := mergeDesiredList(path, baseTyped, overlayTyped, ownership, index); handled {
 				return merged
 			}
 		}
-		result := make([]interface{}, len(overlayTyped))
+		result := make([]any, len(overlayTyped))
 		for i, value := range overlayTyped {
 			result[i] = mergeDesiredValue(indexedPath(path, i), nil, value, ownership, index)
 		}
@@ -1899,16 +2157,21 @@ func mergeDesiredValue(path []string, base, overlay interface{}, ownership hydra
 	}
 }
 
-func mergeDesiredList(path []string, base, overlay []interface{}, ownership hydrate.InventoryOwnership, index pathOwnershipIndex) ([]interface{}, bool) {
+func mergeDesiredList(
+	path []string,
+	base, overlay []any,
+	ownership hydrate.InventoryOwnership,
+	index pathOwnershipIndex,
+) ([]any, bool) {
 	matcher := mergeKeyMatcherForPath(path)
 	if matcher == nil {
 		return nil, false
 	}
 
-	result := make([]interface{}, len(base))
+	result := make([]any, len(base))
 	basePositions := make(map[string]int, len(base))
 	for i, item := range base {
-		itemMap, ok := item.(map[string]interface{})
+		itemMap, ok := item.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -1921,7 +2184,7 @@ func mergeDesiredList(path []string, base, overlay []interface{}, ownership hydr
 	}
 
 	for _, item := range overlay {
-		itemMap, ok := item.(map[string]interface{})
+		itemMap, ok := item.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -1931,7 +2194,13 @@ func mergeDesiredList(path []string, base, overlay []interface{}, ownership hydr
 		}
 		itemPath := selectorPath(path, key.selector)
 		if position, exists := basePositions[key.key]; exists {
-			result[position] = mergeDesiredValue(itemPath, result[position], itemMap, ownership, index)
+			result[position] = mergeDesiredValue(
+				itemPath,
+				result[position],
+				itemMap,
+				ownership,
+				index,
+			)
 			continue
 		}
 		result = append(result, mergeDesiredValue(itemPath, nil, itemMap, ownership, index))
@@ -1940,16 +2209,16 @@ func mergeDesiredList(path []string, base, overlay []interface{}, ownership hydr
 	return result, true
 }
 
-func cloneValue(value interface{}) interface{} {
+func cloneValue(value any) any {
 	switch typed := value.(type) {
-	case map[string]interface{}:
-		cloned := make(map[string]interface{}, len(typed))
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
 		for key, item := range typed {
 			cloned[key] = cloneValue(item)
 		}
 		return cloned
-	case []interface{}:
-		cloned := make([]interface{}, len(typed))
+	case []any:
+		cloned := make([]any, len(typed))
 		for i, item := range typed {
 			cloned[i] = cloneValue(item)
 		}
@@ -1959,14 +2228,14 @@ func cloneValue(value interface{}) interface{} {
 	}
 }
 
-func normalizeObject(object map[string]interface{}) {
+func normalizeObject(object map[string]any) {
 	delete(object, "status")
 
 	if kind, ok := object["kind"].(string); ok && kind == "Secret" {
 		normalizeSecret(object)
 	}
 
-	metadata, ok := object["metadata"].(map[string]interface{})
+	metadata, ok := object["metadata"].(map[string]any)
 	if !ok {
 		return
 	}
@@ -1982,7 +2251,7 @@ func normalizeObject(object map[string]interface{}) {
 		delete(metadata, key)
 	}
 
-	annotations, ok := metadata["annotations"].(map[string]interface{})
+	annotations, ok := metadata["annotations"].(map[string]any)
 	if ok {
 		for _, key := range []string{
 			"kubectl.kubernetes.io/last-applied-configuration",
@@ -1997,20 +2266,20 @@ func normalizeObject(object map[string]interface{}) {
 	}
 }
 
-func normalizeSecret(object map[string]interface{}) {
+func normalizeSecret(object map[string]any) {
 	if _, ok := object["type"]; !ok {
 		object["type"] = "Opaque"
 	}
 
-	stringData, ok := object["stringData"].(map[string]interface{})
+	stringData, ok := object["stringData"].(map[string]any)
 	if !ok || len(stringData) == 0 {
 		delete(object, "stringData")
 		return
 	}
 
-	data, ok := object["data"].(map[string]interface{})
+	data, ok := object["data"].(map[string]any)
 	if !ok {
-		data = make(map[string]interface{}, len(stringData))
+		data = make(map[string]any, len(stringData))
 		object["data"] = data
 	}
 	for key, value := range stringData {

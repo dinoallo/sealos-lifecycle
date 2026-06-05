@@ -21,17 +21,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/constants"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
-	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/state"
 	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"github.com/opencontainers/go-digest"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -153,7 +151,16 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	provenance := opts.RenderProvenance
 	provenance.LocalRepoRevision = localRepoRevision(opts.LocalRepo)
 	provenance.LocalPatchRevision = opts.LocalPatchRevision
-	renderedBundle, stagePath, err := materializeBundle(plan, opts.ClusterName, opts.BOMRoot, opts.Sources, topology, provenance, opts.SourcePreflight)
+	provenance = provenance.Normalize()
+	renderedBundle, stagePath, err := materializeBundle(
+		plan,
+		opts.ClusterName,
+		opts.BOMRoot,
+		opts.Sources,
+		topology,
+		provenance,
+		opts.SourcePreflight,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +186,17 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
-	appliedRevision, err := state.PersistRenderedState(
+	targetState := appliedRevisionTargetState(provenance, ref)
+	appliedRevision, err := state.PersistRenderedStateWithOptions(
 		opts.ClusterName,
 		ref,
 		desiredStateDigest.String(),
 		localRepoRevision(opts.LocalRepo),
 		opts.LocalPatchRevision,
+		state.PersistRevisionOptions{
+			RequestedTarget: targetState.Requested,
+			ResolvedTarget:  targetState.Resolved,
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -199,40 +211,21 @@ func Materialize(doc *bom.BOM, opts Options) (result *Result, err error) {
 	}, nil
 }
 
-func attachLocalBindings(plan *hydrate.Plan, bomRoot string, sources hydrate.SourceProvider, repo *localrepo.Repo) error {
+func attachLocalBindings(
+	plan *hydrate.Plan,
+	bomRoot string,
+	sources hydrate.SourceProvider,
+	repo *localrepo.Repo,
+) error {
 	if plan == nil {
 		return nil
 	}
-	plan.LocalPatchPolicy = ownership.DefaultLocalPatchPolicyDocument().Clone()
-	plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBuiltInDefault
-
-	repoPolicySelected := false
-	if repo != nil {
-		if localPatchPolicy := repo.LocalPatchPolicy(); localPatchPolicy != nil {
-			plan.LocalPatchPolicy = localPatchPolicy
-			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceLocalRepo
-			repoPolicySelected = true
-		}
+	selection, err := hydrate.SelectLocalPatchPolicy(plan, bomRoot, sources, repo)
+	if err != nil {
+		return err
 	}
-	if !repoPolicySelected {
-		bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
-		if err != nil {
-			return err
-		}
-		if bomPolicy != nil {
-			plan.LocalPatchPolicy = bomPolicy
-			plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourceBOM
-		} else {
-			packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
-			if err != nil {
-				return err
-			}
-			if packagePolicy != nil {
-				plan.LocalPatchPolicy = packagePolicy
-				plan.LocalPatchPolicySource = ownership.LocalPatchPolicySourcePackage
-			}
-		}
-	}
+	plan.LocalPatchPolicy = selection.Document.Clone()
+	plan.LocalPatchPolicySource = selection.Source
 	if repo == nil {
 		return nil
 	}
@@ -291,7 +284,10 @@ func localRepoRevision(repo *localrepo.Repo) string {
 	return repo.Revision
 }
 
-func materializeExecutionTopology(clusterName string, requested hydrate.ExecutionTopology) (hydrate.ExecutionTopology, error) {
+func materializeExecutionTopology(
+	clusterName string,
+	requested hydrate.ExecutionTopology,
+) (hydrate.ExecutionTopology, error) {
 	normalized := requested.Normalize()
 	if !normalized.Empty() {
 		return normalized, nil
@@ -306,7 +302,14 @@ func materializeExecutionTopology(clusterName string, requested hydrate.Executio
 	return topology.snapshot(), nil
 }
 
-func materializeBundle(plan *hydrate.Plan, clusterName, bomRoot string, sources hydrate.SourceProvider, topology hydrate.ExecutionTopology, provenance hydrate.RenderProvenance, sourcePreflight *hydrate.SourcePreflight) (*hydrate.Bundle, string, error) {
+func materializeBundle(
+	plan *hydrate.Plan,
+	clusterName, bomRoot string,
+	sources hydrate.SourceProvider,
+	topology hydrate.ExecutionTopology,
+	provenance hydrate.RenderProvenance,
+	sourcePreflight *hydrate.SourcePreflight,
+) (*hydrate.Bundle, string, error) {
 	storePath := BundleStorePath(clusterName)
 	if err := os.MkdirAll(storePath, 0o755); err != nil {
 		return nil, "", fmt.Errorf("create bundle store %q: %w", storePath, err)
@@ -323,9 +326,14 @@ func materializeBundle(plan *hydrate.Plan, clusterName, bomRoot string, sources 
 		}
 	}()
 
-	renderedBundle, err := hydrate.RenderPlanWithOptions(plan, sources, stagePath, hydrate.RenderOptions{
-		BOMRoot: bomRoot,
-	})
+	renderedBundle, err := hydrate.RenderPlanWithOptions(
+		plan,
+		sources,
+		stagePath,
+		hydrate.RenderOptions{
+			BOMRoot: bomRoot,
+		},
+	)
 	if err != nil {
 		return nil, "", err
 	}
@@ -333,14 +341,21 @@ func materializeBundle(plan *hydrate.Plan, clusterName, bomRoot string, sources 
 	renderedBundle.Spec.SourcePreflight = sourcePreflight
 	renderedBundle.Spec.ExecutionTopology = topology.Normalize()
 	if err := yamlutil.MarshalFile(filepath.Join(stagePath, hydrate.BundleFileName), renderedBundle); err != nil {
-		return nil, "", fmt.Errorf("write bundle manifest %q: %w", filepath.Join(stagePath, hydrate.BundleFileName), err)
+		return nil, "", fmt.Errorf(
+			"write bundle manifest %q: %w",
+			filepath.Join(stagePath, hydrate.BundleFileName),
+			err,
+		)
 	}
 
 	keepStage = true
 	return renderedBundle, stagePath, nil
 }
 
-func promoteRenderedBundle(stagePath, clusterName string, desiredStateDigest digest.Digest) (string, error) {
+func promoteRenderedBundle(
+	stagePath, clusterName string,
+	desiredStateDigest digest.Digest,
+) (string, error) {
 	revisionPath, err := RevisionBundlePath(clusterName, desiredStateDigest.String())
 	if err != nil {
 		return "", err
@@ -389,7 +404,12 @@ func promoteBundle(stagePath, currentPath string) error {
 		if restoreErr != nil {
 			return errors.Join(
 				fmt.Errorf("promote staged bundle %q to %q: %w", stagePath, currentPath, err),
-				fmt.Errorf("restore previous bundle %q to %q: %w", backupPath, currentPath, restoreErr),
+				fmt.Errorf(
+					"restore previous bundle %q to %q: %w",
+					backupPath,
+					currentPath,
+					restoreErr,
+				),
 			)
 		}
 		return fmt.Errorf("promote staged bundle %q to %q: %w", stagePath, currentPath, err)
@@ -439,4 +459,55 @@ func newBOMReference(doc *bom.BOM, channel bom.ReleaseChannel) (state.BOMReferen
 		Channel:  channel,
 		Digest:   digest.Canonical.FromBytes(data).String(),
 	}, nil
+}
+
+func appliedRevisionTargetState(
+	provenance hydrate.RenderProvenance,
+	ref state.BOMReference,
+) state.TargetState {
+	provenance = provenance.Normalize()
+	requested := state.RequestedTarget{
+		Kind:                 state.TargetKindBOM,
+		BOMPath:              provenance.BOMPath,
+		BOMDigest:            provenance.BOMDigest,
+		ReleaseChannelPath:   provenance.ReleaseChannelPath,
+		ReleaseChannelDigest: provenance.ReleaseChannelDigest,
+		ReleaseSource:        provenance.ReleaseSource,
+		DistributionLine:     provenance.DistributionLine,
+		Channel:              bom.ReleaseChannel(provenance.ReleaseChannel),
+	}
+	if requested.BOMDigest == "" {
+		requested.BOMDigest = ref.Digest
+	}
+	switch {
+	case requested.ReleaseSource != "":
+		requested.Kind = state.TargetKindReleaseChannelLookup
+	case requested.ReleaseChannelPath != "" || requested.ReleaseChannelDigest != "":
+		requested.Kind = state.TargetKindReleaseChannelFile
+	case requested.BOMPath == "" && requested.BOMDigest == "":
+		requested.BOMDigest = ref.Digest
+	}
+	if requested.DistributionLine == "" && requested.Kind != state.TargetKindBOM {
+		requested.DistributionLine = ref.Name
+	}
+	if requested.Channel == "" && requested.Kind != state.TargetKindBOM {
+		requested.Channel = ref.Channel
+	}
+
+	resolved := state.ResolvedTarget{
+		BOM: ref,
+	}
+	if requested.Kind != state.TargetKindBOM {
+		resolved.ReleaseChannel = &state.ReleaseChannelReference{
+			DistributionLine: requested.DistributionLine,
+			Channel:          requested.Channel,
+			TargetRevision:   ref.Revision,
+			Source:           requested.ReleaseChannelPath,
+			Digest:           requested.ReleaseChannelDigest,
+		}
+	}
+	return state.TargetState{
+		Requested: &requested,
+		Resolved:  &resolved,
+	}
 }

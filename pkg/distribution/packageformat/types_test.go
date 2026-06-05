@@ -85,6 +85,69 @@ func TestComponentPackageValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid generated host path output",
+			mutate: func(p *ComponentPackage) {
+				p.Spec.GeneratedOutputs.HostPaths = []GeneratedHostPathOutput{{
+					Name:            "cilium-status",
+					HostPath:        "/var/lib/sealos/generated/cilium/status.yaml",
+					Tool:            "cilium-cli",
+					Hook:            "healthcheck",
+					APIVersion:      "v1",
+					Kind:            "ConfigMap",
+					Namespace:       "kube-system",
+					ObjectName:      "cilium-status",
+					ExpectedCommand: "cilium-status-renderer",
+				}}
+			},
+		},
+		{
+			name: "generated host path must be absolute",
+			mutate: func(p *ComponentPackage) {
+				p.Spec.GeneratedOutputs.HostPaths = []GeneratedHostPathOutput{{
+					HostPath:   "var/lib/sealos/generated/cilium/status.yaml",
+					Tool:       "cilium-cli",
+					APIVersion: "v1",
+					Kind:       "ConfigMap",
+					ObjectName: "cilium-status",
+				}}
+			},
+			wantErr: true,
+		},
+		{
+			name: "generated host path requires object name",
+			mutate: func(p *ComponentPackage) {
+				p.Spec.GeneratedOutputs.HostPaths = []GeneratedHostPathOutput{{
+					HostPath:   "/var/lib/sealos/generated/cilium/status.yaml",
+					Tool:       "cilium-cli",
+					APIVersion: "v1",
+					Kind:       "ConfigMap",
+				}}
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate generated host path",
+			mutate: func(p *ComponentPackage) {
+				p.Spec.GeneratedOutputs.HostPaths = []GeneratedHostPathOutput{
+					{
+						HostPath:   "/var/lib/sealos/generated/cilium/status.yaml",
+						Tool:       "cilium-cli",
+						APIVersion: "v1",
+						Kind:       "ConfigMap",
+						ObjectName: "cilium-status",
+					},
+					{
+						HostPath:   "/var/lib/sealos/generated/cilium/status.yaml",
+						Tool:       "cilium-cli",
+						APIVersion: "v1",
+						Kind:       "ConfigMap",
+						ObjectName: "cilium-status",
+					},
+				}
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -316,6 +316,17 @@ ownership”是不够的。
 
 当前单节点 MVP 说明：
 
+- package 现在可以在 `ComponentPackage.spec.generatedOutputs.hostPaths[]`
+  里声明 generated host file。render 时这些声明会被复制进 hydrated bundle，
+  并成为 `spec.trackedHostPaths[]` 里的条目，带
+  `projectionClass=generatedHostPath` 和
+  `compareStrategy=semanticGeneratedFile`。
+- 这是当前 generated outputs 的 bundle-local inventory 位置；它记录目标
+  host path、component、generator tool/hook identity、generated object
+  identity，以及 container image、command、flags、mounts 等已知语义期望。
+- 声明能力不再限于 kubeadm。package 作者可以建模其他 generated
+  Kubernetes-object host file，例如由 package hook 渲染的 Cilium
+  health/status projection。
 - 仓库现在会追踪这条链路里的 3 个已知 generated host file：
   `/etc/kubernetes/manifests/` 下的 `kube-apiserver.yaml`、
   `kube-controller-manager.yaml` 和 `kube-scheduler.yaml`
@@ -335,8 +346,10 @@ ownership”是不够的。
   推导额外的预期 mount
 - 它仍然不会把整份 generated manifest 按完整的字段级 desired intent
   模型做比较
-- 今天只有 `sync diff` 和 `sync status` 会直接报告这类 projection；
-  `sync revert` 和 `sync commit` 还不会直接管理它
+- 今天 `sync diff` 和 `sync status` 会直接报告这类 projection；当 rendered
+  kubeadm input 仍然保留时，`sync revert` 可以修复一小部分已知 kubeadm
+  control-plane host path，而 `sync commit` 仍然不会直接管理 generated
+  projection
 - 当前 CLI 输出还会带一个 generated-projection remediation hint：
   语义字段 drift 会把运维人员指回 rendered `kubeadm` input，而 parse 级失败
   会被归类成需要人工 review 的情况
@@ -350,6 +363,11 @@ ownership”是不够的。
 - 对 generated projection，`commandGuidance[]` 现在还会带命令级 precondition
   和求值后的 `availability`，这样 `sync diff/status` 不只知道“哪个命令相关”，
   还知道它当前是否被像 bundle digest 不匹配这样的前提挡住
+- generated remediation 现在还会带结构化 projection metadata：
+  `projectionClass`、`generator`、`generatedKind`、`generatedName`，以及明确的
+  `repairable` flag。这样 operator 和自动化可以区分“已建模但不可自动 repair”
+  的 generated drift，以及当前已有已知 repair path 的窄集合 generated
+  projection。
 
 ## 当前普通 Drift 的 Remediation 模型
 
@@ -438,8 +456,10 @@ ownership”是不够的。
 当前 `AppliedRevision` 仍然有价值，但它太粗了，无法解释到底预期有哪些投影，
 以及它们应该如何比较。
 
-Sealos 之后应该在 revision snapshot 旁边保留一份更细粒度的
-materialization inventory。
+当前 MVP 会把这份更细粒度的 materialization inventory 保存在 rendered
+bundle 的 `spec.trackedK8sObjects[]` 和 `spec.trackedHostPaths[]` 里。未来
+controller-facing API 可以把同一份信息提升成 revision snapshot 旁边的独立
+state object。
 
 一个示意形态可以是：
 
@@ -532,7 +552,8 @@ spec:
 
 - 直接的 `rootfs` 和 `file` projection
 - 直接来自 manifest、底层 live state 存在 etcd 里的 Kubernetes 对象
-- 一小组已知生成型输出，尤其是 kubeadm 生成的 static Pod manifest
+- package metadata 声明的 generated host-path output，以及从保留的 kubeadm
+  input 推导出的已知 kubeadm static Pod manifest
 - local repo 里的 Secret 和 `ExternalSecret` resource
 
 这样才足以让 Kubernetes bootstrap 路径、Cilium 包流程和最初的 stateful
@@ -908,11 +929,9 @@ canonical 矩阵已经单独放在：
 
 ## Open Questions
 
-- generated output 应该在哪里声明：package metadata、ownership policy，还是
-  单独的 tracking manifest？
 - 要表达 generated file 和 Kubernetes object 的字段级 ownership 规则，最小
   的 selector 语言应该长什么样？
-- 这份细粒度 inventory 应该放进一个新的 state object 里，还是作为当前
-  applied revision 旁边的一份 bundle-local 文件？
-- 除了 kubeadm 的 static Pod manifest，第一版 MVP 还应该显式支持哪些
-  generated output？
+- 除了当前 kubeadm control-plane 子集，哪些 generated output 应该获得直接
+  自动 repair path？
+- 什么时候应该把 bundle-local inventory 提升成独立的 controller-facing
+  state object？

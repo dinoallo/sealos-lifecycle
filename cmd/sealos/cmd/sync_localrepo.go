@@ -23,58 +23,69 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
 	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"github.com/opencontainers/go-digest"
+	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 type syncLocalRepoInitOutput struct {
-	LocalRepo          string                        `json:"localRepo" yaml:"localRepo"`
-	BOMPath            string                        `json:"bomPath" yaml:"bomPath"`
-	ReleaseChannelPath string                        `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
-	BOMName            string                        `json:"bomName" yaml:"bomName"`
-	Revision           string                        `json:"revision" yaml:"revision"`
-	Components         int                           `json:"components" yaml:"components"`
-	Summary            syncLocalRepoInitSummary      `json:"summary" yaml:"summary"`
-	Inputs             []syncLocalRepoInitInput      `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	SecretHints        []syncLocalRepoInitSecretHint `json:"secretHints,omitempty" yaml:"secretHints,omitempty"`
-	WrittenFiles       []string                      `json:"writtenFiles,omitempty" yaml:"writtenFiles,omitempty"`
-	SkippedFiles       []string                      `json:"skippedFiles,omitempty" yaml:"skippedFiles,omitempty"`
-	NextSteps          []string                      `json:"nextSteps" yaml:"nextSteps"`
+	LocalRepo             string                        `json:"localRepo"                       yaml:"localRepo"`
+	LocalRepoMetadata     string                        `json:"localRepoMetadataPath,omitempty" yaml:"localRepoMetadataPath,omitempty"`
+	LocalRepoRevision     string                        `json:"localRepoRevision,omitempty"     yaml:"localRepoRevision,omitempty"`
+	LocalRepoRevisionPath string                        `json:"localRepoRevisionPath,omitempty" yaml:"localRepoRevisionPath,omitempty"`
+	LocalInputRevision    string                        `json:"localInputRevision,omitempty"    yaml:"localInputRevision,omitempty"`
+	BOMPath               string                        `json:"bomPath"                         yaml:"bomPath"`
+	BOMDigest             string                        `json:"bomDigest,omitempty"             yaml:"bomDigest,omitempty"`
+	ReleaseChannelPath    string                        `json:"releaseChannelPath,omitempty"    yaml:"releaseChannelPath,omitempty"`
+	ReleaseSource         string                        `json:"releaseSource,omitempty"         yaml:"releaseSource,omitempty"`
+	ReleaseLine           string                        `json:"releaseLine,omitempty"           yaml:"releaseLine,omitempty"`
+	Channel               string                        `json:"channel,omitempty"               yaml:"channel,omitempty"`
+	BOMName               string                        `json:"bomName"                         yaml:"bomName"`
+	Revision              string                        `json:"revision"                        yaml:"revision"`
+	Components            int                           `json:"components"                      yaml:"components"`
+	Summary               syncLocalRepoInitSummary      `json:"summary"                         yaml:"summary"`
+	Inputs                []syncLocalRepoInitInput      `json:"inputs,omitempty"                yaml:"inputs,omitempty"`
+	SecretHints           []syncLocalRepoInitSecretHint `json:"secretHints,omitempty"           yaml:"secretHints,omitempty"`
+	WrittenFiles          []string                      `json:"writtenFiles,omitempty"          yaml:"writtenFiles,omitempty"`
+	SkippedFiles          []string                      `json:"skippedFiles,omitempty"          yaml:"skippedFiles,omitempty"`
+	NextSteps             []string                      `json:"nextSteps"                       yaml:"nextSteps"`
 }
 
 type syncLocalRepoInitSummary struct {
 	RequiredInputs int `json:"requiredInputs" yaml:"requiredInputs"`
 	OptionalInputs int `json:"optionalInputs" yaml:"optionalInputs"`
-	SecretHints    int `json:"secretHints" yaml:"secretHints"`
-	WrittenFiles   int `json:"writtenFiles" yaml:"writtenFiles"`
-	SkippedFiles   int `json:"skippedFiles" yaml:"skippedFiles"`
+	SecretHints    int `json:"secretHints"    yaml:"secretHints"`
+	WrittenFiles   int `json:"writtenFiles"   yaml:"writtenFiles"`
+	SkippedFiles   int `json:"skippedFiles"   yaml:"skippedFiles"`
 }
 
 type syncLocalRepoInitInput struct {
-	Component string `json:"component" yaml:"component"`
-	Name      string `json:"name" yaml:"name"`
-	Type      string `json:"type" yaml:"type"`
+	Component string `json:"component"        yaml:"component"`
+	Name      string `json:"name"             yaml:"name"`
+	Type      string `json:"type"             yaml:"type"`
 	Format    string `json:"format,omitempty" yaml:"format,omitempty"`
-	Required  bool   `json:"required" yaml:"required"`
-	Path      string `json:"path" yaml:"path"`
+	Required  bool   `json:"required"         yaml:"required"`
+	Path      string `json:"path"             yaml:"path"`
 }
 
 type syncLocalRepoInitSecretHint struct {
 	Component string `json:"component,omitempty" yaml:"component,omitempty"`
-	Input     string `json:"input,omitempty" yaml:"input,omitempty"`
-	Path      string `json:"path" yaml:"path"`
-	Reason    string `json:"reason" yaml:"reason"`
+	Input     string `json:"input,omitempty"     yaml:"input,omitempty"`
+	Path      string `json:"path"                yaml:"path"`
+	Reason    string `json:"reason"              yaml:"reason"`
 }
 
 type syncLocalRepoInitOptions struct {
 	ClusterName        string
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 	OutputDir          string
 	PackageSources     []string
 	Overwrite          bool
@@ -85,8 +96,20 @@ type syncLocalRepoDoctorOptions struct {
 	ClusterName        string
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 	LocalRepoPath      string
 	PackageSources     []string
+}
+
+type syncLocalRepoTargetMetadata struct {
+	Cluster          string
+	DistributionLine string
+	Channel          string
+	BOMName          string
+	BOMRevision      string
+	BOMDigest        string
 }
 
 type syncLocalRepoInitWriter struct {
@@ -115,14 +138,27 @@ func runSyncLocalRepoDoctor(opts syncLocalRepoDoctorOptions) syncLocalRepoDoctor
 	acc := syncLocalRepoDoctorAccumulator{}
 	acc.out.BOMPath = strings.TrimSpace(opts.BOMPath)
 	acc.out.ReleaseChannelPath = strings.TrimSpace(opts.ReleaseChannelPath)
+	acc.out.ReleaseSource = strings.TrimSpace(opts.ReleaseSource)
+	acc.out.ReleaseLine = strings.TrimSpace(opts.ReleaseLine)
+	acc.out.Channel = strings.TrimSpace(opts.Channel)
 	acc.out.LocalRepo = strings.TrimSpace(opts.LocalRepoPath)
 
 	target, resolved, err := resolveSyncLocalRepoBOMPackages(opts.ClusterName, syncTargetOptions{
 		BOMPath:            opts.BOMPath,
 		ReleaseChannelPath: opts.ReleaseChannelPath,
+		ReleaseSource:      opts.ReleaseSource,
+		ReleaseLine:        opts.ReleaseLine,
+		Channel:            opts.Channel,
 	}, opts.PackageSources)
 	if err != nil {
-		acc.error("packageContractInvalid", "", "", opts.BOMPath, err.Error(), "Fix the BOM or package-source flags, then rerun local-repo doctor.")
+		acc.error(
+			"packageContractInvalid",
+			"",
+			"",
+			opts.BOMPath,
+			err.Error(),
+			"Fix the BOM or package-source flags, then rerun local-repo doctor.",
+		)
 		return acc.finalize()
 	}
 	doc := target.BOM
@@ -130,23 +166,57 @@ func runSyncLocalRepoDoctor(opts syncLocalRepoDoctorOptions) syncLocalRepoDoctor
 	if strings.TrimSpace(target.ReleaseChannelPath) != "" {
 		acc.out.ReleaseChannelPath = strings.TrimSpace(target.ReleaseChannelPath)
 	}
+	if strings.TrimSpace(target.ReleaseSource) != "" {
+		acc.out.ReleaseSource = strings.TrimSpace(target.ReleaseSource)
+	}
+	if strings.TrimSpace(target.ReleaseLine) != "" {
+		acc.out.ReleaseLine = strings.TrimSpace(target.ReleaseLine)
+	}
+	if target.Channel != "" {
+		acc.out.Channel = string(target.Channel)
+	}
 	acc.out.BOMName = doc.Metadata.Name
 	acc.out.Revision = doc.Spec.Revision
+	acc.out.BOMDigest = syncLocalRepoTargetBOMDigest(target)
 	acc.out.Summary.Components = doc.PackageCount()
 
 	repoRoot, err := filepath.Abs(opts.LocalRepoPath)
 	if err != nil {
-		acc.error("localRepoInvalid", "", "", opts.LocalRepoPath, fmt.Sprintf("resolve local repo path: %v", err), "Pass a valid --local-repo path.")
+		acc.error(
+			"localRepoInvalid",
+			"",
+			"",
+			opts.LocalRepoPath,
+			fmt.Sprintf("resolve local repo path: %v", err),
+			"Pass a valid --local-repo path.",
+		)
 		return acc.finalize()
 	}
 	acc.out.LocalRepo = repoRoot
 	repo, err := localrepo.Load(repoRoot)
 	if err != nil {
-		acc.error("localRepoInvalid", "", "", repoRoot, err.Error(), "Run sync local-repo init or fix the local repo layout.")
+		acc.error(
+			"localRepoInvalid",
+			"",
+			"",
+			repoRoot,
+			err.Error(),
+			"Run sync local-repo init or fix the local repo layout.",
+		)
 		return acc.finalize()
 	}
+	acc.out.LocalRepoMetadata = filepath.Join(repo.Root, localrepo.RepoFileName)
+	acc.out.LocalRepoRevisionPath = filepath.Join(
+		repo.Root,
+		localrepo.RevisionsDirName,
+		localrepo.CurrentRevisionFileName,
+	)
+	acc.out.LocalRepoRevision = repo.Revision
+	acc.out.LocalInputRevision = repo.InputRevision
 	acc.out.Summary.Resources = len(repo.Resources())
 	acc.out.Summary.Patches = syncLocalRepoDoctorPatchCount(repo, doc)
+	acc.checkLocalRepoSchemaWarnings(repo)
+	acc.checkLocalRepoSchema(repo, syncLocalRepoTargetMetadataForTarget(opts.ClusterName, target))
 
 	inputContracts := collectSyncLocalRepoInitInputs(doc, resolved)
 	acc.out.Summary.Inputs = len(inputContracts)
@@ -162,7 +232,11 @@ func runSyncLocalRepoDoctor(opts syncLocalRepoDoctorOptions) syncLocalRepoDoctor
 	return acc.finalize()
 }
 
-func resolveSyncLocalRepoBOMPackages(clusterName string, targetOpts syncTargetOptions, packageSources []string) (*syncResolvedTarget, map[string]*packageformat.ComponentPackage, error) {
+func resolveSyncLocalRepoBOMPackages(
+	clusterName string,
+	targetOpts syncTargetOptions,
+	packageSources []string,
+) (*syncResolvedTarget, map[string]*packageformat.ComponentPackage, error) {
 	target, err := resolveSyncTarget(targetOpts)
 	if err != nil {
 		return nil, nil, err
@@ -189,7 +263,10 @@ func resolveSyncLocalRepoBOMPackages(clusterName string, targetOpts syncTargetOp
 	return target, resolved, nil
 }
 
-func (a *syncLocalRepoDoctorAccumulator) issue(severity syncLocalRepoDoctorSeverity, code, component, input, path, message, suggestedFix string) {
+func (a *syncLocalRepoDoctorAccumulator) issue(
+	severity syncLocalRepoDoctorSeverity,
+	code, component, input, path, message, suggestedFix string,
+) {
 	a.out.Issues = append(a.out.Issues, syncLocalRepoDoctorIssue{
 		Severity:     severity,
 		Code:         strings.TrimSpace(code),
@@ -207,11 +284,15 @@ func (a *syncLocalRepoDoctorAccumulator) issue(severity syncLocalRepoDoctorSever
 	}
 }
 
-func (a *syncLocalRepoDoctorAccumulator) error(code, component, input, path, message, suggestedFix string) {
+func (a *syncLocalRepoDoctorAccumulator) error(
+	code, component, input, path, message, suggestedFix string,
+) {
 	a.issue(syncLocalRepoDoctorSeverityError, code, component, input, path, message, suggestedFix)
 }
 
-func (a *syncLocalRepoDoctorAccumulator) warning(code, component, input, path, message, suggestedFix string) {
+func (a *syncLocalRepoDoctorAccumulator) warning(
+	code, component, input, path, message, suggestedFix string,
+) {
 	a.issue(syncLocalRepoDoctorSeverityWarning, code, component, input, path, message, suggestedFix)
 }
 
@@ -238,7 +319,10 @@ func (a *syncLocalRepoDoctorAccumulator) finalize() syncLocalRepoDoctorOutput {
 	return a.out
 }
 
-func (a *syncLocalRepoDoctorAccumulator) checkInput(repo *localrepo.Repo, input syncLocalRepoInitInput) {
+func (a *syncLocalRepoDoctorAccumulator) checkInput(
+	repo *localrepo.Repo,
+	input syncLocalRepoInitInput,
+) {
 	if repo == nil {
 		return
 	}
@@ -251,8 +335,15 @@ func (a *syncLocalRepoDoctorAccumulator) checkInput(repo *localrepo.Repo, input 
 				input.Component,
 				input.Name,
 				expectedPath,
-				fmt.Sprintf("required input %q for component %q is not initialized in the local repo", input.Name, input.Component),
-				fmt.Sprintf("Create %s or rerun sealos sync local-repo init for this BOM.", syncShellQuote(expectedPath)),
+				fmt.Sprintf(
+					"required input %q for component %q is not initialized in the local repo",
+					input.Name,
+					input.Component,
+				),
+				fmt.Sprintf(
+					"Create %s or rerun sealos sync local-repo init for this BOM.",
+					syncShellQuote(expectedPath),
+				),
 			)
 		}
 		return
@@ -272,8 +363,15 @@ func (a *syncLocalRepoDoctorAccumulator) checkInput(repo *localrepo.Repo, input 
 	}
 	if syncLocalRepoDoctorIsGeneratedPlaceholder(input, data) {
 		a.out.Summary.PlaceholderHits++
-		message := fmt.Sprintf("input %q for component %q still contains the generated local-repo init placeholder", input.Name, input.Component)
-		suggestedFix := fmt.Sprintf("Replace the generated placeholder in %s with the real cluster-local value.", syncShellQuote(binding))
+		message := fmt.Sprintf(
+			"input %q for component %q still contains the generated local-repo init placeholder",
+			input.Name,
+			input.Component,
+		)
+		suggestedFix := fmt.Sprintf(
+			"Replace the generated placeholder in %s with the real cluster-local value.",
+			syncShellQuote(binding),
+		)
 		if input.Required {
 			a.error("inputPlaceholder", input.Component, input.Name, binding, message, suggestedFix)
 		} else {
@@ -301,18 +399,32 @@ func (a *syncLocalRepoDoctorAccumulator) checkInput(repo *localrepo.Repo, input 
 			input.Component,
 			input.Name,
 			binding,
-			fmt.Sprintf("secret-like input %q is readable by group or other users; current mode is %s", binding, info.Mode().Perm()),
-			fmt.Sprintf("Run chmod 0600 %s for secret-like local repo inputs.", syncShellQuote(binding)),
+			fmt.Sprintf(
+				"secret-like input %q is readable by group or other users; current mode is %s",
+				binding,
+				info.Mode().Perm(),
+			),
+			fmt.Sprintf(
+				"Run chmod 0600 %s for secret-like local repo inputs.",
+				syncShellQuote(binding),
+			),
 		)
 	}
 }
 
-func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoPolicy(repo *localrepo.Repo, repoRoot string) {
+func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoPolicy(
+	repo *localrepo.Repo,
+	repoRoot string,
+) {
 	if repo == nil {
 		return
 	}
 	policyDoc := repo.LocalPatchPolicy()
-	policyPath := filepath.Join(repoRoot, localrepo.PolicyDirName, ownership.LocalPatchPolicyFileName)
+	policyPath := filepath.Join(
+		repoRoot,
+		localrepo.PolicyDirName,
+		ownership.LocalPatchPolicyFileName,
+	)
 	if policyDoc == nil {
 		a.warning(
 			"localPatchPolicyMissing",
@@ -342,9 +454,177 @@ func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoPolicy(repo *localrepo.Re
 			"localPatchPolicyViolation",
 			issue.Component,
 			"",
-			filepath.ToSlash(filepath.Join(localrepo.PatchesDirName, issue.Component, issue.RelativePath)),
+			filepath.ToSlash(
+				filepath.Join(localrepo.PatchesDirName, issue.Component, issue.RelativePath),
+			),
 			issue.Reason,
 			"Adjust the local patch or update policy/local-patch-policy.yaml through the local patch policy review flow.",
+		)
+	}
+}
+
+func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoSchema(
+	repo *localrepo.Repo,
+	target syncLocalRepoTargetMetadata,
+) {
+	if repo == nil {
+		return
+	}
+	if repo.Metadata == nil {
+		a.warning(
+			"localRepoMetadataMissing",
+			"",
+			"",
+			filepath.Join(repo.Root, localrepo.RepoFileName),
+			"local repo metadata schema file is missing",
+			"Run sealos sync local-repo init --overwrite with the same target to write repo.yaml.",
+		)
+	} else {
+		a.checkLocalRepoMetadata(repo.Metadata, target, repo.Root)
+	}
+	if repo.Current == nil {
+		a.warning(
+			"localRepoRevisionMissing",
+			"",
+			"",
+			filepath.Join(repo.Root, localrepo.RevisionsDirName, localrepo.CurrentRevisionFileName),
+			"local repo current revision schema file is missing",
+			"Run sealos sync local-repo init --overwrite with the same target to write revisions/current.yaml.",
+		)
+		return
+	}
+	a.checkLocalRepoRevision(repo.Current, target, repo)
+}
+
+func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoSchemaWarnings(repo *localrepo.Repo) {
+	if repo == nil {
+		return
+	}
+	for _, warning := range repo.SchemaWarnings {
+		a.warning(
+			"localRepoSchemaInvalid",
+			"",
+			"",
+			repo.Root,
+			warning,
+			"Run sealos sync local-repo init --overwrite with the same target to refresh repo.yaml and revisions/current.yaml.",
+		)
+	}
+}
+
+func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoMetadata(
+	doc *localrepo.LocalRepoDocument,
+	target syncLocalRepoTargetMetadata,
+	repoRoot string,
+) {
+	if doc == nil {
+		return
+	}
+	if got, want := strings.TrimSpace(doc.Spec.Cluster), strings.TrimSpace(target.Cluster); got != "" &&
+		want != "" &&
+		got != want {
+		a.warning(
+			"localRepoClusterMismatch",
+			"",
+			"",
+			filepath.Join(repoRoot, localrepo.RepoFileName),
+			fmt.Sprintf(
+				"local repo metadata cluster %q does not match selected cluster %q",
+				got,
+				want,
+			),
+			"Reinitialize repo.yaml with the selected cluster or inspect the target selection.",
+		)
+	}
+	if got, want := strings.TrimSpace(doc.Spec.DistributionLine), strings.TrimSpace(target.DistributionLine); got != "" &&
+		want != "" &&
+		got != want {
+		a.warning(
+			"localRepoDistributionLineMismatch",
+			"",
+			"",
+			filepath.Join(repoRoot, localrepo.RepoFileName),
+			fmt.Sprintf(
+				"local repo metadata distributionLine %q does not match selected line %q",
+				got,
+				want,
+			),
+			"Reinitialize repo.yaml with the selected release line or inspect the target selection.",
+		)
+	}
+}
+
+func (a *syncLocalRepoDoctorAccumulator) checkLocalRepoRevision(
+	doc *localrepo.LocalRepoRevisionDocument,
+	target syncLocalRepoTargetMetadata,
+	repo *localrepo.Repo,
+) {
+	if doc == nil || repo == nil {
+		return
+	}
+	revisionPath := filepath.Join(
+		repo.Root,
+		localrepo.RevisionsDirName,
+		localrepo.CurrentRevisionFileName,
+	)
+	if got, want := strings.TrimSpace(doc.Spec.Cluster), strings.TrimSpace(target.Cluster); got != "" &&
+		want != "" &&
+		got != want {
+		a.warning(
+			"localRepoRevisionClusterMismatch",
+			"",
+			"",
+			revisionPath,
+			fmt.Sprintf(
+				"local repo revision cluster %q does not match selected cluster %q",
+				got,
+				want,
+			),
+			"Refresh revisions/current.yaml with the selected cluster before using it for audit.",
+		)
+	}
+	if got, want := strings.TrimSpace(doc.Spec.DistributionLine), strings.TrimSpace(target.DistributionLine); got != "" &&
+		want != "" &&
+		got != want {
+		a.warning(
+			"localRepoRevisionLineMismatch",
+			"",
+			"",
+			revisionPath,
+			fmt.Sprintf(
+				"local repo revision distributionLine %q does not match selected line %q",
+				got,
+				want,
+			),
+			"Refresh revisions/current.yaml with the selected release line before using it for audit.",
+		)
+	}
+	if got, want := strings.TrimSpace(doc.Spec.BOM.Name), strings.TrimSpace(target.BOMName); got != "" &&
+		want != "" &&
+		got != want {
+		a.warning(
+			"localRepoRevisionBOMMismatch",
+			"",
+			"",
+			revisionPath,
+			fmt.Sprintf("local repo revision BOM %q does not match selected BOM %q", got, want),
+			"Refresh revisions/current.yaml with the selected BOM before using it for audit.",
+		)
+	}
+	if got, want := strings.TrimSpace(doc.Spec.BOM.Revision), strings.TrimSpace(target.BOMRevision); got != "" &&
+		want != "" &&
+		got != want {
+		a.warning(
+			"localRepoRevisionBOMRevisionMismatch",
+			"",
+			"",
+			revisionPath,
+			fmt.Sprintf(
+				"local repo revision BOM revision %q does not match selected revision %q",
+				got,
+				want,
+			),
+			"Refresh revisions/current.yaml with the selected BOM before using it for audit.",
 		)
 	}
 }
@@ -361,7 +641,10 @@ func (a *syncLocalRepoDoctorAccumulator) checkResources(repo *localrepo.Repo) {
 				"",
 				"",
 				resource.Path,
-				fmt.Sprintf("local repo resource %q is not a Kubernetes manifest file", resource.RelativePath),
+				fmt.Sprintf(
+					"local repo resource %q is not a Kubernetes manifest file",
+					resource.RelativePath,
+				),
 				"Keep resources/ limited to .yaml, .yml, or .json Kubernetes manifests.",
 			)
 			a.checkSecretResourceMode(resource, secretLike)
@@ -375,7 +658,10 @@ func (a *syncLocalRepoDoctorAccumulator) checkResources(repo *localrepo.Repo) {
 				"",
 				"",
 				resource.Path,
-				fmt.Sprintf("local repo resource %q is not a readable Kubernetes manifest with a kind", resource.RelativePath),
+				fmt.Sprintf(
+					"local repo resource %q is not a readable Kubernetes manifest with a kind",
+					resource.RelativePath,
+				),
 				"Fix or remove the resource manifest before render/apply.",
 			)
 			a.checkSecretResourceMode(resource, secretLike)
@@ -387,15 +673,25 @@ func (a *syncLocalRepoDoctorAccumulator) checkResources(repo *localrepo.Repo) {
 				"",
 				"",
 				resource.Path,
-				fmt.Sprintf("secret-like resource path %q uses kind %q", resource.RelativePath, kind),
-				"Use kind Secret, ExternalSecret, ClusterExternalSecret, or SealedSecret for files under secret-like resource paths.",
+				fmt.Sprintf(
+					"secret-like resource path %q uses kind %q",
+					resource.RelativePath,
+					kind,
+				),
+				"Use kind Secret, ExternalSecret, ClusterExternalSecret, SecretProviderClass, or SealedSecret for files under secret-like resource paths.",
 			)
 		}
-		a.checkSecretResourceMode(resource, secretLike || syncLocalRepoDoctorAllowedSecretResourceKind(kind))
+		a.checkSecretResourceMode(
+			resource,
+			secretLike || syncLocalRepoDoctorAllowedSecretResourceKind(kind),
+		)
 	}
 }
 
-func (a *syncLocalRepoDoctorAccumulator) checkSecretResourceMode(resource localrepo.Resource, secretLike bool) {
+func (a *syncLocalRepoDoctorAccumulator) checkSecretResourceMode(
+	resource localrepo.Resource,
+	secretLike bool,
+) {
 	if !secretLike {
 		return
 	}
@@ -417,8 +713,15 @@ func (a *syncLocalRepoDoctorAccumulator) checkSecretResourceMode(resource localr
 			"",
 			"",
 			resource.Path,
-			fmt.Sprintf("secret-like resource %q is readable by group or other users; current mode is %s", resource.RelativePath, info.Mode().Perm()),
-			fmt.Sprintf("Run chmod 0600 %s for secret-like local repo resources.", syncShellQuote(resource.Path)),
+			fmt.Sprintf(
+				"secret-like resource %q is readable by group or other users; current mode is %s",
+				resource.RelativePath,
+				info.Mode().Perm(),
+			),
+			fmt.Sprintf(
+				"Run chmod 0600 %s for secret-like local repo resources.",
+				syncShellQuote(resource.Path),
+			),
 		)
 	}
 }
@@ -460,7 +763,11 @@ func (a *syncLocalRepoDoctorAccumulator) checkStaleComponentDirs(doc *bom.BOM, r
 				entry.Name(),
 				"",
 				path,
-				fmt.Sprintf("local repo %s directory belongs to component %q, which is not present in the current BOM", rootName, entry.Name()),
+				fmt.Sprintf(
+					"local repo %s directory belongs to component %q, which is not present in the current BOM",
+					rootName,
+					entry.Name(),
+				),
 				"Remove the stale component directory or update the BOM if it is still intended.",
 			)
 		}
@@ -523,7 +830,8 @@ func syncLocalRepoDoctorInputLooksSecret(input syncLocalRepoInitInput, binding s
 	if _, ok := syncLocalRepoSecretHintForInput(input); ok {
 		return true
 	}
-	return syncLocalRepoDoctorPathLooksSecret(input.Path) || syncLocalRepoDoctorPathLooksSecret(filepath.Base(binding))
+	return syncLocalRepoDoctorPathLooksSecret(input.Path) ||
+		syncLocalRepoDoctorPathLooksSecret(filepath.Base(binding))
 }
 
 func syncLocalRepoDoctorPathLooksSecret(path string) bool {
@@ -557,7 +865,7 @@ func syncLocalRepoDoctorIsManifestPath(path string) bool {
 
 func syncLocalRepoDoctorAllowedSecretResourceKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "Secret", "ExternalSecret", "ClusterExternalSecret", "SealedSecret":
+	case "Secret", "ExternalSecret", "ClusterExternalSecret", "SecretProviderClass", "SealedSecret":
 		return true
 	default:
 		return false
@@ -572,36 +880,44 @@ const (
 )
 
 type syncLocalRepoDoctorIssue struct {
-	Severity     syncLocalRepoDoctorSeverity `json:"severity" yaml:"severity"`
-	Code         string                      `json:"code" yaml:"code"`
-	Component    string                      `json:"component,omitempty" yaml:"component,omitempty"`
-	Input        string                      `json:"input,omitempty" yaml:"input,omitempty"`
-	Path         string                      `json:"path,omitempty" yaml:"path,omitempty"`
-	Message      string                      `json:"message" yaml:"message"`
+	Severity     syncLocalRepoDoctorSeverity `json:"severity"               yaml:"severity"`
+	Code         string                      `json:"code"                   yaml:"code"`
+	Component    string                      `json:"component,omitempty"    yaml:"component,omitempty"`
+	Input        string                      `json:"input,omitempty"        yaml:"input,omitempty"`
+	Path         string                      `json:"path,omitempty"         yaml:"path,omitempty"`
+	Message      string                      `json:"message"                yaml:"message"`
 	SuggestedFix string                      `json:"suggestedFix,omitempty" yaml:"suggestedFix,omitempty"`
 }
 
 type syncLocalRepoDoctorSummary struct {
-	Components      int `json:"components" yaml:"components"`
-	Inputs          int `json:"inputs" yaml:"inputs"`
-	RequiredInputs  int `json:"requiredInputs" yaml:"requiredInputs"`
-	Resources       int `json:"resources" yaml:"resources"`
-	Patches         int `json:"patches" yaml:"patches"`
-	Errors          int `json:"errors" yaml:"errors"`
-	Warnings        int `json:"warnings" yaml:"warnings"`
+	Components      int `json:"components"      yaml:"components"`
+	Inputs          int `json:"inputs"          yaml:"inputs"`
+	RequiredInputs  int `json:"requiredInputs"  yaml:"requiredInputs"`
+	Resources       int `json:"resources"       yaml:"resources"`
+	Patches         int `json:"patches"         yaml:"patches"`
+	Errors          int `json:"errors"          yaml:"errors"`
+	Warnings        int `json:"warnings"        yaml:"warnings"`
 	PlaceholderHits int `json:"placeholderHits" yaml:"placeholderHits"`
 }
 
 type syncLocalRepoDoctorOutput struct {
-	Passed             bool                       `json:"passed" yaml:"passed"`
-	LocalRepo          string                     `json:"localRepo" yaml:"localRepo"`
-	BOMPath            string                     `json:"bomPath" yaml:"bomPath"`
-	ReleaseChannelPath string                     `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
-	BOMName            string                     `json:"bomName" yaml:"bomName"`
-	Revision           string                     `json:"revision" yaml:"revision"`
-	Summary            syncLocalRepoDoctorSummary `json:"summary" yaml:"summary"`
-	Issues             []syncLocalRepoDoctorIssue `json:"issues,omitempty" yaml:"issues,omitempty"`
-	Suggested          []string                   `json:"suggested,omitempty" yaml:"suggested,omitempty"`
+	Passed                bool                       `json:"passed"                          yaml:"passed"`
+	LocalRepo             string                     `json:"localRepo"                       yaml:"localRepo"`
+	LocalRepoMetadata     string                     `json:"localRepoMetadataPath,omitempty" yaml:"localRepoMetadataPath,omitempty"`
+	LocalRepoRevision     string                     `json:"localRepoRevision,omitempty"     yaml:"localRepoRevision,omitempty"`
+	LocalRepoRevisionPath string                     `json:"localRepoRevisionPath,omitempty" yaml:"localRepoRevisionPath,omitempty"`
+	LocalInputRevision    string                     `json:"localInputRevision,omitempty"    yaml:"localInputRevision,omitempty"`
+	BOMPath               string                     `json:"bomPath"                         yaml:"bomPath"`
+	BOMDigest             string                     `json:"bomDigest,omitempty"             yaml:"bomDigest,omitempty"`
+	ReleaseChannelPath    string                     `json:"releaseChannelPath,omitempty"    yaml:"releaseChannelPath,omitempty"`
+	ReleaseSource         string                     `json:"releaseSource,omitempty"         yaml:"releaseSource,omitempty"`
+	ReleaseLine           string                     `json:"releaseLine,omitempty"           yaml:"releaseLine,omitempty"`
+	Channel               string                     `json:"channel,omitempty"               yaml:"channel,omitempty"`
+	BOMName               string                     `json:"bomName"                         yaml:"bomName"`
+	Revision              string                     `json:"revision"                        yaml:"revision"`
+	Summary               syncLocalRepoDoctorSummary `json:"summary"                         yaml:"summary"`
+	Issues                []syncLocalRepoDoctorIssue `json:"issues,omitempty"                yaml:"issues,omitempty"`
+	Suggested             []string                   `json:"suggested,omitempty"             yaml:"suggested,omitempty"`
 }
 
 type syncLocalRepoDoctorAccumulator struct {
@@ -613,6 +929,9 @@ func newSyncLocalRepoDoctorCmd() *cobra.Command {
 		clusterName        string
 		bomFile            string
 		releaseChannelFile string
+		releaseSource      string
+		releaseLine        string
+		channel            string
 		localRepo          string
 		packageSources     []string
 		output             string
@@ -628,6 +947,9 @@ func newSyncLocalRepoDoctorCmd() *cobra.Command {
 				ClusterName:        flags.clusterName,
 				BOMPath:            flags.bomFile,
 				ReleaseChannelPath: flags.releaseChannelFile,
+				ReleaseSource:      flags.releaseSource,
+				ReleaseLine:        flags.releaseLine,
+				Channel:            flags.channel,
 				LocalRepoPath:      flags.localRepo,
 				PackageSources:     flags.packageSources,
 			})
@@ -640,10 +962,20 @@ func newSyncLocalRepoDoctorCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose runtime package cache should be used")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file used to discover package input contracts")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose runtime package cache should be used")
+	addSyncTargetFlags(
+		cmd,
+		&flags.bomFile,
+		&flags.releaseChannelFile,
+		&flags.releaseSource,
+		&flags.releaseLine,
+		&flags.channel,
+		"path to the BOM file used to discover package input contracts",
+	)
 	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "local repo directory to inspect")
-	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local repo inspection")
+	cmd.Flags().
+		StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local repo inspection")
 	addSyncOutputFlag(cmd, &flags.output)
 	if err := cmd.MarkFlagRequired("local-repo"); err != nil {
 		panic(err)
@@ -656,6 +988,9 @@ func newSyncLocalRepoInitCmd() *cobra.Command {
 		clusterName        string
 		bomFile            string
 		releaseChannelFile string
+		releaseSource      string
+		releaseLine        string
+		channel            string
 		outputDir          string
 		packageSources     []string
 		overwrite          bool
@@ -672,6 +1007,9 @@ func newSyncLocalRepoInitCmd() *cobra.Command {
 				ClusterName:        flags.clusterName,
 				BOMPath:            flags.bomFile,
 				ReleaseChannelPath: flags.releaseChannelFile,
+				ReleaseSource:      flags.releaseSource,
+				ReleaseLine:        flags.releaseLine,
+				Channel:            flags.channel,
 				OutputDir:          flags.outputDir,
 				PackageSources:     flags.packageSources,
 				Overwrite:          flags.overwrite,
@@ -683,11 +1021,23 @@ func newSyncLocalRepoInitCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "local repo init result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose runtime package cache should be used")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file used to discover package input contracts")
-	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "local repo directory to create or update")
-	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local initialization")
-	cmd.Flags().BoolVar(&flags.overwrite, "overwrite", false, "overwrite generated skeleton files that already exist")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose runtime package cache should be used")
+	addSyncTargetFlags(
+		cmd,
+		&flags.bomFile,
+		&flags.releaseChannelFile,
+		&flags.releaseSource,
+		&flags.releaseLine,
+		&flags.channel,
+		"path to the BOM file used to discover package input contracts",
+	)
+	cmd.Flags().
+		StringVar(&flags.outputDir, "output-dir", "", "local repo directory to create or update")
+	cmd.Flags().
+		StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local initialization")
+	cmd.Flags().
+		BoolVar(&flags.overwrite, "overwrite", false, "overwrite generated skeleton files that already exist")
 	addSyncOutputFlag(cmd, &flags.output)
 	if err := cmd.MarkFlagRequired("output-dir"); err != nil {
 		panic(err)
@@ -699,6 +1049,9 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 	target, resolved, err := resolveSyncLocalRepoBOMPackages(opts.ClusterName, syncTargetOptions{
 		BOMPath:            opts.BOMPath,
 		ReleaseChannelPath: opts.ReleaseChannelPath,
+		ReleaseSource:      opts.ReleaseSource,
+		ReleaseLine:        opts.ReleaseLine,
+		Channel:            opts.Channel,
 	}, opts.PackageSources)
 	if err != nil {
 		return syncLocalRepoInitOutput{}, err
@@ -707,7 +1060,11 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 
 	root, err := filepath.Abs(opts.OutputDir)
 	if err != nil {
-		return syncLocalRepoInitOutput{}, fmt.Errorf("resolve local repo output dir %q: %w", opts.OutputDir, err)
+		return syncLocalRepoInitOutput{}, fmt.Errorf(
+			"resolve local repo output dir %q: %w",
+			opts.OutputDir,
+			err,
+		)
 	}
 	writer := &syncLocalRepoInitWriter{
 		root:      root,
@@ -722,23 +1079,31 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 		filepath.Join(localrepo.ResourcesDirName, "secrets"),
 		localrepo.PatchesDirName,
 		localrepo.PolicyDirName,
-		"revisions",
+		localrepo.RevisionsDirName,
 	); err != nil {
 		return syncLocalRepoInitOutput{}, err
 	}
 
 	out := syncLocalRepoInitOutput{
-		LocalRepo:          root,
+		LocalRepo:         root,
+		LocalRepoMetadata: filepath.Join(root, localrepo.RepoFileName),
+		LocalRepoRevisionPath: filepath.Join(
+			root,
+			localrepo.RevisionsDirName,
+			localrepo.CurrentRevisionFileName,
+		),
 		BOMPath:            target.BOMPath,
+		BOMDigest:          syncLocalRepoTargetBOMDigest(target),
 		ReleaseChannelPath: strings.TrimSpace(target.ReleaseChannelPath),
+		ReleaseSource:      strings.TrimSpace(target.ReleaseSource),
+		ReleaseLine:        strings.TrimSpace(target.ReleaseLine),
+		Channel:            string(target.Channel),
 		BOMName:            doc.Metadata.Name,
 		Revision:           doc.Spec.Revision,
 		Components:         doc.PackageCount(),
 	}
-	if err := writer.writeYAML("repo.yaml", syncLocalRepoMetadata(doc, opts.CreatedAt)); err != nil {
-		return syncLocalRepoInitOutput{}, err
-	}
-	if err := writer.writeYAML(filepath.Join("revisions", "current.yaml"), syncLocalRepoCurrentRevision(doc, opts.CreatedAt)); err != nil {
+	targetMetadata := syncLocalRepoTargetMetadataForTarget(opts.ClusterName, target)
+	if err := writer.writeYAML(localrepo.RepoFileName, syncLocalRepoMetadata(targetMetadata)); err != nil {
 		return syncLocalRepoInitOutput{}, err
 	}
 	if err := writer.writeYAML(filepath.Join(localrepo.PolicyDirName, ownership.LocalPatchPolicyFileName), ownership.DefaultLocalPatchPolicyDocument()); err != nil {
@@ -763,6 +1128,21 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 			return syncLocalRepoInitOutput{}, err
 		}
 	}
+	initializedRepo, err := localrepo.Load(root)
+	if err != nil {
+		return syncLocalRepoInitOutput{}, err
+	}
+	out.LocalRepoRevision = initializedRepo.Revision
+	out.LocalInputRevision = initializedRepo.InputRevision
+	if err := writer.writeYAML(filepath.Join(localrepo.RevisionsDirName, localrepo.CurrentRevisionFileName), syncLocalRepoCurrentRevision(targetMetadata, initializedRepo, opts.CreatedAt)); err != nil {
+		return syncLocalRepoInitOutput{}, err
+	}
+	finalRepo, err := localrepo.Load(root)
+	if err != nil {
+		return syncLocalRepoInitOutput{}, err
+	}
+	out.LocalRepoRevision = finalRepo.Revision
+	out.LocalInputRevision = finalRepo.InputRevision
 	sort.Slice(out.SecretHints, func(i, j int) bool {
 		if out.SecretHints[i].Component != out.SecretHints[j].Component {
 			return out.SecretHints[i].Component < out.SecretHints[j].Component
@@ -787,7 +1167,10 @@ func runSyncLocalRepoInit(opts syncLocalRepoInitOptions) (syncLocalRepoInitOutpu
 	return out, nil
 }
 
-func collectSyncLocalRepoInitInputs(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage) []syncLocalRepoInitInput {
+func collectSyncLocalRepoInitInputs(
+	doc *bom.BOM,
+	resolved map[string]*packageformat.ComponentPackage,
+) []syncLocalRepoInitInput {
 	var inputs []syncLocalRepoInitInput
 	for _, component := range doc.Packages() {
 		pkg, ok := resolved[component.Name]
@@ -802,7 +1185,9 @@ func collectSyncLocalRepoInitInputs(doc *bom.BOM, resolved map[string]*packagefo
 				Type:      string(input.Type),
 				Format:    input.Format,
 				Required:  input.Required,
-				Path:      filepath.ToSlash(filepath.Join(localrepo.InputsDirName, component.Name, filename)),
+				Path: filepath.ToSlash(
+					filepath.Join(localrepo.InputsDirName, component.Name, filename),
+				),
 			})
 		}
 	}
@@ -868,8 +1253,12 @@ func syncLocalRepoInputFileMode(input syncLocalRepoInitInput) os.FileMode {
 	return 0o644
 }
 
-func syncLocalRepoSecretHintForInput(input syncLocalRepoInitInput) (syncLocalRepoInitSecretHint, bool) {
-	needle := strings.ToLower(strings.Join([]string{input.Name, input.Path, input.Type, input.Format}, " "))
+func syncLocalRepoSecretHintForInput(
+	input syncLocalRepoInitInput,
+) (syncLocalRepoInitSecretHint, bool) {
+	needle := strings.ToLower(
+		strings.Join([]string{input.Name, input.Path, input.Type, input.Format}, " "),
+	)
 	if !strings.Contains(needle, "secret") &&
 		!strings.Contains(needle, "password") &&
 		!strings.Contains(needle, "credential") &&
@@ -881,8 +1270,14 @@ func syncLocalRepoSecretHintForInput(input syncLocalRepoInitInput) (syncLocalRep
 	return syncLocalRepoInitSecretHint{
 		Component: input.Component,
 		Input:     input.Name,
-		Path:      filepath.ToSlash(filepath.Join(localrepo.ResourcesDirName, "secrets", input.Component+"-"+input.Name+".yaml")),
-		Reason:    "input name or path looks secret-bearing; initialize the real Secret manifest or external reference in resources/, not in the package or BOM",
+		Path: filepath.ToSlash(
+			filepath.Join(
+				localrepo.ResourcesDirName,
+				"secrets",
+				input.Component+"-"+input.Name+".yaml",
+			),
+		),
+		Reason: "input name or path looks secret-bearing; initialize the real Secret manifest or external reference in resources/, not in the package or BOM",
 	}, true
 }
 
@@ -903,32 +1298,101 @@ func syncLocalRepoReadme() string {
 	}, "\n")
 }
 
-func syncLocalRepoMetadata(doc *bom.BOM, createdAt time.Time) map[string]interface{} {
-	return map[string]interface{}{
-		"apiVersion": "distribution.sealos.io/v1alpha1",
-		"kind":       "LocalRepo",
-		"metadata": map[string]interface{}{
-			"name": doc.Metadata.Name,
-		},
-		"spec": map[string]interface{}{
-			"bomName":   doc.Metadata.Name,
-			"revision":  doc.Spec.Revision,
-			"createdAt": createdAt.Format(time.RFC3339),
-		},
-	}
+func syncLocalRepoMetadata(target syncLocalRepoTargetMetadata) *localrepo.LocalRepoDocument {
+	return localrepo.NewDocument(
+		syncLocalRepoName(target),
+		target.Cluster,
+		target.DistributionLine,
+		target.Channel,
+		target.BOMName,
+		target.BOMRevision,
+	)
 }
 
-func syncLocalRepoCurrentRevision(doc *bom.BOM, createdAt time.Time) map[string]interface{} {
-	return map[string]interface{}{
-		"apiVersion": "distribution.sealos.io/v1alpha1",
-		"kind":       "LocalRepoRevision",
-		"spec": map[string]interface{}{
-			"bom": map[string]interface{}{
-				"name":     doc.Metadata.Name,
-				"revision": doc.Spec.Revision,
-			},
-			"initializedAt": createdAt.Format(time.RFC3339),
+func syncLocalRepoCurrentRevision(
+	target syncLocalRepoTargetMetadata,
+	repo *localrepo.Repo,
+	createdAt time.Time,
+) *localrepo.LocalRepoRevisionDocument {
+	localInputRevision := ""
+	localRepoRevision := ""
+	if repo != nil {
+		localInputRevision = repo.InputRevision
+		localRepoRevision = repo.Revision
+	}
+	return localrepo.NewRevisionDocument("current", localrepo.LocalRepoRevisionSpec{
+		Cluster:          strings.TrimSpace(target.Cluster),
+		DistributionLine: strings.TrimSpace(target.DistributionLine),
+		Channel:          strings.TrimSpace(target.Channel),
+		BOM: localrepo.BOMReference{
+			Name:     strings.TrimSpace(target.BOMName),
+			Revision: strings.TrimSpace(target.BOMRevision),
+			Digest:   strings.TrimSpace(target.BOMDigest),
 		},
+		LocalInputRevision: localInputRevision,
+		Digest:             localRepoRevision,
+		Audit: localrepo.AuditFields{
+			CreatedAt: createdAt.UTC().Format(time.RFC3339),
+			Command:   "sealos sync local-repo init",
+		},
+	})
+}
+
+func syncLocalRepoTargetMetadataForTarget(
+	clusterName string,
+	target *syncResolvedTarget,
+) syncLocalRepoTargetMetadata {
+	metadata := syncLocalRepoTargetMetadata{
+		Cluster: strings.TrimSpace(clusterName),
+	}
+	if metadata.Cluster == "" {
+		metadata.Cluster = "default"
+	}
+	if target == nil || target.BOM == nil {
+		return metadata
+	}
+	metadata.DistributionLine = strings.TrimSpace(target.BOM.Metadata.Name)
+	if target.ReleaseChannelDocument != nil {
+		metadata.DistributionLine = target.ReleaseChannelDocument.Distribution()
+		metadata.Channel = string(target.ReleaseChannelDocument.Spec.Channel)
+	} else if target.Channel != "" {
+		metadata.Channel = string(target.Channel)
+	}
+	metadata.BOMName = strings.TrimSpace(target.BOM.Metadata.Name)
+	metadata.BOMRevision = strings.TrimSpace(target.BOM.Spec.Revision)
+	metadata.BOMDigest = syncLocalRepoTargetBOMDigest(target)
+	return metadata
+}
+
+func syncLocalRepoTargetBOMDigest(target *syncResolvedTarget) string {
+	if target == nil {
+		return ""
+	}
+	if strings.TrimSpace(target.BOMDigest) != "" {
+		return strings.TrimSpace(target.BOMDigest)
+	}
+	if strings.TrimSpace(target.BOMPath) == "" || isSyncRemoteLocation(target.BOMPath) {
+		return ""
+	}
+	data, err := os.ReadFile(target.BOMPath)
+	if err != nil {
+		return ""
+	}
+	return digest.Canonical.FromBytes(data).String()
+}
+
+func syncLocalRepoName(target syncLocalRepoTargetMetadata) string {
+	cluster := strings.TrimSpace(target.Cluster)
+	line := strings.TrimSpace(target.DistributionLine)
+	switch {
+	case cluster != "" && line != "":
+		return cluster + "-" + line
+	case cluster != "":
+		return cluster
+	case line != "":
+		return line
+	default:
+		return "local-repo"
 	}
 }
 
@@ -941,7 +1405,7 @@ func (w *syncLocalRepoInitWriter) ensureDirs(dirs ...string) error {
 	return nil
 }
 
-func (w *syncLocalRepoInitWriter) writeYAML(rel string, value interface{}) error {
+func (w *syncLocalRepoInitWriter) writeYAML(rel string, value any) error {
 	data, err := yaml.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", rel, err)

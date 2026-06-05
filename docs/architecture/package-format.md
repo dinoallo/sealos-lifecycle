@@ -50,6 +50,9 @@ The new package format should preserve compatibility with this behavior while ma
 - Replacing the existing image transport. OCI remains the transport.
 - Encoding every runtime policy or promotion rule into the package manifest.
 - Solving local patch packaging in the same format on day one.
+- Providing a package-direct cluster install flow. Packages are consumed through
+  BOM resolution, hydration, and rendered bundles; package authoring commands do
+  not bypass that release boundary.
 
 ## Packaging Unit
 
@@ -101,6 +104,9 @@ If Sealos manages the container runtime, it should be modeled as a separate pack
 | `kubernetes-rootfs` | `rootfs` | `kubeadm`, `kubelet`, `kubectl`, host baseline files, systemd units or drop-ins, kubeadm defaults, bootstrap hooks | These assets bootstrap the node baseline and usually move together as one Kubernetes revision. |
 | `cilium-cni` | `application` | Cilium manifests, optional values files, networking health checks | Networking has its own lifecycle, release cadence, and operational owner. |
 | `kubernetes-control-plane-patch` | `patch` | audit policy, admission config, extra API server flags, static-pod patches, kubelet config overlays, policy manifests | This is the right layer for SRE customization that should be reusable across clusters without forking the rootfs package. |
+| `csi-driver-*` | `application` | CSI controller/node plugin manifests, StorageClass defaults, snapshotter integration, storage health checks | Storage has a separate operational owner, cloud/vendor lifecycle, data-plane blast radius, and rollback policy from Kubernetes bootstrap. |
+| `ingress-controller-*` | `application` | ingress controller manifests, ingress class defaults, admission webhooks, load balancer integration, request-path health checks | Ingress is an edge traffic subsystem with its own release cadence, certificates, exposure policy, and rollback workflow. |
+| `observability-stack` | `application` | metrics/logging/tracing manifests, dashboards, alerts, scrape defaults, health checks | Observability is often owned by a platform/SRE team and should evolve independently from the cluster baseline. |
 
 ### Inputs Vs Patch Packages
 
@@ -275,6 +281,9 @@ hydrate time. It does not mean the package can be overridden arbitrarily.
 | `kubernetes-rootfs` | `kubeadm`, `kubelet`, `kubectl`, systemd units, sysctl profile, bootstrap manifests, bootstrap and healthcheck hooks, baseline kubeadm config structure | cluster name, control-plane endpoint, advertise address, node IP inventory, pod/service CIDR, image repository overrides, private certificates or CA refs, kubelet extra env | audit policy, admission controller config, reusable API server flags, static-pod patches, common kubelet config overlays |
 | `cilium-cni` | Cilium manifest or chart revision, baseline RBAC and DaemonSet resources, default feature profile, healthcheck logic | cluster-specific IPAM values, native-routing or pod-CIDR integration, MTU overrides, environment-specific mirror refs, approved nodeSelector or toleration overrides | whether Cilium is the chosen CNI, shared `kubeProxyReplacement` policy, shared Hubble profile, standard operator sizing policy |
 | `kubernetes-control-plane-patch` (later) | reusable control-plane hardening overlays, audit policy, admission config, shared policy manifests, reusable static-pod patches | cluster-specific endpoint refs, certificate refs, narrowly scoped environment-specific exemptions | the hardening profile itself, standard platform security defaults |
+| `csi-driver-*` (later) | driver controller/node plugin revision, RBAC, CRDs, sidecars, default StorageClass and VolumeSnapshotClass templates, healthcheck logic | zone/region, credentials Secret references, storage pool/class names, topology labels, reclaim policy overrides | supported storage backend choice, driver version, default encryption/expansion policy, snapshot policy |
+| `ingress-controller-*` (later) | controller deployment, service model, ingress class, webhook manifests, default timeout/body-size policy, healthcheck logic | load balancer address or class, TLS Secret refs, node placement, environment-specific annotations | chosen ingress implementation, standard exposure policy, baseline security headers, shared WAF or gateway policy |
+| `observability-stack` (later) | metrics/logging/tracing manifests, dashboards, alert rules, scrape defaults, healthcheck logic | retention size, storage class, external endpoint refs, tenant labels, Secret refs for remote write or notification channels | standard dashboard pack, alert baseline, scrape policy, platform SLO profile |
 
 The decision pattern should be consistent across packages:
 
@@ -400,6 +409,32 @@ Recommended adoption sequence:
 
 This gives SREs a place to express opinionated control-plane customizations without turning every Kubernetes daemon into its own package.
 
+### Extended Package Set Contract
+
+The first package set expansion should not just add package names. Each new
+package needs an owner, explicit local input surface, dependency contract, and
+health check before it is considered part of the supported Day 0 model.
+
+| Package | Owner | Depends On | Required Inputs | Health Check |
+| --- | --- | --- | --- | --- |
+| `kubernetes-control-plane-patch` | platform/SRE | `kubernetes-rootfs` exact Kubernetes minor | optional policy exemption refs, certificate or admission config refs, tightly scoped static-pod patch values | API server reports healthy, static Pod projections match the rendered bundle, and policy manifests are accepted by kube-apiserver. |
+| `csi-driver-*` | storage platform owner | `kubernetes-rootfs`, selected CNI, storage backend prereqs | backend credential Secret refs, zone/region/topology labels, StorageClass names, reclaim and expansion policy values | CSI controller deployment ready, node plugin DaemonSet ready on expected nodes, a non-destructive provisioning capability check passes, and no PVC data-plane deletion is attempted by default. |
+| `ingress-controller-*` | network/edge platform owner | `kubernetes-rootfs`, selected CNI, optional load balancer integration | ingress class name, service exposure mode, TLS Secret refs, load balancer annotations or address refs | controller deployment ready, admission webhook ready when present, ingress class visible, and an HTTP readiness route or synthetic backend check passes. |
+| `observability-stack` | platform/SRE observability owner | `kubernetes-rootfs`, selected CNI, optional CSI for persistent storage | retention and storage class values, external endpoint refs, Secret refs for remote write, notification, or auth | core collectors and UI deployments ready, scrape targets healthy, alert rules loaded, and dashboards or API probes respond. |
+
+Boundaries:
+
+- the PoC repository fixture remains the three-package set until these packages
+  have real package directories, local input templates, and acceptance coverage
+- `kubernetes-control-plane-patch` is the preferred place for reusable
+  hardening overlays; it should not become a dumping ground for per-cluster
+  installation facts
+- addon packages must carry cluster-scoped `healthcheck` hooks before promotion
+  beyond authoring examples
+- data-plane resources such as PVCs, database contents, and user traffic state
+  require a separate protection/runbook contract before reset, revert, or
+  destructive cleanup workflows touch them
+
 ## Transport And Discovery
 
 OCI remains the artifact transport. Each artifact should contain a package manifest at a stable path:
@@ -496,6 +531,25 @@ Initial content types:
 - `hook`
 
 This keeps the format flexible enough for current Sealos behavior without allowing arbitrary hidden payloads.
+
+### MVP Content Semantics
+
+The current executable MVP applies only a narrow subset of these content types:
+
+| Content Type | MVP Semantics |
+| --- | --- |
+| `rootfs` | Host-mutating payload. `sync apply` copies it to the resolved host targets and runs the related hook phases. |
+| `file` | Host-mutating file payload. `sync apply` copies it to the resolved host targets. |
+| `manifest` | Raw Kubernetes YAML payload. `sync apply` applies it with `kubectl apply -f` after kubeconfig and API readiness gates pass. |
+| `values` | Render-only support data. It is copied into the rendered bundle and may be overlaid by declared inputs, but it is not applied directly. |
+| `patch` | Local patch or ownership-reviewed overlay content. It participates in planning and approval surfaces, not direct package install. |
+| `chart` | Package-distributed chart content only. It is accepted by the file schema and copied through render, but the current apply executor does not run Helm or render chart templates. |
+| `hook` | Referenced file content used by `spec.hooks[]`; hook execution is driven by the hook declaration, not by the content entry alone. |
+
+The MVP install path is therefore raw-manifest first. Helm charts may be stored
+in a package for provenance or a future renderer, but package authors should
+not expect chart content to be installed unless a package hook explicitly and
+deterministically renders or applies it as part of that package revision.
 
 ## Inputs
 
@@ -769,6 +823,9 @@ Rules:
 - Hydration and reconcile should be able to see hook intent from the manifest before execution.
 - `target` should describe the operational scope of the hook, not an arbitrary
   machine choice.
+- Inline hook command forms are not part of the package contract. Keeping hooks
+  as referenced files gives package review, digests, executable-bit validation,
+  timeout policy, and audit tooling one stable payload to inspect.
 
 Current implementation note:
 
@@ -802,6 +859,9 @@ Initial rules:
 - dependencies are named references, not implicit path ordering
 - dependencies must be unique
 - self-dependency is invalid
+- `version`, when present, is an exact version selected by the BOM
+- dependency version ranges are intentionally out of scope for package
+  manifests; BOM and release-channel selection remain the version resolver
 - reconcile should topologically sort components before apply
 
 ## Class-Specific Constraints
@@ -845,8 +905,23 @@ Recommended migration path:
 
 1. Accept legacy images that only expose the current label-based contract.
 2. Add `package.yaml` to new component artifacts first.
-3. Add a compatibility layer that can infer a basic package manifest from legacy images when needed.
+3. Infer only minimal metadata from legacy labels when a transitional tool
+   explicitly opts into that behavior.
 4. Move BOM-managed components to the explicit package format over time.
+
+Legacy inference boundary:
+
+- safe to infer: package class from `sealos.io.type`, component version from
+  the existing version labels, distribution labels, and platform labels that
+  already exist on the image
+- unsafe to infer: payload layout, hook phases, hook targets, input surfaces,
+  dependency intent, local patch policy, generated outputs, chart semantics, or
+  secret handling
+
+Any legacy image used by BOM-driven render/apply should therefore either carry
+an explicit `package.yaml` or be converted into a package root by a controlled
+migration step. The runtime should not silently invent hooks or input contracts
+from image labels alone.
 
 ## Initial Go Schema
 
@@ -876,16 +951,23 @@ The initial BOM integration now also supports resolving component package manife
 
 Yes, component packaging should be designed now. It sits directly on the critical path between BOM metadata and real reconcile behavior.
 
-The next implementation step should be:
+The current implementation step is no longer schema discovery; it is keeping
+the package authoring surface aligned with the narrow executable MVP:
 
-1. keep this package manifest schema small
-2. define how `package.yaml` is loaded from an OCI artifact
-3. add one example packaged component fixture
-4. decide whether the hydration MVP supports raw manifests only, or raw manifests plus charts
+1. raw manifests are the directly applied Kubernetes payload format
+2. chart content remains a packaged artifact type until a Helm renderer/apply
+   path is implemented
+3. hooks are referenced files only
+4. dependency versions are exact BOM-selected versions, not ranges in the
+   package manifest
+5. legacy label inference is metadata-only and must not silently create runtime
+   behavior
 
-## Open Questions
+## MVP Decisions
 
-- Should the MVP hydration path support both Helm charts and raw manifests, or only raw manifests?
-- Should hook scripts be modeled only as referenced files, or should inline command forms also be allowed later?
-- Should package dependencies support version ranges in the manifest, or should BOM selection remain the only version resolver?
-- How much of the legacy image metadata can be inferred safely when `package.yaml` is absent?
+| Topic | Decision |
+| --- | --- |
+| Raw manifests versus Helm charts | `manifest` is the executable MVP path. `chart` is accepted as package content and copied through render, but the current executor does not run Helm. |
+| Hook form | Hooks are referenced files only. Inline shell command forms are not part of the contract. |
+| Dependency versions | Package dependencies may name an exact BOM-selected version. Version ranges belong to BOM/release selection policy, not the package manifest. |
+| Legacy image inference | Without `package.yaml`, only metadata labels may be inferred by explicit migration tooling. Runtime behavior such as hooks, inputs, dependencies, local patch policy, and generated outputs must not be invented. |

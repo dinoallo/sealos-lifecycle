@@ -23,11 +23,15 @@ const (
 )
 
 const (
-	KindBOM                     = "BOM"
-	KindAppliedRevision         = "AppliedRevision"
-	KindComponentPackage        = "ComponentPackage"
-	KindDistributionHealthProof = "DistributionHealthProof"
-	KindHydratedBundle          = "HydratedBundle"
-	KindPackageAcceptanceReport = "PackageAcceptanceReport"
-	KindReleaseChannel          = "ReleaseChannel"
+	KindBOM                      = "BOM"
+	KindAppliedRevision          = "AppliedRevision"
+	KindComponentPackage         = "ComponentPackage"
+	KindDistributionHealthProof  = "DistributionHealthProof"
+	KindHydratedBundle           = "HydratedBundle"
+	KindLocalRepo                = "LocalRepo"
+	KindLocalRepoRevision        = "LocalRepoRevision"
+	KindPackageAcceptanceReport  = "PackageAcceptanceReport"
+	KindReleaseCandidateRevision = "ReleaseCandidateRevision"
+	KindReleaseChannel           = "ReleaseChannel"
+	KindReleasePromotionHistory  = "ReleasePromotionHistory"
 )

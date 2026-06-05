@@ -199,13 +199,25 @@ sealos sync package build \
 ```bash
 sealos sync package push \
   --image localhost:5000/poc-minimal/cilium-cni:v1.15.0 \
-  --destination localhost:5000/poc-minimal/cilium-cni:v1.15.0
+  --destination localhost:5000/poc-minimal/cilium-cni:v1.15.0 \
+  --provenance-file /tmp/cilium-cni.provenance.yaml
 ```
 
-推送结果里最重要的是 digest。BOM 最终要记录的是：
+推送命令会先把返回值校验为 OCI digest，再报告推送成功。可选的
+provenance 文件会记录目标 transport、digest algorithm、encoded digest 值，
+以及 registry auth 输入是否被配置；`--creds` 的具体值只会传给底层 push，
+不会写进命令输出、provenance 或失败诊断。
+
+推送结果里最重要的是 digest。签名仍然交给外部 registry/image policy 处理；
+这个 PoC 流程通过 image 加 digest 固定 BOM 里的包选择。BOM 最终要记录的是：
 
 - image
 - digest
+
+如果目标是 mirror 或离线 registry，就把 `--destination` 指向 mirror registry，
+并在 BOM 里记录这个 mirror image 加 digest。render 阶段的 OCI 解析仍然使用
+digest-derived 的 pull-if-missing cache；cache GC、预热和 registry outage
+runbook 属于后续运维任务，不属于发布命令本身。
 
 PoC 里负责三组件整体发布的脚本是：
 

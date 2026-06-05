@@ -60,6 +60,48 @@ func TestAppliedRevisionValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "requested target without resolved target",
+			mutate: func(a *AppliedRevision) {
+				a.Spec.RequestedTarget = &RequestedTarget{
+					Kind:      TargetKindBOM,
+					BOMDigest: a.Spec.BOM.Digest,
+				}
+			},
+			wantErr: true,
+		},
+		{
+			name: "resolved target does not match bom revision",
+			mutate: func(a *AppliedRevision) {
+				a.Spec.RequestedTarget = &RequestedTarget{
+					Kind:      TargetKindBOM,
+					BOMDigest: a.Spec.BOM.Digest,
+				}
+				resolved := a.Spec.BOM
+				resolved.Revision = "rev-other"
+				a.Spec.ResolvedTarget = &ResolvedTarget{BOM: resolved}
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid release channel lookup target",
+			mutate: func(a *AppliedRevision) {
+				a.Spec.RequestedTarget = &RequestedTarget{
+					Kind:             TargetKindReleaseChannelLookup,
+					DistributionLine: a.Spec.BOM.Name,
+					Channel:          a.Spec.BOM.Channel,
+				}
+				a.Spec.ResolvedTarget = &ResolvedTarget{
+					BOM: a.Spec.BOM,
+					ReleaseChannel: &ReleaseChannelReference{
+						DistributionLine: a.Spec.BOM.Name,
+						Channel:          a.Spec.BOM.Channel,
+						TargetRevision:   a.Spec.BOM.Revision,
+					},
+				}
+			},
+			wantErr: true,
+		},
+		{
 			name: "negative observed summary",
 			mutate: func(a *AppliedRevision) {
 				a.Status.ObservedSummary = &ObservedSummary{Dirty: -1}

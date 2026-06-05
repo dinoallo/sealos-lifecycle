@@ -407,10 +407,7 @@ func (e *bundleExecutor) rollbackToLastSuccessfulRevision() error {
 	}
 
 	restored := *applied
-	restored.Spec.BOM = lastSuccessful.BOM
-	restored.Spec.LocalRepoRevision = lastSuccessful.LocalRepoRevision
-	restored.Spec.LocalPatchRevision = lastSuccessful.LocalPatchRevision
-	restored.Spec.DesiredStateDigest = lastSuccessful.DesiredStateDigest
+	state.ApplyRevisionSnapshotToSpec(&restored, *lastSuccessful)
 	restored.Status.State = state.StateDirty
 	if err := mirrorBundle(rollbackBundlePath, CurrentBundlePath(e.clusterName)); err != nil {
 		return fmt.Errorf("restore current bundle after rollback: %w", err)

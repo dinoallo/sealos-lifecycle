@@ -58,6 +58,48 @@ Options:
                    The smoke script writes acceptance-report.yaml under its workdir
                    unless --report-file is passed here.
 
+  DAY0_BOOTSTRAP_ARGS
+                   Extra arguments passed to scripts/poc/minimal-single-node/bootstrap.sh.
+                   Legacy fixture gate only; the operator-facing PoC path is
+                   the scriptless Day 0 guide flow.
+
+  DAY0_RELEASE_SOURCE
+                   Release metadata source used by verify-day0-guide-render.
+
+  DAY0_RELEASE_LINE
+                   Distribution line used by verify-day0-guide-render.
+                   Default is minimal-single-node.
+
+  DAY0_RELEASE_CHANNEL
+                   Release channel used by verify-day0-guide-render.
+                   Default is alpha.
+
+  DAY0_CLUSTER
+                   Cluster name used by verify-day0-guide-render.
+                   Default is poc-minimal-ci.
+
+  DAY0_RUNTIME_ROOT
+                   Runtime root used by verify-day0-guide-render.
+                   Default is a temporary directory under TMPDIR.
+
+  DAY0_LOCAL_REPO
+                   Local repo directory used by verify-day0-guide-render.
+                   Default is <runtime-root>/<cluster>/local-repo.
+
+  SEALOS_BIN
+                   sealos binary used by verify-day0-guide-render.
+                   Default is ./bin/linux_amd64/sealos; the target builds it
+                   first when the binary is missing.
+
+  DAY0_MULTINODE_ARGS
+                   Extra arguments passed to scripts/poc/multi-node-day0/acceptance.sh.
+                   The acceptance script is safe and does not mutate hosts.
+
+  DAY0_CLEANUP_ARGS
+                   Extra arguments passed to scripts/poc/day0-cleanup.sh.
+                   The default cleanup path removes only Day 0 distribution
+                   runtime/local-repo state and explicit temporary workdirs.
+
   I_UNDERSTAND_THIS_MUTATES_HOST
                    Must be set to 1 for verify-sync-package-apply and
                    verify-sync-package-revert.
@@ -70,6 +112,12 @@ Options:
   DISTRIBUTION_CONTROLLER_BUNDLE_DIR
                    Output directory for render-distribution-controller-bundle.
                    Default is dist/distribution-controller.
+
+  DISTRIBUTION_CONTROLLER_PROFILE
+                   Install profile used by render-distribution-controller-bundle
+                   and verify-distribution-controller-real-cluster.
+                   Supported values: host-agent, production-host-agent.
+                   Default is host-agent.
 
   DISTRIBUTION_CONTROLLER_PUSH_IMAGE
                    Set to 1 with build-distribution-controller-image to push the
@@ -162,6 +210,99 @@ verify-sync-package-revert:
 	fi; \
 	scripts/poc/minimal-single-node/smoke.sh --apply --revert-check $(SYNC_PACKAGE_SMOKE_ARGS)
 
+## verify-day0-guide-render: Run the scriptless Day 0 guide render path against an existing release source.
+.PHONY: verify-day0-guide-render
+verify-day0-guide-render:
+	@set -eu; \
+	if [ -z "$(DAY0_RELEASE_SOURCE)" ]; then \
+		echo "DAY0_RELEASE_SOURCE is required for the scriptless Day 0 guide render gate" >&2; \
+		exit 1; \
+	fi; \
+	cluster="$(or $(DAY0_CLUSTER),poc-minimal-ci)"; \
+	line="$(or $(DAY0_RELEASE_LINE),minimal-single-node)"; \
+	channel="$(or $(DAY0_RELEASE_CHANNEL),alpha)"; \
+	runtime_root="$(or $(DAY0_RUNTIME_ROOT),$${TMPDIR:-/tmp}/sealos-day0-guide-render)"; \
+	local_repo="$(or $(DAY0_LOCAL_REPO),$${runtime_root}/$${cluster}/local-repo)"; \
+	sealos_bin="$(or $(SEALOS_BIN),./bin/linux_amd64/sealos)"; \
+	if [ ! -x "$${sealos_bin}" ]; then \
+		make build BINS=sealos >/dev/null; \
+	fi; \
+	"$${sealos_bin}" sync local-repo init \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--output-dir "$${local_repo}" \
+		--overwrite >/dev/null; \
+	install -D -m 0644 \
+		scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
+		"$${local_repo}/inputs/containerd/containerd-config.toml"; \
+	install -D -m 0644 \
+		scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
+		"$${local_repo}/inputs/kubernetes/kubeadm-cluster-config.yaml"; \
+	install -D -m 0644 \
+		scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
+		"$${local_repo}/inputs/cilium/cilium-values.yaml"; \
+	"$${sealos_bin}" sync local-repo doctor \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--local-repo "$${local_repo}" >/dev/null; \
+	"$${sealos_bin}" sync validate \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--local-repo "$${local_repo}" >/dev/null; \
+	"$${sealos_bin}" sync render \
+		--runtime-root "$${runtime_root}" \
+		--cluster "$${cluster}" \
+		--release-source "$(DAY0_RELEASE_SOURCE)" \
+		--release-line "$${line}" \
+		--channel "$${channel}" \
+		--local-repo "$${local_repo}" >/dev/null; \
+	test -f "$${runtime_root}/$${cluster}/distribution/bundles/current/bundle.yaml"; \
+	test -f "$${runtime_root}/$${cluster}/distribution/applied-revision.yaml"
+
+## verify-day0-bootstrap-render: Legacy fixture gate that publishes OCI packages and renders generated release metadata without host mutation.
+.PHONY: verify-day0-bootstrap-render
+verify-day0-bootstrap-render:
+	@scripts/poc/minimal-single-node/bootstrap.sh --skip-apply $(DAY0_BOOTSTRAP_ARGS)
+
+## verify-day0-bootstrap-apply: Legacy mutating fixture gate for the old prepared-host wrapper.
+.PHONY: verify-day0-bootstrap-apply
+verify-day0-bootstrap-apply:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target mutates the host" >&2; \
+		exit 1; \
+	fi; \
+	scripts/poc/minimal-single-node/bootstrap.sh $(DAY0_BOOTSTRAP_ARGS)
+
+## verify-day0-multinode-acceptance: Run the safe multi-node Day 0 acceptance gate.
+.PHONY: verify-day0-multinode-acceptance
+verify-day0-multinode-acceptance:
+	@scripts/poc/multi-node-day0/acceptance.sh $(DAY0_MULTINODE_ARGS)
+
+## cleanup-day0-poc: Remove repeat-run Day 0 PoC distribution state without resetting Kubernetes.
+.PHONY: cleanup-day0-poc
+cleanup-day0-poc:
+	@scripts/poc/day0-cleanup.sh $(DAY0_CLEANUP_ARGS)
+
+## reset-day0-poc: Reset the selected Day 0 PoC cluster, then remove repeat-run state.
+.PHONY: reset-day0-poc
+reset-day0-poc:
+	@set -eu; \
+	if [ "$(I_UNDERSTAND_THIS_MUTATES_HOST)" != "1" ]; then \
+		echo "I_UNDERSTAND_THIS_MUTATES_HOST=1 is required because this target resets a Kubernetes cluster" >&2; \
+		exit 1; \
+	fi; \
+	scripts/poc/day0-cleanup.sh --reset-cluster --yes-reset $(DAY0_CLEANUP_ARGS)
+
 ## build-distribution-controller-image: Build the sealos-agent controller image for testing or release preparation.
 .PHONY: build-distribution-controller-image
 build-distribution-controller-image:
@@ -184,6 +325,7 @@ render-distribution-controller-bundle:
 	fi; \
 	scripts/distribution-controller/render-release-bundle.sh \
 		--image "$(DISTRIBUTION_CONTROLLER_IMAGE)" \
+		$(if $(DISTRIBUTION_CONTROLLER_PROFILE),--profile "$(DISTRIBUTION_CONTROLLER_PROFILE)") \
 		$(if $(DISTRIBUTION_CONTROLLER_BUNDLE_DIR),--output-dir "$(DISTRIBUTION_CONTROLLER_BUNDLE_DIR)")
 
 ## verify-distribution-controller-manifests: Validate controller manifests and controller wiring.
@@ -206,6 +348,7 @@ verify-distribution-controller-real-cluster:
 	fi; \
 	scripts/distribution-controller/real-cluster-smoke.sh \
 		--image "$(DISTRIBUTION_CONTROLLER_IMAGE)" \
+		$(if $(DISTRIBUTION_CONTROLLER_PROFILE),--profile "$(DISTRIBUTION_CONTROLLER_PROFILE)") \
 		--apply \
 		$(DISTRIBUTION_CONTROLLER_SMOKE_ARGS)
 

@@ -30,6 +30,8 @@ binding model should handle:
   [Distribution and config sync](../architecture/distribution-and-config-sync.md)
 - Release-channel and derived-distribution model:
   [Release and promotion](../architecture/release-and-promotion.md)
+- Data-plane protection gates:
+  [Data plane protection](./data-plane-protection-runbook.md)
 
 ## External References
 
@@ -402,5 +404,7 @@ For an app like Grafana with a database and secrets:
 - keep secret bytes in the local repo or another cluster-local secret system
 - treat runtime-generated credentials as local runtime state, not as upstream
   package material
+- use the [Data plane protection](./data-plane-protection-runbook.md) gates
+  before revert, rollback, upgrade, or derived-line switches touch the database
 
 That is the cleanest way to preserve both reproducibility and secret boundary.

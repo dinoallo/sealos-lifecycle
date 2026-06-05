@@ -15,55 +15,103 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/apply/processor"
 	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/distribution/ocipackage"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"github.com/labring/sealos/pkg/distribution/reconcile"
+	ocidigest "github.com/opencontainers/go-digest"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"sigs.k8s.io/yaml"
 )
 
-type syncPackageCommandRunner func(args []string, stderr io.Writer) error
-type syncPackageImageMounterFactory func(id string) (packageformat.ImageMounter, error)
+type (
+	syncPackageCommandRunner       func(args []string, stderr io.Writer) error
+	syncPackageImageMounterFactory func(id string) (packageformat.ImageMounter, error)
+)
 
-var runSyncPackageSubcommand syncPackageCommandRunner = defaultSyncPackageCommandRunner
-var newSyncPackageImageMounter syncPackageImageMounterFactory = defaultSyncPackageImageMounter
+var (
+	runSyncPackageSubcommand   syncPackageCommandRunner       = defaultSyncPackageCommandRunner
+	newSyncPackageImageMounter syncPackageImageMounterFactory = defaultSyncPackageImageMounter
+)
 
 type syncPackageBuildOutput struct {
-	PackageDir       string `json:"packageDir" yaml:"packageDir"`
-	Image            string `json:"image" yaml:"image"`
-	PackageName      string `json:"packageName" yaml:"packageName"`
+	PackageDir       string `json:"packageDir"       yaml:"packageDir"`
+	Image            string `json:"image"            yaml:"image"`
+	PackageName      string `json:"packageName"      yaml:"packageName"`
 	PackageComponent string `json:"packageComponent" yaml:"packageComponent"`
-	PackageVersion   string `json:"packageVersion" yaml:"packageVersion"`
-	PackageClass     string `json:"packageClass" yaml:"packageClass"`
-	Platform         string `json:"platform" yaml:"platform"`
+	PackageVersion   string `json:"packageVersion"   yaml:"packageVersion"`
+	PackageClass     string `json:"packageClass"     yaml:"packageClass"`
+	Platform         string `json:"platform"         yaml:"platform"`
 }
 
 type syncPackagePushOutput struct {
-	SourceImage string `json:"sourceImage" yaml:"sourceImage"`
-	Destination string `json:"destination" yaml:"destination"`
-	Image       string `json:"image" yaml:"image"`
-	Digest      string `json:"digest" yaml:"digest"`
-	Reference   string `json:"reference" yaml:"reference"`
+	SourceImage    string                    `json:"sourceImage"              yaml:"sourceImage"`
+	Destination    string                    `json:"destination"              yaml:"destination"`
+	Image          string                    `json:"image"                    yaml:"image"`
+	Digest         string                    `json:"digest"                   yaml:"digest"`
+	Reference      string                    `json:"reference"                yaml:"reference"`
+	ProvenanceFile string                    `json:"provenanceFile,omitempty" yaml:"provenanceFile,omitempty"`
+	Provenance     syncPackagePushProvenance `json:"provenance"               yaml:"provenance"`
+}
+
+type syncPackagePushProvenance struct {
+	Transport       string                      `json:"transport"       yaml:"transport"`
+	DigestAlgorithm string                      `json:"digestAlgorithm" yaml:"digestAlgorithm"`
+	DigestEncoded   string                      `json:"digestEncoded"   yaml:"digestEncoded"`
+	AuthMode        syncPackageRegistryAuthMode `json:"authMode"        yaml:"authMode"`
+}
+
+type syncPackageRegistryAuthMode struct {
+	Authfile bool `json:"authfile" yaml:"authfile"`
+	CertDir  bool `json:"certDir"  yaml:"certDir"`
+	Creds    bool `json:"creds"    yaml:"creds"`
 }
 
 type syncPackagePullOutput struct {
-	Image            string `json:"image" yaml:"image"`
-	OutputDir        string `json:"outputDir" yaml:"outputDir"`
-	PackageName      string `json:"packageName" yaml:"packageName"`
+	Image            string `json:"image"            yaml:"image"`
+	OutputDir        string `json:"outputDir"        yaml:"outputDir"`
+	PackageName      string `json:"packageName"      yaml:"packageName"`
 	PackageComponent string `json:"packageComponent" yaml:"packageComponent"`
-	PackageVersion   string `json:"packageVersion" yaml:"packageVersion"`
-	PackageClass     string `json:"packageClass" yaml:"packageClass"`
+	PackageVersion   string `json:"packageVersion"   yaml:"packageVersion"`
+	PackageClass     string `json:"packageClass"     yaml:"packageClass"`
+}
+
+type syncPackageCacheListOutput struct {
+	CacheRoot string                  `json:"cacheRoot" yaml:"cacheRoot"`
+	Entries   []ocipackage.CacheEntry `json:"entries"   yaml:"entries"`
+	Summary   syncPackageCacheSummary `json:"summary"   yaml:"summary"`
+}
+
+type syncPackageCacheGCOutput struct {
+	CacheRoot    string                  `json:"cacheRoot"    yaml:"cacheRoot"`
+	DryRun       bool                    `json:"dryRun"       yaml:"dryRun"`
+	MaxAge       string                  `json:"maxAge"       yaml:"maxAge"`
+	IncludeValid bool                    `json:"includeValid" yaml:"includeValid"`
+	Removed      []ocipackage.CacheEntry `json:"removed"      yaml:"removed"`
+	Kept         []ocipackage.CacheEntry `json:"kept"         yaml:"kept"`
+	Summary      syncPackageCacheSummary `json:"summary"      yaml:"summary"`
+}
+
+type syncPackageCacheSummary struct {
+	Entries      int   `json:"entries"                yaml:"entries"`
+	Valid        int   `json:"valid"                  yaml:"valid"`
+	Invalid      int   `json:"invalid"                yaml:"invalid"`
+	Removed      int   `json:"removed,omitempty"      yaml:"removed,omitempty"`
+	Kept         int   `json:"kept,omitempty"         yaml:"kept,omitempty"`
+	SizeBytes    int64 `json:"sizeBytes"              yaml:"sizeBytes"`
+	RemovedBytes int64 `json:"removedBytes,omitempty" yaml:"removedBytes,omitempty"`
 }
 
 func newSyncPackageCmd() *cobra.Command {
@@ -76,6 +124,125 @@ func newSyncPackageCmd() *cobra.Command {
 	cmd.AddCommand(newSyncPackageBuildCmd())
 	cmd.AddCommand(newSyncPackagePushCmd())
 	cmd.AddCommand(newSyncPackagePullCmd())
+	cmd.AddCommand(newSyncPackageCacheCmd())
+	return cmd
+}
+
+func newSyncPackageCacheCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Inspect and garbage-collect cached OCI component packages",
+		Args:  cobra.NoArgs,
+	}
+	cmd.AddCommand(newSyncPackageCacheListCmd())
+	cmd.AddCommand(newSyncPackageCacheGCCmd())
+	return cmd
+}
+
+func newSyncPackageCacheListCmd() *cobra.Command {
+	var flags struct {
+		clusterName string
+		cacheRoot   string
+		output      string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List cached OCI component packages and invalid cache entries",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cacheRoot := syncPackageCacheRoot(flags.clusterName, flags.cacheRoot)
+			entries, err := (&ocipackage.Cache{Root: cacheRoot}).List()
+			if err != nil {
+				return err
+			}
+			out := syncPackageCacheListOutput{
+				CacheRoot: cacheRoot,
+				Entries:   entries,
+				Summary:   syncPackageCacheSummaryForEntries(entries, nil),
+			}
+			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
+				{"cache_root", out.CacheRoot},
+				{"entries", strconv.Itoa(out.Summary.Entries)},
+				{"valid", strconv.Itoa(out.Summary.Valid)},
+				{"invalid", strconv.Itoa(out.Summary.Invalid)},
+				{"size_bytes", strconv.FormatInt(out.Summary.SizeBytes, 10)},
+			})
+		},
+	}
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "cluster name whose runtime package cache should be inspected")
+	cmd.Flags().
+		StringVar(&flags.cacheRoot, "cache-root", "", "explicit package cache root; overrides --cluster")
+	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
+	return cmd
+}
+
+func newSyncPackageCacheGCCmd() *cobra.Command {
+	var flags struct {
+		clusterName  string
+		cacheRoot    string
+		maxAge       string
+		includeValid bool
+		dryRun       bool
+		output       string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "gc",
+		Short: "Garbage-collect invalid or old cached OCI component packages",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			maxAge, err := time.ParseDuration(flags.maxAge)
+			if err != nil {
+				return fmt.Errorf("parse --max-age: %w", err)
+			}
+			cacheRoot := syncPackageCacheRoot(flags.clusterName, flags.cacheRoot)
+			result, err := (&ocipackage.Cache{Root: cacheRoot}).GC(ocipackage.CacheGCOptions{
+				MaxAge:       maxAge,
+				IncludeValid: flags.includeValid,
+				DryRun:       flags.dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			out := syncPackageCacheGCOutput{
+				CacheRoot:    cacheRoot,
+				DryRun:       result.DryRun,
+				MaxAge:       result.MaxAge,
+				IncludeValid: result.IncludeValid,
+				Removed:      result.Removed,
+				Kept:         result.Kept,
+				Summary:      syncPackageCacheSummaryForEntries(result.Entries, result.Removed),
+			}
+			out.Summary.Removed = len(result.Removed)
+			out.Summary.Kept = len(result.Kept)
+			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
+				{"cache_root", out.CacheRoot},
+				{"dry_run", strconv.FormatBool(out.DryRun)},
+				{"max_age", out.MaxAge},
+				{"include_valid", strconv.FormatBool(out.IncludeValid)},
+				{"entries", strconv.Itoa(out.Summary.Entries)},
+				{"valid", strconv.Itoa(out.Summary.Valid)},
+				{"invalid", strconv.Itoa(out.Summary.Invalid)},
+				{"removed", strconv.Itoa(out.Summary.Removed)},
+				{"kept", strconv.Itoa(out.Summary.Kept)},
+				{"size_bytes", strconv.FormatInt(out.Summary.SizeBytes, 10)},
+				{"removed_bytes", strconv.FormatInt(out.Summary.RemovedBytes, 10)},
+			})
+		},
+	}
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "cluster name whose runtime package cache should be garbage-collected")
+	cmd.Flags().
+		StringVar(&flags.cacheRoot, "cache-root", "", "explicit package cache root; overrides --cluster")
+	cmd.Flags().
+		StringVar(&flags.maxAge, "max-age", "168h", "minimum cache entry age before removal")
+	cmd.Flags().
+		BoolVar(&flags.includeValid, "include-valid", false, "allow valid cached packages older than --max-age to be removed")
+	cmd.Flags().
+		BoolVar(&flags.dryRun, "dry-run", false, "report removable entries without deleting them")
+	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	return cmd
 }
 
@@ -111,7 +278,8 @@ func newSyncPackageInspectCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.packageDir, "package-dir", "", "component package directory to inspect")
+	cmd.Flags().
+		StringVar(&flags.packageDir, "package-dir", "", "component package directory to inspect")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	mustMarkFlagRequired(cmd, "package-dir")
 	return cmd
@@ -140,7 +308,11 @@ func newSyncPackageBuildCmd() *cobra.Command {
 			defer os.RemoveAll(tmpDir)
 
 			contextDir := filepath.Join(tmpDir, "context")
-			meta, err := ocipackage.StageContext(flags.packageDir, contextDir, time.Unix(flags.timestamp, 0).UTC())
+			meta, err := ocipackage.StageContext(
+				flags.packageDir,
+				contextDir,
+				time.Unix(flags.timestamp, 0).UTC(),
+			)
 			if err != nil {
 				return err
 			}
@@ -168,7 +340,11 @@ func newSyncPackageBuildCmd() *cobra.Command {
 				"--label", "distribution.sealos.io/version=" + meta.Version,
 			}
 			if flags.distribution != "" {
-				buildArgs = append(buildArgs, "--label", "sealos.io.distribution="+flags.distribution)
+				buildArgs = append(
+					buildArgs,
+					"--label",
+					"sealos.io.distribution="+flags.distribution,
+				)
 			}
 			for _, label := range flags.labels {
 				buildArgs = append(buildArgs, "--label", label)
@@ -182,7 +358,10 @@ func newSyncPackageBuildCmd() *cobra.Command {
 			if err := runSyncPackageSubcommand(buildArgs, cmd.ErrOrStderr()); err != nil {
 				return fmt.Errorf("build package image: %w", err)
 			}
-			inspectArgs, err := syncPackageSubcommandArgs(cmd, []string{"inspect", "--type", "image", flags.image})
+			inspectArgs, err := syncPackageSubcommandArgs(
+				cmd,
+				[]string{"inspect", "--type", "image", flags.image},
+			)
 			if err != nil {
 				return err
 			}
@@ -211,12 +390,17 @@ func newSyncPackageBuildCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.packageDir, "package-dir", "", "component package directory to build")
+	cmd.Flags().
+		StringVar(&flags.packageDir, "package-dir", "", "component package directory to build")
 	cmd.Flags().StringVar(&flags.image, "image", "", "image reference to tag locally after build")
-	cmd.Flags().StringVar(&flags.platform, "platform", "linux/amd64", "target platform in os/arch form")
-	cmd.Flags().Int64Var(&flags.timestamp, "timestamp", 0, "created timestamp in epoch seconds for deterministic builds")
-	cmd.Flags().StringVar(&flags.distribution, "distribution", "", "optional distribution label to apply to the package image")
-	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "additional OCI labels in key=value form")
+	cmd.Flags().
+		StringVar(&flags.platform, "platform", "linux/amd64", "target platform in os/arch form")
+	cmd.Flags().
+		Int64Var(&flags.timestamp, "timestamp", 0, "created timestamp in epoch seconds for deterministic builds")
+	cmd.Flags().
+		StringVar(&flags.distribution, "distribution", "", "optional distribution label to apply to the package image")
+	cmd.Flags().
+		StringArrayVar(&flags.labels, "label", nil, "additional OCI labels in key=value form")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	mustMarkFlagRequired(cmd, "package-dir")
 	mustMarkFlagRequired(cmd, "image")
@@ -225,13 +409,14 @@ func newSyncPackageBuildCmd() *cobra.Command {
 
 func newSyncPackagePushCmd() *cobra.Command {
 	var flags struct {
-		image       string
-		destination string
-		authfile    string
-		certDir     string
-		creds       string
-		digestFile  string
-		output      string
+		image          string
+		destination    string
+		authfile       string
+		certDir        string
+		creds          string
+		digestFile     string
+		provenanceFile string
+		output         string
 	}
 
 	cmd := &cobra.Command{
@@ -258,6 +443,7 @@ func newSyncPackagePushCmd() *cobra.Command {
 			}
 
 			pushArgs := []string{"push", "--digestfile", digestFile}
+			authMode := syncPackagePushAuthMode(flags.authfile, flags.certDir, flags.creds)
 			if flags.authfile != "" {
 				pushArgs = append(pushArgs, "--authfile", flags.authfile)
 			}
@@ -274,25 +460,44 @@ func newSyncPackagePushCmd() *cobra.Command {
 				return err
 			}
 			if err := runSyncPackageSubcommand(pushArgs, cmd.ErrOrStderr()); err != nil {
-				return fmt.Errorf("push package image: %w", err)
+				return fmt.Errorf(
+					"push package image %q to %q: %w; registry diagnostics: authfile=%t cert-dir=%t creds=%t; for private registries pass --authfile or --creds, for custom CAs pass --cert-dir",
+					flags.image,
+					destination,
+					err,
+					authMode.Authfile,
+					authMode.CertDir,
+					authMode.Creds,
+				)
 			}
 
 			digestBytes, err := os.ReadFile(digestFile)
 			if err != nil {
 				return fmt.Errorf("read digest file %q: %w", digestFile, err)
 			}
-			digest := strings.TrimSpace(string(digestBytes))
-			if digest == "" {
-				return fmt.Errorf("push completed without digest output")
+			pushedDigest, err := parseSyncPackagePushDigest(digestBytes, digestFile)
+			if err != nil {
+				return err
 			}
 
 			image := imageRefFromSyncPackageDestination(destination)
+			digest := pushedDigest.String()
 			out := syncPackagePushOutput{
-				SourceImage: flags.image,
-				Destination: destination,
-				Image:       image,
-				Digest:      digest,
-				Reference:   image + "@" + digest,
+				SourceImage:    flags.image,
+				Destination:    destination,
+				Image:          image,
+				Digest:         digest,
+				Reference:      image + "@" + digest,
+				ProvenanceFile: flags.provenanceFile,
+				Provenance: syncPackagePushProvenance{
+					Transport:       syncPackageDestinationTransport(destination),
+					DigestAlgorithm: pushedDigest.Algorithm().String(),
+					DigestEncoded:   pushedDigest.Encoded(),
+					AuthMode:        authMode,
+				},
+			}
+			if err := writeSyncPackagePushProvenance(flags.provenanceFile, out); err != nil {
+				return err
 			}
 			return writeSyncPackageOutput(cmd, flags.output, out, [][2]string{
 				{"source_image", out.SourceImage},
@@ -300,16 +505,27 @@ func newSyncPackagePushCmd() *cobra.Command {
 				{"image", out.Image},
 				{"digest", out.Digest},
 				{"reference", out.Reference},
+				{"provenance_file", out.ProvenanceFile},
+				{"transport", out.Provenance.Transport},
+				{"digest_algorithm", out.Provenance.DigestAlgorithm},
+				{"digest_encoded", out.Provenance.DigestEncoded},
+				{"authfile_configured", strconv.FormatBool(out.Provenance.AuthMode.Authfile)},
+				{"cert_dir_configured", strconv.FormatBool(out.Provenance.AuthMode.CertDir)},
+				{"creds_configured", strconv.FormatBool(out.Provenance.AuthMode.Creds)},
 			})
 		},
 	}
 
 	cmd.Flags().StringVar(&flags.image, "image", "", "local image reference to push")
-	cmd.Flags().StringVar(&flags.destination, "destination", "", "destination image reference, docker:// implied when omitted")
+	cmd.Flags().
+		StringVar(&flags.destination, "destination", "", "destination image reference, docker:// implied when omitted")
 	cmd.Flags().StringVar(&flags.authfile, "authfile", "", "path to a registry auth file")
 	cmd.Flags().StringVar(&flags.certDir, "cert-dir", "", "path to registry certificates")
 	cmd.Flags().StringVar(&flags.creds, "creds", "", "registry credentials in user[:pass] form")
-	cmd.Flags().StringVar(&flags.digestFile, "digest-file", "", "write the pushed digest to this path")
+	cmd.Flags().
+		StringVar(&flags.digestFile, "digest-file", "", "write the pushed digest to this path")
+	cmd.Flags().
+		StringVar(&flags.provenanceFile, "provenance-file", "", "write push provenance YAML to this path")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	mustMarkFlagRequired(cmd, "image")
 	mustMarkFlagRequired(cmd, "destination")
@@ -361,9 +577,12 @@ func newSyncPackagePullCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.image, "image", "", "OCI component package image reference to pull")
-	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "", "local directory to write the component package into")
-	cmd.Flags().BoolVar(&flags.overwrite, "overwrite", false, "overwrite output-dir when it already exists")
+	cmd.Flags().
+		StringVar(&flags.image, "image", "", "OCI component package image reference to pull")
+	cmd.Flags().
+		StringVar(&flags.outputDir, "output-dir", "", "local directory to write the component package into")
+	cmd.Flags().
+		BoolVar(&flags.overwrite, "overwrite", false, "overwrite output-dir when it already exists")
 	cmd.Flags().StringVar(&flags.output, "output", "yaml", "output format: yaml or env")
 	mustMarkFlagRequired(cmd, "image")
 	mustMarkFlagRequired(cmd, "output-dir")
@@ -392,6 +611,37 @@ func defaultSyncPackageCommandRunner(args []string, stderr io.Writer) error {
 	command.Stdout = stderr
 	command.Stderr = stderr
 	return command.Run()
+}
+
+func syncPackageCacheRoot(clusterName, cacheRoot string) string {
+	if strings.TrimSpace(cacheRoot) != "" {
+		return strings.TrimSpace(cacheRoot)
+	}
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		clusterName = "default"
+	}
+	return filepath.Join(reconcile.DistributionRootPath(clusterName), "package-cache")
+}
+
+func syncPackageCacheSummaryForEntries(
+	entries, removed []ocipackage.CacheEntry,
+) syncPackageCacheSummary {
+	summary := syncPackageCacheSummary{
+		Entries: len(entries),
+	}
+	for _, entry := range entries {
+		if entry.Valid {
+			summary.Valid++
+		} else {
+			summary.Invalid++
+		}
+		summary.SizeBytes += entry.SizeBytes
+	}
+	for _, entry := range removed {
+		summary.RemovedBytes += entry.SizeBytes
+	}
+	return summary
 }
 
 func syncPackageSubcommandArgs(cmd *cobra.Command, args []string) ([]string, error) {
@@ -443,7 +693,12 @@ func syncPackageRootArgs(cmd *cobra.Command) ([]string, error) {
 	return args, nil
 }
 
-func writeSyncPackageOutput(cmd *cobra.Command, format string, value any, envPairs [][2]string) error {
+func writeSyncPackageOutput(
+	cmd *cobra.Command,
+	format string,
+	value any,
+	envPairs [][2]string,
+) error {
 	switch format {
 	case "yaml":
 		data, err := yaml.Marshal(value)
@@ -486,6 +741,54 @@ func normalizeSyncPackagePushDestination(destination string) string {
 	default:
 		return "docker://" + destination
 	}
+}
+
+func syncPackageDestinationTransport(destination string) string {
+	if index := strings.Index(destination, ":"); index > 0 {
+		return destination[:index]
+	}
+	return "docker"
+}
+
+func syncPackagePushAuthMode(authfile, certDir, creds string) syncPackageRegistryAuthMode {
+	return syncPackageRegistryAuthMode{
+		Authfile: authfile != "",
+		CertDir:  certDir != "",
+		Creds:    creds != "",
+	}
+}
+
+func parseSyncPackagePushDigest(raw []byte, digestFile string) (ocidigest.Digest, error) {
+	value := strings.TrimSpace(string(raw))
+	if value == "" {
+		return "", errors.New("push completed without digest output")
+	}
+	digest, err := ocidigest.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("parse pushed digest from %q: %w", digestFile, err)
+	}
+	if err := digest.Validate(); err != nil {
+		return "", fmt.Errorf("validate pushed digest from %q: %w", digestFile, err)
+	}
+	return digest, nil
+}
+
+func writeSyncPackagePushProvenance(path string, out syncPackagePushOutput) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create provenance directory %q: %w", filepath.Dir(path), err)
+	}
+	data, err := yaml.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal push provenance: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write push provenance %q: %w", path, err)
+	}
+	return nil
 }
 
 func imageRefFromSyncPackageDestination(destination string) string {

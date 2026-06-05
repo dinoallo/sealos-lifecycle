@@ -21,10 +21,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"github.com/opencontainers/go-digest"
 )
 
 const (
@@ -46,8 +45,12 @@ type Resource struct {
 }
 
 type Repo struct {
-	Root     string
-	Revision string
+	Root           string
+	Revision       string
+	InputRevision  string
+	Metadata       *LocalRepoDocument
+	Current        *LocalRepoRevisionDocument
+	SchemaWarnings []string
 
 	inputsByComponent     map[string]map[string]string
 	hostInputsByComponent map[string]map[string]map[string]string
@@ -91,15 +94,29 @@ func Load(root string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
+	metadata, metadataWarnings, err := loadOptionalDocument(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
+	current, currentWarnings, err := loadOptionalCurrentRevisionDocument(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
 
 	hashParts := append(append(inputHashes, resourceHashes...), patchHashes...)
 	if policyHash != "" {
 		hashParts = append(hashParts, policyHash)
 	}
+	inputRevision := digestHashes(inputHashes)
+	revision := digestHashes(hashParts)
 
 	return &Repo{
 		Root:                  resolvedRoot,
-		Revision:              digestHashes(hashParts),
+		Revision:              revision,
+		InputRevision:         inputRevision,
+		Metadata:              metadata,
+		Current:               current,
+		SchemaWarnings:        append(metadataWarnings, currentWarnings...),
 		inputsByComponent:     inputsByComponent,
 		hostInputsByComponent: hostInputsByComponent,
 		resources:             resources,
@@ -107,6 +124,48 @@ func Load(root string) (*Repo, error) {
 		localPatchPolicy:      localPatchPolicy,
 		policyRelativePath:    policyRelativePath(localPatchPolicy),
 	}, nil
+}
+
+func loadOptionalDocument(root string) (*LocalRepoDocument, []string, error) {
+	path := filepath.Join(root, RepoFileName)
+	if _, err := os.Stat(filepath.Join(root, RepoFileName)); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf(
+			"stat local repo metadata %q: %w",
+			filepath.Join(root, RepoFileName),
+			err,
+		)
+	}
+	doc, err := LoadDocument(root)
+	if err != nil {
+		if IsSchemaValidationError(err) {
+			return nil, []string{fmt.Sprintf("%s: %v", path, err)}, nil
+		}
+		return nil, nil, err
+	}
+	return doc, nil, nil
+}
+
+func loadOptionalCurrentRevisionDocument(
+	root string,
+) (*LocalRepoRevisionDocument, []string, error) {
+	path := filepath.Join(root, RevisionsDirName, CurrentRevisionFileName)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("stat local repo revision %q: %w", path, err)
+	}
+	doc, err := LoadCurrentRevisionDocument(root)
+	if err != nil {
+		if IsSchemaValidationError(err) {
+			return nil, []string{fmt.Sprintf("%s: %v", path, err)}, nil
+		}
+		return nil, nil, err
+	}
+	return doc, nil, nil
 }
 
 func (r *Repo) BindingFor(componentName string, input packageformat.Input) (string, bool) {
@@ -232,7 +291,9 @@ func (r *Repo) LocalPatchPolicyRelativePath() string {
 	return r.policyRelativePath
 }
 
-func scanInputs(root string) (map[string]map[string]string, map[string]map[string]map[string]string, []string, error) {
+func scanInputs(
+	root string,
+) (map[string]map[string]string, map[string]map[string]map[string]string, []string, error) {
 	inputsRoot := filepath.Join(root, InputsDirName)
 	if _, err := os.Stat(inputsRoot); err != nil {
 		if os.IsNotExist(err) {
@@ -263,7 +324,11 @@ func scanInputs(root string) (map[string]map[string]string, map[string]map[strin
 		componentDir := filepath.Join(inputsRoot, componentName)
 		fileEntries, err := os.ReadDir(componentDir)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("read local repo component input dir %q: %w", componentDir, err)
+			return nil, nil, nil, fmt.Errorf(
+				"read local repo component input dir %q: %w",
+				componentDir,
+				err,
+			)
 		}
 
 		sort.Slice(fileEntries, func(i, j int) bool {
@@ -277,20 +342,39 @@ func scanInputs(root string) (map[string]map[string]string, map[string]map[strin
 				filename := fileEntry.Name()
 				inputName := strings.TrimSuffix(filename, filepath.Ext(filename))
 				if inputName == "" {
-					return nil, nil, nil, fmt.Errorf("local repo input file %q must have a basename", filepath.Join(componentDir, filename))
+					return nil, nil, nil, fmt.Errorf(
+						"local repo input file %q must have a basename",
+						filepath.Join(componentDir, filename),
+					)
 				}
 				if _, ok := componentInputs[inputName]; ok {
-					return nil, nil, nil, fmt.Errorf("local repo component %q has multiple files for input %q", componentName, inputName)
+					return nil, nil, nil, fmt.Errorf(
+						"local repo component %q has multiple files for input %q",
+						componentName,
+						inputName,
+					)
 				}
 
 				absPath := filepath.Join(componentDir, filename)
 				data, err := os.ReadFile(absPath)
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("read local repo input file %q: %w", absPath, err)
+					return nil, nil, nil, fmt.Errorf(
+						"read local repo input file %q: %w",
+						absPath,
+						err,
+					)
 				}
 
 				componentInputs[inputName] = absPath
-				hashParts = append(hashParts, fmt.Sprintf("%s/%s=%s", componentName, filename, digest.Canonical.FromBytes(data)))
+				hashParts = append(
+					hashParts,
+					fmt.Sprintf(
+						"%s/%s=%s",
+						componentName,
+						filename,
+						digest.Canonical.FromBytes(data),
+					),
+				)
 				continue
 			}
 			if fileEntry.Name() != "hosts" {
@@ -299,7 +383,11 @@ func scanInputs(root string) (map[string]map[string]string, map[string]map[strin
 			hostInputsRoot := filepath.Join(componentDir, fileEntry.Name())
 			hostEntries, err := os.ReadDir(hostInputsRoot)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("read local repo host input dir %q: %w", hostInputsRoot, err)
+				return nil, nil, nil, fmt.Errorf(
+					"read local repo host input dir %q: %w",
+					hostInputsRoot,
+					err,
+				)
 			}
 			sort.Slice(hostEntries, func(i, j int) bool {
 				return hostEntries[i].Name() < hostEntries[j].Name()
@@ -312,7 +400,11 @@ func scanInputs(root string) (map[string]map[string]string, map[string]map[strin
 				hostDir := filepath.Join(hostInputsRoot, hostName)
 				hostFiles, err := os.ReadDir(hostDir)
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("read local repo host input dir %q: %w", hostDir, err)
+					return nil, nil, nil, fmt.Errorf(
+						"read local repo host input dir %q: %w",
+						hostDir,
+						err,
+					)
 				}
 				sort.Slice(hostFiles, func(i, j int) bool {
 					return hostFiles[i].Name() < hostFiles[j].Name()
@@ -324,7 +416,10 @@ func scanInputs(root string) (map[string]map[string]string, map[string]map[strin
 					filename := hostFile.Name()
 					inputName := strings.TrimSuffix(filename, filepath.Ext(filename))
 					if inputName == "" {
-						return nil, nil, nil, fmt.Errorf("local repo host input file %q must have a basename", filepath.Join(hostDir, filename))
+						return nil, nil, nil, fmt.Errorf(
+							"local repo host input file %q must have a basename",
+							filepath.Join(hostDir, filename),
+						)
 					}
 					hostBindings, ok := componentHostInputs[inputName]
 					if !ok {
@@ -332,17 +427,35 @@ func scanInputs(root string) (map[string]map[string]string, map[string]map[strin
 						componentHostInputs[inputName] = hostBindings
 					}
 					if _, ok := hostBindings[hostName]; ok {
-						return nil, nil, nil, fmt.Errorf("local repo component %q host %q has multiple files for input %q", componentName, hostName, inputName)
+						return nil, nil, nil, fmt.Errorf(
+							"local repo component %q host %q has multiple files for input %q",
+							componentName,
+							hostName,
+							inputName,
+						)
 					}
 
 					absPath := filepath.Join(hostDir, filename)
 					data, err := os.ReadFile(absPath)
 					if err != nil {
-						return nil, nil, nil, fmt.Errorf("read local repo host input file %q: %w", absPath, err)
+						return nil, nil, nil, fmt.Errorf(
+							"read local repo host input file %q: %w",
+							absPath,
+							err,
+						)
 					}
 
 					hostBindings[hostName] = absPath
-					hashParts = append(hashParts, fmt.Sprintf("%s/hosts/%s/%s=%s", componentName, hostName, filename, digest.Canonical.FromBytes(data)))
+					hashParts = append(
+						hashParts,
+						fmt.Sprintf(
+							"%s/hosts/%s/%s=%s",
+							componentName,
+							hostName,
+							filename,
+							digest.Canonical.FromBytes(data),
+						),
+					)
 				}
 			}
 		}
@@ -488,7 +601,11 @@ func scanLocalPatchPolicy(root string) (*ownership.LocalPatchPolicyDocument, str
 	if err != nil {
 		return nil, "", fmt.Errorf("read local repo policy file %q: %w", policyPath, err)
 	}
-	return doc, fmt.Sprintf("%s=%s", filepath.ToSlash(filepath.Join(PolicyDirName, ownership.LocalPatchPolicyFileName)), digest.Canonical.FromBytes(data)), nil
+	return doc, fmt.Sprintf(
+		"%s=%s",
+		filepath.ToSlash(filepath.Join(PolicyDirName, ownership.LocalPatchPolicyFileName)),
+		digest.Canonical.FromBytes(data),
+	), nil
 }
 
 func policyRelativePath(doc *ownership.LocalPatchPolicyDocument) string {

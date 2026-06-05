@@ -16,16 +16,17 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
-
-	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
 func TestSyncPackageBuildCmd(t *testing.T) {
@@ -83,7 +84,10 @@ func TestSyncPackageBuildCmd(t *testing.T) {
 	if !slices.Contains(invocations[0], "--save-image=false") {
 		t.Fatalf("build args = %v, want --save-image=false", invocations[0])
 	}
-	if got, want := invocations[1], []string{"inspect", "--type", "image", "localhost:5000/test/kubernetes-rootfs:v1.30.3"}; !slices.Equal(got, want) {
+	if got, want := invocations[1], []string{"inspect", "--type", "image", "localhost:5000/test/kubernetes-rootfs:v1.30.3"}; !slices.Equal(
+		got,
+		want,
+	) {
 		t.Fatalf("inspect args = %v, want %v", got, want)
 	}
 
@@ -132,11 +136,12 @@ func TestSyncPackageInspectCmd(t *testing.T) {
 }
 
 func TestSyncPackagePushCmd(t *testing.T) {
+	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	previousRunner := runSyncPackageSubcommand
 	runSyncPackageSubcommand = func(args []string, _ io.Writer) error {
 		for i := 0; i < len(args); i++ {
 			if args[i] == "--digestfile" {
-				if err := os.WriteFile(args[i+1], []byte("sha256:1234\n"), 0o644); err != nil {
+				if err := os.WriteFile(args[i+1], []byte(digest+"\n"), 0o644); err != nil {
 					t.Fatalf("WriteFile() error = %v", err)
 				}
 				break
@@ -173,11 +178,171 @@ func TestSyncPackagePushCmd(t *testing.T) {
 	if got, want := out.Image, "registry.example.io/sealos/kubernetes-rootfs:v1.30.3"; got != want {
 		t.Fatalf("out.Image = %q, want %q", got, want)
 	}
-	if got, want := out.Digest, "sha256:1234"; got != want {
+	if got, want := out.Digest, digest; got != want {
 		t.Fatalf("out.Digest = %q, want %q", got, want)
 	}
-	if got, want := out.Reference, "registry.example.io/sealos/kubernetes-rootfs:v1.30.3@sha256:1234"; got != want {
+	if got, want := out.Reference, "registry.example.io/sealos/kubernetes-rootfs:v1.30.3@"+digest; got != want {
 		t.Fatalf("out.Reference = %q, want %q", got, want)
+	}
+	if got, want := out.Provenance.Transport, "docker"; got != want {
+		t.Fatalf("out.Provenance.Transport = %q, want %q", got, want)
+	}
+	if got, want := out.Provenance.DigestAlgorithm, "sha256"; got != want {
+		t.Fatalf("out.Provenance.DigestAlgorithm = %q, want %q", got, want)
+	}
+	if got, want := out.Provenance.DigestEncoded, strings.Repeat("a", 64); got != want {
+		t.Fatalf("out.Provenance.DigestEncoded = %q, want %q", got, want)
+	}
+	if got := out.Provenance.AuthMode; got.Authfile || got.CertDir || got.Creds {
+		t.Fatalf("out.Provenance.AuthMode = %+v, want all false", got)
+	}
+}
+
+func TestSyncPackagePushCmdWritesProvenanceWithoutLeakingCreds(t *testing.T) {
+	const (
+		digest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		creds  = "user:example"
+	)
+	var pushArgs []string
+	previousRunner := runSyncPackageSubcommand
+	runSyncPackageSubcommand = func(args []string, _ io.Writer) error {
+		pushArgs = slices.Clone(args)
+		for i := range args {
+			if args[i] == "--digestfile" {
+				if err := os.WriteFile(args[i+1], []byte(digest+"\n"), 0o644); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+				break
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		runSyncPackageSubcommand = previousRunner
+	})
+
+	provenanceFile := filepath.Join(t.TempDir(), "push", "provenance.yaml")
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"package",
+		"push",
+		"--image", "localhost:5000/test/kubernetes-rootfs:v1.30.3",
+		"--destination", "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+		"--authfile", "/tmp/auth.json",
+		"--cert-dir", "/tmp/certs",
+		"--creds", creds,
+		"--provenance-file", provenanceFile,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !slices.Contains(pushArgs, "--creds") {
+		t.Fatalf("push args = %v, want --creds forwarded", pushArgs)
+	}
+	if strings.Contains(buf.String(), creds) {
+		t.Fatalf("stdout leaked credentials: %s", buf.String())
+	}
+
+	var out syncPackagePushOutput
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.ProvenanceFile, provenanceFile; got != want {
+		t.Fatalf("out.ProvenanceFile = %q, want %q", got, want)
+	}
+	if got := out.Provenance.AuthMode; !got.Authfile || !got.CertDir || !got.Creds {
+		t.Fatalf("out.Provenance.AuthMode = %+v, want all true", got)
+	}
+
+	provenanceBytes, err := os.ReadFile(provenanceFile)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(provenanceBytes), creds) {
+		t.Fatalf("provenance leaked credentials: %s", string(provenanceBytes))
+	}
+	var provenance syncPackagePushOutput
+	if err := yaml.Unmarshal(provenanceBytes, &provenance); err != nil {
+		t.Fatalf("Unmarshal(provenance) error = %v\noutput=%s", err, string(provenanceBytes))
+	}
+	if got, want := provenance.Reference, out.Reference; got != want {
+		t.Fatalf("provenance.Reference = %q, want %q", got, want)
+	}
+}
+
+func TestSyncPackagePushCmdRejectsInvalidDigest(t *testing.T) {
+	previousRunner := runSyncPackageSubcommand
+	runSyncPackageSubcommand = func(args []string, _ io.Writer) error {
+		for i := range args {
+			if args[i] == "--digestfile" {
+				if err := os.WriteFile(args[i+1], []byte("not-a-digest\n"), 0o644); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+				break
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		runSyncPackageSubcommand = previousRunner
+	})
+
+	cmd := newSyncCmd()
+	cmd.SetOut(bytes.NewBuffer(nil))
+	cmd.SetErr(bytes.NewBuffer(nil))
+	cmd.SetArgs([]string{
+		"package",
+		"push",
+		"--image", "localhost:5000/test/kubernetes-rootfs:v1.30.3",
+		"--destination", "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want invalid digest error")
+	}
+	if !strings.Contains(err.Error(), "parse pushed digest") {
+		t.Fatalf("Execute() error = %v, want parse pushed digest", err)
+	}
+}
+
+func TestSyncPackagePushCmdFailureDiagnosticsRedactCreds(t *testing.T) {
+	const creds = "user:example"
+	previousRunner := runSyncPackageSubcommand
+	runSyncPackageSubcommand = func(_ []string, _ io.Writer) error {
+		return errors.New("registry unavailable")
+	}
+	t.Cleanup(func() {
+		runSyncPackageSubcommand = previousRunner
+	})
+
+	cmd := newSyncCmd()
+	cmd.SetOut(bytes.NewBuffer(nil))
+	cmd.SetErr(bytes.NewBuffer(nil))
+	cmd.SetArgs([]string{
+		"package",
+		"push",
+		"--image", "localhost:5000/test/kubernetes-rootfs:v1.30.3",
+		"--destination", "registry.example.io/sealos/kubernetes-rootfs:v1.30.3",
+		"--creds", creds,
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want push failure")
+	}
+	if strings.Contains(err.Error(), creds) {
+		t.Fatalf("Execute() error leaked credentials: %v", err)
+	}
+	if !strings.Contains(
+		err.Error(),
+		"registry diagnostics: authfile=false cert-dir=false creds=true",
+	) {
+		t.Fatalf("Execute() error = %v, want redacted registry diagnostics", err)
 	}
 }
 

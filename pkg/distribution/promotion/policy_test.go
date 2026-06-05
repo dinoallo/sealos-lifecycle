@@ -126,6 +126,48 @@ func TestEvaluateDefault(t *testing.T) {
 			wantHealth: true,
 		},
 		{
+			name: "stable rejects missing required health signal",
+			request: Request{
+				TargetChannel: ChannelStable,
+				Candidate: CandidateRevision{
+					Line:          "default-platform",
+					Revision:      "rev-20240424",
+					SourceChannel: ChannelBeta,
+				},
+				HealthProof: HealthProofSummary{
+					Provided:               true,
+					Passed:                 true,
+					RequiredSignals:        []string{"node-readiness", "runtime-preflight"},
+					MissingRequiredSignals: []string{"runtime-preflight"},
+					MinPassedSignals:       1,
+					PassedSignals:          1,
+				},
+			},
+			wantCodes:  []ViolationCode{ViolationHealthProofFailed},
+			wantHealth: true,
+		},
+		{
+			name: "beta accepts optional failed signal when thresholds pass",
+			request: Request{
+				TargetChannel: ChannelBeta,
+				Candidate: CandidateRevision{
+					Line:          "default-platform",
+					Revision:      "rev-20240424",
+					SourceChannel: ChannelAlpha,
+				},
+				HealthProof: HealthProofSummary{
+					Provided:              true,
+					Passed:                true,
+					RequiredSignals:       []string{"node-readiness"},
+					OptionalFailedSignals: []string{"observability-smoke"},
+					MinPassedSignals:      1,
+					PassedSignals:         1,
+				},
+			},
+			wantAllow:  true,
+			wantHealth: true,
+		},
+		{
 			name: "alpha rejects provided failed health proof",
 			request: Request{
 				TargetChannel: ChannelAlpha,
@@ -158,6 +200,10 @@ func TestEvaluateDefault(t *testing.T) {
 				t.Fatalf("HealthProofRequired = %v, want %v", got, want)
 			}
 			assertViolationCodes(t, decision.Violations, tt.wantCodes)
+			if tt.name == "beta accepts optional failed signal when thresholds pass" &&
+				len(decision.Warnings) == 0 {
+				t.Fatal("Warnings empty, want optional failed signal warning")
+			}
 		})
 	}
 }
@@ -246,11 +292,22 @@ func assertViolationCodes(t *testing.T, violations []Violation, want []Violation
 	t.Helper()
 
 	if len(violations) != len(want) {
-		t.Fatalf("len(Violations) = %d, want %d; violations=%#v", len(violations), len(want), violations)
+		t.Fatalf(
+			"len(Violations) = %d, want %d; violations=%#v",
+			len(violations),
+			len(want),
+			violations,
+		)
 	}
 	for i, violation := range violations {
 		if violation.Code != want[i] {
-			t.Fatalf("Violations[%d].Code = %q, want %q; violations=%#v", i, violation.Code, want[i], violations)
+			t.Fatalf(
+				"Violations[%d].Code = %q, want %q; violations=%#v",
+				i,
+				violation.Code,
+				want[i],
+				violations,
+			)
 		}
 	}
 }

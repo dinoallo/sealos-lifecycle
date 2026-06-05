@@ -16,9 +16,10 @@ package bom
 
 import (
 	"fmt"
+	"os"
 
 	fileutil "github.com/labring/sealos/pkg/utils/file"
-	yamlutil "github.com/labring/sealos/pkg/utils/yaml"
+	"sigs.k8s.io/yaml"
 )
 
 func LoadFile(path string) (*BOM, error) {
@@ -26,12 +27,20 @@ func LoadFile(path string) (*BOM, error) {
 		return nil, fmt.Errorf("bom file %q not found", path)
 	}
 
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read bom %q: %w", path, err)
+	}
+	return LoadBytes(data, path)
+}
+
+func LoadBytes(data []byte, subject string) (*BOM, error) {
 	var doc BOM
-	if err := yamlutil.UnmarshalFile(path, &doc); err != nil {
-		return nil, fmt.Errorf("unmarshal bom %q: %w", path, err)
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("unmarshal bom %q: %w", subject, err)
 	}
 	if err := doc.Validate(); err != nil {
-		return nil, fmt.Errorf("validate bom %q: %w", path, err)
+		return nil, fmt.Errorf("validate bom %q: %w", subject, err)
 	}
 	return &doc, nil
 }

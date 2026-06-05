@@ -23,10 +23,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/clusterfile"
 	"github.com/labring/sealos/pkg/constants"
+	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/compare"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
@@ -34,6 +33,7 @@ import (
 	"github.com/labring/sealos/pkg/ssh"
 	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
 	"github.com/labring/sealos/pkg/utils/iputils"
+	"github.com/opencontainers/go-digest"
 )
 
 type syncRemoteExecutor interface {
@@ -50,8 +50,10 @@ type syncExecutionTopology struct {
 	hostRoles   map[string][]string
 }
 
-var loadSyncExecutionTopology = defaultSyncExecutionTopology
-var newSyncRemoteExecutor = defaultSyncRemoteExecutor
+var (
+	loadSyncExecutionTopology = defaultSyncExecutionTopology
+	newSyncRemoteExecutor     = defaultSyncRemoteExecutor
+)
 
 type syncTopologyState string
 
@@ -63,12 +65,12 @@ const (
 )
 
 type syncTopologyStatus struct {
-	State          syncTopologyState         `json:"state" yaml:"state"`
-	Message        string                    `json:"message,omitempty" yaml:"message,omitempty"`
+	State          syncTopologyState         `json:"state"                    yaml:"state"`
+	Message        string                    `json:"message,omitempty"        yaml:"message,omitempty"`
 	RefreshCommand string                    `json:"refreshCommand,omitempty" yaml:"refreshCommand,omitempty"`
-	Bundle         hydrate.ExecutionTopology `json:"bundle,omitempty" yaml:"bundle,omitempty"`
-	Current        hydrate.ExecutionTopology `json:"current,omitempty" yaml:"current,omitempty"`
-	ChangedFields  []string                  `json:"changedFields,omitempty" yaml:"changedFields,omitempty"`
+	Bundle         hydrate.ExecutionTopology `json:"bundle,omitempty"         yaml:"bundle,omitempty"`
+	Current        hydrate.ExecutionTopology `json:"current,omitempty"        yaml:"current,omitempty"`
+	ChangedFields  []string                  `json:"changedFields,omitempty"  yaml:"changedFields,omitempty"`
 }
 
 type syncRenderInputState string
@@ -81,21 +83,24 @@ const (
 )
 
 type syncRenderInputStatus struct {
-	State         syncRenderInputState     `json:"state" yaml:"state"`
-	Message       string                   `json:"message,omitempty" yaml:"message,omitempty"`
+	State         syncRenderInputState     `json:"state"                   yaml:"state"`
+	Message       string                   `json:"message,omitempty"       yaml:"message,omitempty"`
 	ChangedInputs []syncRenderInputChange  `json:"changedInputs,omitempty" yaml:"changedInputs,omitempty"`
-	Provenance    hydrate.RenderProvenance `json:"provenance,omitempty" yaml:"provenance,omitempty"`
+	Provenance    hydrate.RenderProvenance `json:"provenance,omitempty"    yaml:"provenance,omitempty"`
 }
 
 type syncRenderInputChange struct {
-	Name     string `json:"name" yaml:"name"`
-	Path     string `json:"path,omitempty" yaml:"path,omitempty"`
+	Name     string `json:"name"               yaml:"name"`
+	Path     string `json:"path,omitempty"     yaml:"path,omitempty"`
 	Expected string `json:"expected,omitempty" yaml:"expected,omitempty"`
-	Current  string `json:"current,omitempty" yaml:"current,omitempty"`
-	Reason   string `json:"reason" yaml:"reason"`
+	Current  string `json:"current,omitempty"  yaml:"current,omitempty"`
+	Reason   string `json:"reason"             yaml:"reason"`
 }
 
-func syncExecutionTopologyForBundle(clusterName string, bundle *hydrate.Bundle) (*syncExecutionTopology, error) {
+func syncExecutionTopologyForBundle(
+	clusterName string,
+	bundle *hydrate.Bundle,
+) (*syncExecutionTopology, error) {
 	if bundle != nil && !bundle.Spec.ExecutionTopology.Empty() {
 		topology, err := syncExecutionTopologyFromSnapshot(bundle.Spec.ExecutionTopology)
 		if err != nil {
@@ -113,7 +118,9 @@ func syncExecutionTopologyForBundle(clusterName string, bundle *hydrate.Bundle) 
 	return loadSyncExecutionTopology(clusterName)
 }
 
-func syncExecutionTopologyFromSnapshot(snapshot hydrate.ExecutionTopology) (*syncExecutionTopology, error) {
+func syncExecutionTopologyFromSnapshot(
+	snapshot hydrate.ExecutionTopology,
+) (*syncExecutionTopology, error) {
 	normalized := snapshot.Normalize()
 	if len(normalized.AllNodes) == 0 {
 		return nil, fmt.Errorf("bundle executionTopology.allNodes cannot be empty")
@@ -140,7 +147,10 @@ func syncTopologyStatusForBundle(clusterName string, bundle *hydrate.Bundle) syn
 		RefreshCommand: syncTopologyRefreshCommand(clusterName, nil),
 	}
 	if bundle != nil {
-		status.RefreshCommand = syncTopologyRefreshCommand(clusterName, &bundle.Spec.RenderProvenance)
+		status.RefreshCommand = syncTopologyRefreshCommand(
+			clusterName,
+			&bundle.Spec.RenderProvenance,
+		)
 	}
 	if bundle == nil || bundle.Spec.ExecutionTopology.Empty() {
 		status.State = syncTopologyStateMissing
@@ -192,7 +202,38 @@ func syncRenderInputStatusForBundle(bundle *hydrate.Bundle) syncRenderInputStatu
 	}
 
 	var changes []syncRenderInputChange
-	if strings.TrimSpace(provenance.ReleaseChannelPath) != "" || strings.TrimSpace(provenance.ReleaseChannelDigest) != "" {
+	if strings.TrimSpace(provenance.ReleaseSource) != "" {
+		resolved, err := bom.ResolveReleaseChannelLookup(bom.ReleaseChannelLookupOptions{
+			DistributionLine: provenance.DistributionLine,
+			Channel:          bom.ReleaseChannel(provenance.ReleaseChannel),
+			Source:           provenance.ReleaseSource,
+		})
+		switch {
+		case err != nil:
+			changes = append(changes, syncRenderInputChange{
+				Name:     "releaseLookup",
+				Path:     provenance.ReleaseSource,
+				Expected: provenance.BOMDigest,
+				Reason:   err.Error(),
+			})
+		case strings.TrimSpace(resolved.BOMDigest) != strings.TrimSpace(provenance.BOMDigest):
+			changes = append(changes, syncRenderInputChange{
+				Name:     "releaseLookup",
+				Path:     provenance.ReleaseSource,
+				Expected: provenance.BOMDigest,
+				Current:  resolved.BOMDigest,
+				Reason:   "resolved BOM digest mismatch",
+			})
+		case resolved.BOM.Spec.Revision != bundle.Spec.Revision:
+			changes = append(changes, syncRenderInputChange{
+				Name:     "releaseLookup",
+				Path:     provenance.ReleaseSource,
+				Expected: bundle.Spec.Revision,
+				Current:  resolved.BOM.Spec.Revision,
+				Reason:   "resolved BOM revision mismatch",
+			})
+		}
+	} else if strings.TrimSpace(provenance.ReleaseChannelPath) != "" || strings.TrimSpace(provenance.ReleaseChannelDigest) != "" {
 		switch {
 		case strings.TrimSpace(provenance.ReleaseChannelPath) == "" || strings.TrimSpace(provenance.ReleaseChannelDigest) == "":
 			changes = append(changes, syncRenderInputChange{
@@ -221,27 +262,30 @@ func syncRenderInputStatusForBundle(bundle *hydrate.Bundle) syncRenderInputStatu
 		}
 	}
 
-	if strings.TrimSpace(provenance.BOMPath) == "" || strings.TrimSpace(provenance.BOMDigest) == "" {
-		changes = append(changes, syncRenderInputChange{
-			Name:   "bom",
-			Path:   provenance.BOMPath,
-			Reason: "missing BOM provenance",
-		})
-	} else if data, err := os.ReadFile(provenance.BOMPath); err != nil {
-		changes = append(changes, syncRenderInputChange{
-			Name:     "bom",
-			Path:     provenance.BOMPath,
-			Expected: provenance.BOMDigest,
-			Reason:   err.Error(),
-		})
-	} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.BOMDigest {
-		changes = append(changes, syncRenderInputChange{
-			Name:     "bom",
-			Path:     provenance.BOMPath,
-			Expected: provenance.BOMDigest,
-			Current:  current,
-			Reason:   "digest mismatch",
-		})
+	if strings.TrimSpace(provenance.ReleaseSource) == "" {
+		if strings.TrimSpace(provenance.BOMPath) == "" ||
+			strings.TrimSpace(provenance.BOMDigest) == "" {
+			changes = append(changes, syncRenderInputChange{
+				Name:   "bom",
+				Path:   provenance.BOMPath,
+				Reason: "missing BOM provenance",
+			})
+		} else if data, err := os.ReadFile(provenance.BOMPath); err != nil {
+			changes = append(changes, syncRenderInputChange{
+				Name:     "bom",
+				Path:     provenance.BOMPath,
+				Expected: provenance.BOMDigest,
+				Reason:   err.Error(),
+			})
+		} else if current := digest.Canonical.FromBytes(data).String(); current != provenance.BOMDigest {
+			changes = append(changes, syncRenderInputChange{
+				Name:     "bom",
+				Path:     provenance.BOMPath,
+				Expected: provenance.BOMDigest,
+				Current:  current,
+				Reason:   "digest mismatch",
+			})
+		}
 	}
 
 	if strings.TrimSpace(provenance.LocalRepoPath) != "" {
@@ -324,9 +368,16 @@ func syncTopologyRefreshCommand(clusterName string, provenance *hydrate.RenderPr
 		bomPath = provenance.BOMPath
 	}
 	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
-	if provenance != nil && strings.TrimSpace(provenance.ReleaseChannelPath) != "" {
+	switch {
+	case provenance != nil && strings.TrimSpace(provenance.ReleaseSource) != "":
+		args = append(args,
+			"--release-source", provenance.ReleaseSource,
+			"--release-line", provenance.DistributionLine,
+			"--channel", provenance.ReleaseChannel,
+		)
+	case provenance != nil && strings.TrimSpace(provenance.ReleaseChannelPath) != "":
 		args = append(args, "--release-channel", provenance.ReleaseChannelPath)
-	} else {
+	default:
 		args = append(args, "--file", bomPath)
 	}
 	if provenance != nil {
@@ -379,9 +430,13 @@ func changedSyncTopologyFields(a, b hydrate.ExecutionTopology) []string {
 	if strings.TrimSpace(a.FirstMaster) != strings.TrimSpace(b.FirstMaster) {
 		changed = append(changed, "firstMaster")
 	}
-	if !slices.EqualFunc(a.HostRoles, b.HostRoles, func(left, right hydrate.ExecutionHostRoleList) bool {
-		return left.Host == right.Host && slices.Equal(left.Roles, right.Roles)
-	}) {
+	if !slices.EqualFunc(
+		a.HostRoles,
+		b.HostRoles,
+		func(left, right hydrate.ExecutionHostRoleList) bool {
+			return left.Host == right.Host && slices.Equal(left.Roles, right.Roles)
+		},
+	) {
 		changed = append(changed, "hostRoles")
 	}
 	return changed
@@ -565,20 +620,34 @@ func syncIsLocalExecutionHost(host string) bool {
 	return false
 }
 
-func syncCompareBundle(clusterName string, bundle *hydrate.Bundle, bundlePath, kubeconfigPath, hostRoot string) (*compare.Result, error) {
+func syncCompareBundle(
+	clusterName string,
+	bundle *hydrate.Bundle,
+	bundlePath, kubeconfigPath, hostRoot string,
+) (*compare.Result, error) {
 	resolver := newSyncKubectlResolver(kubeconfigPath)
 	topology, err := syncExecutionTopologyForBundle(clusterName, bundle)
 	if err != nil {
 		return nil, err
 	}
 	if topology == nil || syncUseLocalSingleNodeCompare(topology) {
-		return compare.CompareBundleWithOptions(bundle, bundlePath, resolver, compare.CompareOptions{HostRoot: hostRoot})
+		return compare.CompareBundleWithOptions(
+			bundle,
+			bundlePath,
+			resolver,
+			compare.CompareOptions{HostRoot: hostRoot},
+		)
 	}
 
-	objectResult, err := compare.CompareBundleWithOptions(bundle, bundlePath, resolver, compare.CompareOptions{
-		HostRoot:      hostRoot,
-		SkipHostPaths: true,
-	})
+	objectResult, err := compare.CompareBundleWithOptions(
+		bundle,
+		bundlePath,
+		resolver,
+		compare.CompareOptions{
+			HostRoot:      hostRoot,
+			SkipHostPaths: true,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +660,11 @@ func syncCompareBundle(clusterName string, bundle *hydrate.Bundle, bundlePath, k
 		}
 	}
 
-	hostStatuses := make([]compare.HostPathStatus, 0, len(bundle.Spec.TrackedHostPaths)*len(topology.nodeExecutionHosts()))
+	hostStatuses := make(
+		[]compare.HostPathStatus,
+		0,
+		len(bundle.Spec.TrackedHostPaths)*len(topology.nodeExecutionHosts()),
+	)
 	for _, host := range topology.nodeExecutionHosts() {
 		compareRoot := hostRoot
 		cleanup := func() {}
@@ -605,11 +678,16 @@ func syncCompareBundle(clusterName string, bundle *hydrate.Bundle, bundlePath, k
 				return nil, err
 			}
 		}
-		hostResult, compareErr := compare.CompareBundleWithOptions(bundle, bundlePath, resolver, compare.CompareOptions{
-			HostRoot:     compareRoot,
-			HostIdentity: host,
-			SkipObjects:  true,
-		})
+		hostResult, compareErr := compare.CompareBundleWithOptions(
+			bundle,
+			bundlePath,
+			resolver,
+			compare.CompareOptions{
+				HostRoot:     compareRoot,
+				HostIdentity: host,
+				SkipObjects:  true,
+			},
+		)
 		cleanup()
 		if compareErr != nil {
 			return nil, compareErr
@@ -630,7 +708,11 @@ func syncCompareBundle(clusterName string, bundle *hydrate.Bundle, bundlePath, k
 	return result, nil
 }
 
-func syncPrepareCommitHostRoot(clusterName string, bundle *hydrate.Bundle, hostRoot, selectedHost string) (string, func(), error) {
+func syncPrepareCommitHostRoot(
+	clusterName string,
+	bundle *hydrate.Bundle,
+	hostRoot, selectedHost string,
+) (string, func(), error) {
 	if strings.TrimSpace(selectedHost) == "" || syncIsLocalExecutionHost(selectedHost) {
 		return hostRoot, func() {}, nil
 	}
@@ -676,7 +758,11 @@ func syncUseLocalSingleNodeCompare(topology *syncExecutionTopology) bool {
 	return len(hosts) <= 1 && len(hosts) > 0 && syncIsLocalExecutionHost(hosts[0])
 }
 
-func syncTrackedHostPathAppliesToHost(topology *syncExecutionTopology, host string, tracked hydrate.TrackedHostPath) bool {
+func syncTrackedHostPathAppliesToHost(
+	topology *syncExecutionTopology,
+	host string,
+	tracked hydrate.TrackedHostPath,
+) bool {
 	if topology == nil {
 		return true
 	}
@@ -689,7 +775,12 @@ func syncTrackedHostPathAppliesToHost(topology *syncExecutionTopology, host stri
 	return true
 }
 
-func stageSyncRemoteHostRoot(remoteExec syncRemoteExecutor, topology *syncExecutionTopology, host string, trackedPaths []hydrate.TrackedHostPath) (string, func(), error) {
+func stageSyncRemoteHostRoot(
+	remoteExec syncRemoteExecutor,
+	topology *syncExecutionTopology,
+	host string,
+	trackedPaths []hydrate.TrackedHostPath,
+) (string, func(), error) {
 	if remoteExec == nil {
 		return "", nil, fmt.Errorf("remote execution client is not configured for host %q", host)
 	}
@@ -712,7 +803,11 @@ func stageSyncRemoteHostRoot(remoteExec syncRemoteExecutor, topology *syncExecut
 	return tempRoot, cleanup, nil
 }
 
-func stageSyncRemoteTrackedHostPath(remoteExec syncRemoteExecutor, host, hostRoot string, tracked hydrate.TrackedHostPath) error {
+func stageSyncRemoteTrackedHostPath(
+	remoteExec syncRemoteExecutor,
+	host, hostRoot string,
+	tracked hydrate.TrackedHostPath,
+) error {
 	dst, err := resolveSyncHostPath(hostRoot, tracked.HostPath)
 	if err != nil {
 		return err
@@ -746,7 +841,12 @@ func stageSyncRemoteTrackedHostPath(remoteExec syncRemoteExecutor, host, hostRoo
 		}
 		return os.MkdirAll(dst, 0o755)
 	default:
-		return fmt.Errorf("unsupported remote host path kind %q for %s on %s", kind, tracked.HostPath, host)
+		return fmt.Errorf(
+			"unsupported remote host path kind %q for %s on %s",
+			kind,
+			tracked.HostPath,
+			host,
+		)
 	}
 }
 
@@ -770,7 +870,10 @@ func prepareSyncStagedHostPath(path string, wantDir bool) error {
 	return os.Remove(path)
 }
 
-func inspectSyncRemoteTrackedHostPath(remoteExec syncRemoteExecutor, host, trackedHostPath string) (string, string, error) {
+func inspectSyncRemoteTrackedHostPath(
+	remoteExec syncRemoteExecutor,
+	host, trackedHostPath string,
+) (string, string, error) {
 	script := strings.Join([]string{
 		"path=" + syncShellQuote(trackedHostPath),
 		`if [ -L "$path" ]; then`,
@@ -788,11 +891,20 @@ func inspectSyncRemoteTrackedHostPath(remoteExec syncRemoteExecutor, host, track
 	}, "\n")
 	output, err := remoteExec.CmdToString(host, "/bin/bash -lc "+syncShellQuote(script), "\n")
 	if err != nil {
-		return "", "", fmt.Errorf("inspect remote host path %s on %s: %w", trackedHostPath, host, err)
+		return "", "", fmt.Errorf(
+			"inspect remote host path %s on %s: %w",
+			trackedHostPath,
+			host,
+			err,
+		)
 	}
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-		return "", "", fmt.Errorf("inspect remote host path %s on %s returned empty result", trackedHostPath, host)
+		return "", "", fmt.Errorf(
+			"inspect remote host path %s on %s returned empty result",
+			trackedHostPath,
+			host,
+		)
 	}
 	kind := strings.TrimSpace(lines[0])
 	if kind == "symlink" && len(lines) > 1 {

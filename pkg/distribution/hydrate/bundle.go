@@ -19,97 +19,100 @@ import (
 	"slices"
 	"strings"
 
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/distribution"
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"sigs.k8s.io/yaml"
 )
 
 const BundleFileName = "bundle.yaml"
 
 type Metadata struct {
-	Name   string            `json:"name" yaml:"name"`
+	Name   string            `json:"name"             yaml:"name"`
 	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 }
 
 type Bundle struct {
 	APIVersion string     `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string     `json:"kind" yaml:"kind"`
-	Metadata   Metadata   `json:"metadata" yaml:"metadata"`
-	Spec       BundleSpec `json:"spec" yaml:"spec"`
+	Kind       string     `json:"kind"       yaml:"kind"`
+	Metadata   Metadata   `json:"metadata"   yaml:"metadata"`
+	Spec       BundleSpec `json:"spec"       yaml:"spec"`
 }
 
 type BundleSpec struct {
-	BOMName                string                           `json:"bomName" yaml:"bomName"`
-	Revision               string                           `json:"revision" yaml:"revision"`
-	Channel                bom.ReleaseChannel               `json:"channel" yaml:"channel"`
-	RenderProvenance       RenderProvenance                 `json:"renderProvenance,omitempty" yaml:"renderProvenance,omitempty"`
-	SourcePreflight        *SourcePreflight                 `json:"sourcePreflight,omitempty" yaml:"sourcePreflight,omitempty"`
-	ExecutionTopology      ExecutionTopology                `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
+	BOMName                string                           `json:"bomName"                          yaml:"bomName"`
+	Revision               string                           `json:"revision"                         yaml:"revision"`
+	Channel                bom.ReleaseChannel               `json:"channel"                          yaml:"channel"`
+	RenderProvenance       RenderProvenance                 `json:"renderProvenance,omitempty"       yaml:"renderProvenance,omitempty"`
+	SourcePreflight        *SourcePreflight                 `json:"sourcePreflight,omitempty"        yaml:"sourcePreflight,omitempty"`
+	ExecutionTopology      ExecutionTopology                `json:"executionTopology,omitempty"      yaml:"executionTopology,omitempty"`
 	LocalPatchPolicySource ownership.LocalPatchPolicySource `json:"localPatchPolicySource,omitempty" yaml:"localPatchPolicySource,omitempty"`
-	LocalPatchPolicyScope  ownership.LocalPatchPolicyScope  `json:"localPatchPolicyScope,omitempty" yaml:"localPatchPolicyScope,omitempty"`
-	LocalPatchPolicyName   string                           `json:"localPatchPolicyName,omitempty" yaml:"localPatchPolicyName,omitempty"`
-	LocalPatchPolicyPath   string                           `json:"localPatchPolicyPath,omitempty" yaml:"localPatchPolicyPath,omitempty"`
+	LocalPatchPolicyScope  ownership.LocalPatchPolicyScope  `json:"localPatchPolicyScope,omitempty"  yaml:"localPatchPolicyScope,omitempty"`
+	LocalPatchPolicyName   string                           `json:"localPatchPolicyName,omitempty"   yaml:"localPatchPolicyName,omitempty"`
+	LocalPatchPolicyPath   string                           `json:"localPatchPolicyPath,omitempty"   yaml:"localPatchPolicyPath,omitempty"`
 	LocalPatchPolicyDigest string                           `json:"localPatchPolicyDigest,omitempty" yaml:"localPatchPolicyDigest,omitempty"`
-	LocalResources         []string                         `json:"localResources,omitempty" yaml:"localResources,omitempty"`
-	TrackedK8sObjects      []TrackedK8sObject               `json:"trackedK8sObjects,omitempty" yaml:"trackedK8sObjects,omitempty"`
-	TrackedHostPaths       []TrackedHostPath                `json:"trackedHostPaths,omitempty" yaml:"trackedHostPaths,omitempty"`
-	Components             []RenderedComponent              `json:"components" yaml:"components"`
+	LocalResources         []string                         `json:"localResources,omitempty"         yaml:"localResources,omitempty"`
+	TrackedK8sObjects      []TrackedK8sObject               `json:"trackedK8sObjects,omitempty"      yaml:"trackedK8sObjects,omitempty"`
+	TrackedHostPaths       []TrackedHostPath                `json:"trackedHostPaths,omitempty"       yaml:"trackedHostPaths,omitempty"`
+	Components             []RenderedComponent              `json:"components"                       yaml:"components"`
 }
 
 type RenderProvenance struct {
-	ReleaseChannelPath   string                          `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
+	ReleaseChannelPath   string                          `json:"releaseChannelPath,omitempty"   yaml:"releaseChannelPath,omitempty"`
 	ReleaseChannelDigest string                          `json:"releaseChannelDigest,omitempty" yaml:"releaseChannelDigest,omitempty"`
-	DistributionLine     string                          `json:"distributionLine,omitempty" yaml:"distributionLine,omitempty"`
-	BOMPath              string                          `json:"bomPath,omitempty" yaml:"bomPath,omitempty"`
-	BOMDigest            string                          `json:"bomDigest,omitempty" yaml:"bomDigest,omitempty"`
-	LocalRepoPath        string                          `json:"localRepoPath,omitempty" yaml:"localRepoPath,omitempty"`
-	LocalRepoRevision    string                          `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
-	LocalPatchRevision   string                          `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
-	PackageSources       []RenderProvenancePackageSource `json:"packageSources,omitempty" yaml:"packageSources,omitempty"`
+	ReleaseSource        string                          `json:"releaseSource,omitempty"        yaml:"releaseSource,omitempty"`
+	DistributionLine     string                          `json:"distributionLine,omitempty"     yaml:"distributionLine,omitempty"`
+	ReleaseChannel       string                          `json:"releaseChannel,omitempty"       yaml:"releaseChannel,omitempty"`
+	BOMPath              string                          `json:"bomPath,omitempty"              yaml:"bomPath,omitempty"`
+	BOMDigest            string                          `json:"bomDigest,omitempty"            yaml:"bomDigest,omitempty"`
+	LocalRepoPath        string                          `json:"localRepoPath,omitempty"        yaml:"localRepoPath,omitempty"`
+	LocalRepoRevision    string                          `json:"localRepoRevision,omitempty"    yaml:"localRepoRevision,omitempty"`
+	LocalPatchRevision   string                          `json:"localPatchRevision,omitempty"   yaml:"localPatchRevision,omitempty"`
+	PackageSources       []RenderProvenancePackageSource `json:"packageSources,omitempty"       yaml:"packageSources,omitempty"`
 }
 
 type RenderProvenancePackageSource struct {
-	Component string `json:"component" yaml:"component"`
-	Path      string `json:"path" yaml:"path"`
+	Component string `json:"component"        yaml:"component"`
+	Path      string `json:"path"             yaml:"path"`
 	Digest    string `json:"digest,omitempty" yaml:"digest,omitempty"`
 }
 
 type SourcePreflight struct {
-	State             string                `json:"state" yaml:"state"`
-	Summary           string                `json:"summary" yaml:"summary"`
-	RecommendedAction string                `json:"recommendedAction" yaml:"recommendedAction"`
-	Blocked           bool                  `json:"blocked" yaml:"blocked"`
-	BlockedReasons    []string              `json:"blockedReasons,omitempty" yaml:"blockedReasons,omitempty"`
-	Counts            SourcePreflightCounts `json:"counts" yaml:"counts"`
+	State             string                `json:"state"                     yaml:"state"`
+	Summary           string                `json:"summary"                   yaml:"summary"`
+	RecommendedAction string                `json:"recommendedAction"         yaml:"recommendedAction"`
+	Blocked           bool                  `json:"blocked"                   yaml:"blocked"`
+	BlockedReasons    []string              `json:"blockedReasons,omitempty"  yaml:"blockedReasons,omitempty"`
+	Counts            SourcePreflightCounts `json:"counts"                    yaml:"counts"`
 	LocalRepoDoctor   *SourcePreflightCheck `json:"localRepoDoctor,omitempty" yaml:"localRepoDoctor,omitempty"`
-	Validate          SourcePreflightCheck  `json:"validate" yaml:"validate"`
+	Validate          SourcePreflightCheck  `json:"validate"                  yaml:"validate"`
 }
 
 type SourcePreflightCounts struct {
-	Components       int `json:"components" yaml:"components"`
-	RequiredInputs   int `json:"requiredInputs" yaml:"requiredInputs"`
-	BoundInputs      int `json:"boundInputs" yaml:"boundInputs"`
-	LocalResources   int `json:"localResources" yaml:"localResources"`
-	LocalPatches     int `json:"localPatches" yaml:"localPatches"`
-	DoctorErrors     int `json:"doctorErrors" yaml:"doctorErrors"`
-	DoctorWarnings   int `json:"doctorWarnings" yaml:"doctorWarnings"`
-	ValidateErrors   int `json:"validateErrors" yaml:"validateErrors"`
+	Components       int `json:"components"       yaml:"components"`
+	RequiredInputs   int `json:"requiredInputs"   yaml:"requiredInputs"`
+	BoundInputs      int `json:"boundInputs"      yaml:"boundInputs"`
+	LocalResources   int `json:"localResources"   yaml:"localResources"`
+	LocalPatches     int `json:"localPatches"     yaml:"localPatches"`
+	DoctorErrors     int `json:"doctorErrors"     yaml:"doctorErrors"`
+	DoctorWarnings   int `json:"doctorWarnings"   yaml:"doctorWarnings"`
+	ValidateErrors   int `json:"validateErrors"   yaml:"validateErrors"`
 	ValidateWarnings int `json:"validateWarnings" yaml:"validateWarnings"`
 }
 
 type SourcePreflightCheck struct {
-	Passed   bool `json:"passed" yaml:"passed"`
-	Errors   int  `json:"errors" yaml:"errors"`
+	Passed   bool `json:"passed"   yaml:"passed"`
+	Errors   int  `json:"errors"   yaml:"errors"`
 	Warnings int  `json:"warnings" yaml:"warnings"`
 }
 
 func (p RenderProvenance) Empty() bool {
 	return strings.TrimSpace(p.ReleaseChannelPath) == "" &&
 		strings.TrimSpace(p.ReleaseChannelDigest) == "" &&
+		strings.TrimSpace(p.ReleaseSource) == "" &&
 		strings.TrimSpace(p.DistributionLine) == "" &&
+		strings.TrimSpace(p.ReleaseChannel) == "" &&
 		strings.TrimSpace(p.BOMPath) == "" &&
 		strings.TrimSpace(p.BOMDigest) == "" &&
 		strings.TrimSpace(p.LocalRepoPath) == "" &&
@@ -122,7 +125,9 @@ func (p RenderProvenance) Normalize() RenderProvenance {
 	normalized := RenderProvenance{
 		ReleaseChannelPath:   strings.TrimSpace(p.ReleaseChannelPath),
 		ReleaseChannelDigest: strings.TrimSpace(p.ReleaseChannelDigest),
+		ReleaseSource:        strings.TrimSpace(p.ReleaseSource),
 		DistributionLine:     strings.TrimSpace(p.DistributionLine),
+		ReleaseChannel:       strings.TrimSpace(p.ReleaseChannel),
 		BOMPath:              strings.TrimSpace(p.BOMPath),
 		BOMDigest:            strings.TrimSpace(p.BOMDigest),
 		LocalRepoPath:        strings.TrimSpace(p.LocalRepoPath),
@@ -137,11 +142,14 @@ func (p RenderProvenance) Normalize() RenderProvenance {
 			if component == "" && path == "" {
 				continue
 			}
-			normalized.PackageSources = append(normalized.PackageSources, RenderProvenancePackageSource{
-				Component: component,
-				Path:      path,
-				Digest:    strings.TrimSpace(source.Digest),
-			})
+			normalized.PackageSources = append(
+				normalized.PackageSources,
+				RenderProvenancePackageSource{
+					Component: component,
+					Path:      path,
+					Digest:    strings.TrimSpace(source.Digest),
+				},
+			)
 		}
 		slices.SortFunc(normalized.PackageSources, func(a, b RenderProvenancePackageSource) int {
 			if a.Component < b.Component {
@@ -163,44 +171,45 @@ func (p RenderProvenance) Normalize() RenderProvenance {
 }
 
 type ExecutionTopology struct {
-	Source      string                  `json:"source,omitempty" yaml:"source,omitempty"`
-	AllNodes    []string                `json:"allNodes,omitempty" yaml:"allNodes,omitempty"`
+	Source      string                  `json:"source,omitempty"      yaml:"source,omitempty"`
+	AllNodes    []string                `json:"allNodes,omitempty"    yaml:"allNodes,omitempty"`
 	FirstMaster string                  `json:"firstMaster,omitempty" yaml:"firstMaster,omitempty"`
-	HostRoles   []ExecutionHostRoleList `json:"hostRoles,omitempty" yaml:"hostRoles,omitempty"`
+	HostRoles   []ExecutionHostRoleList `json:"hostRoles,omitempty"   yaml:"hostRoles,omitempty"`
 }
 
 type ExecutionHostRoleList struct {
-	Host  string   `json:"host" yaml:"host"`
+	Host  string   `json:"host"            yaml:"host"`
 	Roles []string `json:"roles,omitempty" yaml:"roles,omitempty"`
 }
 
 type RenderedComponent struct {
-	Name              string                       `json:"name" yaml:"name"`
-	PackageName       string                       `json:"packageName" yaml:"packageName"`
-	Version           string                       `json:"version" yaml:"version"`
-	Class             packageformat.PackageClass   `json:"class" yaml:"class"`
-	Artifact          string                       `json:"artifact" yaml:"artifact"`
-	Dependencies      []string                     `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
-	Inputs            []packageformat.Input        `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	InputBindings     map[string]string            `json:"inputBindings,omitempty" yaml:"inputBindings,omitempty"`
-	HostInputBindings map[string]map[string]string `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
-	LocalPatches      []string                     `json:"localPatches,omitempty" yaml:"localPatches,omitempty"`
-	ManifestPath      string                       `json:"manifestPath" yaml:"manifestPath"`
-	RootPath          string                       `json:"rootPath" yaml:"rootPath"`
-	Steps             []RenderedStep               `json:"steps" yaml:"steps"`
+	Name              string                         `json:"name"                        yaml:"name"`
+	PackageName       string                         `json:"packageName"                 yaml:"packageName"`
+	Version           string                         `json:"version"                     yaml:"version"`
+	Class             packageformat.PackageClass     `json:"class"                       yaml:"class"`
+	Artifact          string                         `json:"artifact"                    yaml:"artifact"`
+	Dependencies      []string                       `json:"dependencies,omitempty"      yaml:"dependencies,omitempty"`
+	Inputs            []packageformat.Input          `json:"inputs,omitempty"            yaml:"inputs,omitempty"`
+	GeneratedOutputs  packageformat.GeneratedOutputs `json:"generatedOutputs,omitempty"  yaml:"generatedOutputs,omitempty"`
+	InputBindings     map[string]string              `json:"inputBindings,omitempty"     yaml:"inputBindings,omitempty"`
+	HostInputBindings map[string]map[string]string   `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
+	LocalPatches      []string                       `json:"localPatches,omitempty"      yaml:"localPatches,omitempty"`
+	ManifestPath      string                         `json:"manifestPath"                yaml:"manifestPath"`
+	RootPath          string                         `json:"rootPath"                    yaml:"rootPath"`
+	Steps             []RenderedStep                 `json:"steps"                       yaml:"steps"`
 }
 
 type RenderedStep struct {
-	Name           string                        `json:"name" yaml:"name"`
-	Kind           StepKind                      `json:"kind" yaml:"kind"`
-	BundlePath     string                        `json:"bundlePath" yaml:"bundlePath"`
-	SourcePath     string                        `json:"sourcePath" yaml:"sourcePath"`
-	ContentType    packageformat.ContentType     `json:"contentType,omitempty" yaml:"contentType,omitempty"`
-	HookPhase      packageformat.HookPhase       `json:"hookPhase,omitempty" yaml:"hookPhase,omitempty"`
-	Target         packageformat.ExecutionTarget `json:"target,omitempty" yaml:"target,omitempty"`
-	MediaType      string                        `json:"mediaType,omitempty" yaml:"mediaType,omitempty"`
-	Required       bool                          `json:"required,omitempty" yaml:"required,omitempty"`
-	Args           []string                      `json:"args,omitempty" yaml:"args,omitempty"`
+	Name           string                        `json:"name"                     yaml:"name"`
+	Kind           StepKind                      `json:"kind"                     yaml:"kind"`
+	BundlePath     string                        `json:"bundlePath"               yaml:"bundlePath"`
+	SourcePath     string                        `json:"sourcePath"               yaml:"sourcePath"`
+	ContentType    packageformat.ContentType     `json:"contentType,omitempty"    yaml:"contentType,omitempty"`
+	HookPhase      packageformat.HookPhase       `json:"hookPhase,omitempty"      yaml:"hookPhase,omitempty"`
+	Target         packageformat.ExecutionTarget `json:"target,omitempty"         yaml:"target,omitempty"`
+	MediaType      string                        `json:"mediaType,omitempty"      yaml:"mediaType,omitempty"`
+	Required       bool                          `json:"required,omitempty"       yaml:"required,omitempty"`
+	Args           []string                      `json:"args,omitempty"           yaml:"args,omitempty"`
 	TimeoutSeconds int32                         `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
@@ -266,7 +275,11 @@ func (t ExecutionTopology) Normalize() ExecutionTopology {
 		}
 		rolesByHost[host] = normalizeTopologyRoles(item.Roles)
 	}
-	normalized.HostRoles = make([]ExecutionHostRoleList, 0, len(normalized.AllNodes)+len(rolesByHost))
+	normalized.HostRoles = make(
+		[]ExecutionHostRoleList,
+		0,
+		len(normalized.AllNodes)+len(rolesByHost),
+	)
 	seen := make(map[string]struct{}, len(normalized.AllNodes)+len(rolesByHost))
 	for _, host := range normalized.AllNodes {
 		normalized.HostRoles = append(normalized.HostRoles, ExecutionHostRoleList{

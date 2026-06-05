@@ -13,15 +13,16 @@ not be read as a generic repo guarantee.
 Prove that the new package and BOM flow in this repository can bootstrap a real
 single-node Kubernetes cluster with the narrowest possible scope:
 
-1. use three local package directories
-2. render them through `sealos sync render`
-3. stage real runtime and Kubernetes payloads into the packages
+1. select a published, digest-pinned release target
+2. initialize the cluster-local repo for that target
+3. validate and render the target with `sealos sync` commands
 4. apply the rendered bundle on one Linux host
 5. validate that Kubernetes API, node readiness, and Cilium all come up
 
-This PoC is intentionally narrow. `sealos sync apply` now exists for the
-prepared single-node host flow, but this is still not a generic multi-node
-engine, not a reconcile loop, and not a production installer.
+This PoC is intentionally narrow. It follows the 0-to-1 guide directly instead
+of hiding the flow behind repository helper scripts. Package assembly and asset
+fetching belong to release build/publish automation, not the operator-facing
+PoC.
 
 ## What Already Exists In This Repo
 
@@ -34,17 +35,17 @@ render/apply pieces:
   - still supports `--package-source` as a local package-directory override for development
 - `sealos sync apply` in `cmd/sealos/cmd/sync.go`
 - a render path test for this PoC in `cmd/sealos/cmd/sync_test.go`
-- runnable PoC assets under `scripts/poc/minimal-single-node/`
-- a PoC-only validation script:
-  - `scripts/poc/minimal-single-node/validate.sh`
+- PoC package templates and default local inputs under
+  `scripts/poc/minimal-single-node/`
+- direct 0-to-1 install guidance in `docs/guides/day-0-install.md`
 
 The main repo and host path has now been proven on this machine. The remaining
 gaps are broader follow-up work rather than blockers for the PoC itself:
 
-- deciding which generated PoC assets should stay tracked versus generated
-- making fresh-host setup more automated
-- adding a multi-node PoC that exercises the current CLI-driven `sync apply`
-  orchestration path
+- publishing productized release assets outside the repository checkout
+- making fresh-host setup more automated without turning the PoC into a wrapper
+- expanding real-host multi-node acceptance coverage for the current
+  CLI-driven `sync apply` orchestration path
 - extending the PoC beyond one machine and one cluster
 
 ## Current Machine Reality
@@ -59,8 +60,8 @@ PoC execution on 2026-04-27.
 | `gcc` | present at `/usr/bin/gcc` | Satisfies the CGO build requirement for `sealos`. |
 | `go` | `go1.23.1` on `PATH` | `make build BINS=sealos` works. |
 | `sealos` | present on `PATH` | `sealos sync render` works directly. |
-| `containerd`, `ctr`, `runc` | present and staged at PoC versions | Runtime payload is install-ready. |
-| `kubeadm`, `kubelet`, `kubectl` | present and staged at PoC versions | Kubernetes payload is install-ready. |
+| `containerd`, `ctr`, `runc` | present at PoC versions from the selected release target | Runtime payload is install-ready. |
+| `kubeadm`, `kubelet`, `kubectl` | present at PoC versions from the selected release target | Kubernetes payload is install-ready. |
 | PID 1 | `systemd` | `sealos sync apply` can manage services on this host. |
 | `systemctl is-system-running` | `running` | Confirms this host is valid for the PoC apply path. |
 | swap | disabled and `swap.img.swap` masked | Satisfies kubeadm preflight and survives reboot. |
@@ -78,16 +79,17 @@ Bottom line for this environment:
 ### In Scope
 
 - BOM artifact resolution through cached OCI package images
-- local package directories loaded via `packageformat.LoadDir` as the current verified PoC override path
 - one BOM with three components
 - rendering via `sealos sync render`
 - applying via `sealos sync apply`
-- a PoC-only validation script
+- validation with normal Kubernetes and `sealos sync status` commands
 - single-node Kubernetes bootstrap on one Linux host
 
 ### Out Of Scope
 
 - OCI build and push pipeline
+- asset fetching and package staging on the install host
+- repository helper scripts as the PoC operator interface
 - multi-node PoC validation
 - controller-driven multi-node rollout policy
 - upgrades, rollback, or drift workflows
@@ -123,24 +125,89 @@ Current Cilium profile in the repo:
 - `operator.replicas: 1`
 - `hubble.enabled: false`
 
-## Repo Assets To Use
+## Repo Assets And Fixtures
 
 | Path | Role |
 | --- | --- |
-| `scripts/poc/minimal-single-node/bom.yaml` | The PoC BOM. |
-| `scripts/poc/minimal-single-node/packages/containerd/` | Local `containerd-runtime` package. |
-| `scripts/poc/minimal-single-node/packages/kubernetes/` | Local `kubernetes-rootfs` package. |
-| `scripts/poc/minimal-single-node/packages/cilium/` | Local `cilium-cni` package. |
+| `docs/guides/day-0-install.md` | Scriptless 0-to-1 operator flow. |
+| `scripts/poc/minimal-single-node/bom.yaml` | Development BOM fixture for render and package tests. |
+| `scripts/poc/minimal-single-node/packages/containerd/` | Local `containerd-runtime` package fixture. |
+| `scripts/poc/minimal-single-node/packages/kubernetes/` | Local `kubernetes-rootfs` package fixture. |
+| `scripts/poc/minimal-single-node/packages/cilium/` | Local `cilium-cni` package fixture. |
 | `cmd/sealos/cmd/sync_package.go` | First-class `sealos sync package build/push/pull` CLI for OCI component package images. |
-| `scripts/poc/minimal-single-node/render.sh` | Convenience wrapper around `sealos sync render`, preferring the generated OCI BOM when present. |
-| `scripts/poc/minimal-single-node/publish-oci.sh` | Publishes the PoC package set to OCI and writes an OCI-backed BOM. |
-| `scripts/poc/minimal-single-node/stage-assets.sh` | Replaces placeholder payloads with real binaries and manifests. |
-| `scripts/poc/minimal-single-node/fetch-assets.sh` | Optional helper to download Kubernetes, containerd, runc, and Cilium assets. |
 | `scripts/poc/minimal-single-node/smoke.sh` | Safe package lifecycle smoke wrapper for package inspect, local repo init/doctor, source preflight, render, runtime preflight, plan, and `sourcePreflight` metadata verification. |
-| `scripts/poc/minimal-single-node/bootstrap.sh` | End-to-end prepared-host wrapper for build, publish, render, apply, and validate. |
-| `scripts/poc/minimal-single-node/validate.sh` | PoC-only cluster health validation. |
+| `scripts/poc/minimal-single-node/fetch-assets.sh` | Release-builder helper for downloading fixture assets; not an install step. |
+| `scripts/poc/minimal-single-node/stage-assets.sh` | Release-builder helper for assembling fixture package payloads; not an install step. |
+| `scripts/poc/minimal-single-node/publish-oci.sh` | CI/release-builder helper for creating a local OCI-backed fixture release. |
+| `scripts/poc/minimal-single-node/render.sh` | Legacy convenience wrapper around `sealos sync render`; the guide uses direct CLI commands. |
+| `scripts/poc/minimal-single-node/bootstrap.sh` | Legacy end-to-end wrapper retained for compatibility gates, not the PoC operator path. |
+| `scripts/poc/minimal-single-node/validate.sh` | Legacy PoC validator; the guide uses direct Kubernetes and `sync status` checks. |
+
+## Tracked Vs Generated Asset Boundary
+
+The repository tracks package authoring fixtures and small defaults, not every
+artifact required to install a real host.
+
+Tracked PoC inputs:
+
+- package manifests, hooks, service units, default config files, and placeholder
+  rootfs `README` files under `scripts/poc/minimal-single-node/packages/`
+- `scripts/poc/minimal-single-node/bom.yaml` as the local development BOM
+  fixture
+- the current Cilium manifest at
+  `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`,
+  because it is small enough to review and keeps the application package
+  render-ready
+- package lifecycle, smoke, and legacy compatibility helpers under
+  `scripts/poc/minimal-single-node/`
+
+Release-build generated assets:
+
+- runtime binaries and archives for `containerd-runtime`
+- Kubernetes binaries, systemd drop-ins, and bootstrap payloads that turn
+  `kubernetes-rootfs` from a render fixture into an install-ready package
+- refreshed Cilium upstream assets when the Cilium package is regenerated
+- OCI package images, pushed digests, generated release BOMs, and
+  `ReleaseChannel` files
+
+Runtime generated assets:
+
+- cluster-local repos created by `sealos sync local-repo init`
+- rendered bundles created by `sealos sync render`
+- runtime package caches keyed by pulled image digest
+- smoke workdirs, acceptance reports, and local release-source directories
+
+These generated outputs must stay out of git by default. The repository
+`.gitignore` keeps `scripts/poc/minimal-single-node/artifacts/` ignored, and
+real-host PoC runs should write bundles, local repos, reports, and package
+caches under a runtime/work directory such as `/var/lib/sealos/runtime`, `/tmp`,
+or a smoke workdir. If a generated artifact becomes useful as a stable fixture,
+promote only the minimal reviewable file and document why it is no longer
+runtime-only output.
 
 ## Package Responsibilities
+
+Current PoC package set:
+
+| Package | Class | Owner | Required Local Inputs | Health Check |
+| --- | --- | --- | --- | --- |
+| `containerd-runtime` | `rootfs` | node runtime platform owner | `containerd-config` | `containerd` is active and `ctr`/runtime tooling can report the local runtime state. |
+| `kubernetes-rootfs` | `rootfs` | cluster platform owner | `kubeadm-cluster-config` | kube-apiserver is reachable, the node is registered, and cluster bootstrap manifests have been accepted. |
+| `cilium-cni` | `application` | network platform owner | `cilium-values` | Cilium DaemonSet and operator rollouts complete in `kube-system`. |
+
+Planned package expansion is a product contract, not an implemented PoC payload:
+
+| Package | Status | Required Owner/Input/Healthcheck Contract |
+| --- | --- | --- |
+| `kubernetes-control-plane-patch` | next package to model | SRE-owned patch package with explicit policy/admission/static-pod inputs and an API/static-Pod projection healthcheck. |
+| `csi-driver-*` | future addon | storage-owner package with backend Secret references, topology/storage-class inputs, controller/node plugin healthchecks, and data-plane protection notes. |
+| `ingress-controller-*` | future addon | network/edge-owner package with ingress class, exposure, TLS/load-balancer inputs, and route/webhook healthchecks. |
+| `observability-stack` | future addon | observability-owner package with retention/storage/external endpoint inputs and collector/dashboard/alert healthchecks. |
+
+Do not add these packages to the Day 0 PoC BOM until their package directory,
+local repo templates, healthcheck hook, acceptance evidence, and rollback/reset
+boundary are present. The current scriptless PoC intentionally proves the
+three-package cluster baseline first.
 
 ### 1. `containerd-runtime`
 
@@ -213,7 +280,7 @@ Host responsibility:
 - apply the Cilium manifest after Kubernetes bootstrap
 - wait for Cilium daemonset and operator rollout
 
-## Important Repo Constraint: Placeholder Payloads
+## Important Repo Constraint: Release Payloads
 
 The package directories intentionally still contain placeholder payloads for the
 runtime and Kubernetes rootfs content:
@@ -229,16 +296,19 @@ The Cilium package is different now: `scripts/poc/minimal-single-node/packages/c
 is a tracked generated manifest because the package directory is meant to remain
 install-ready once assets have been refreshed.
 
-It is not enough for host apply:
+Those in-tree package directories are not the 0-to-1 install target. They are
+fixtures and development sources. The operator-facing PoC must start from a BOM
+or `ReleaseChannel` whose component package artifacts already point at real,
+published payloads.
 
-- `sealos sync apply` now rejects placeholder or incomplete staged bundles
-  before host mutation starts
-- that includes missing staged runtime or Kubernetes binaries
-- it also rejects placeholder hook scripts and a staged Cilium manifest that
-  does not contain the expected daemonset and deployment payloads
+This boundary matters because `sealos sync apply` rejects placeholder or
+incomplete staged bundles before host mutation starts. That includes missing
+runtime or Kubernetes binaries and a Cilium manifest that does not contain the
+expected daemonset and deployment payloads.
 
-Therefore, any real host run must stage real assets first and then re-render the
-bundle.
+Therefore, any real host run must consume already assembled release packages and
+then render from that release target. Asset fetching, staging, package image
+builds, and package image pushes are release-builder work.
 
 ## BOM Shape
 
@@ -279,22 +349,23 @@ For the validated run recorded in this document:
 
 ## Execution Plan
 
-### Standard Safe Smoke
+### Repository Smoke Gates
 
-Use the standard smoke target when you want to verify the current package
-lifecycle without mutating the host:
+Use the standard smoke target when you want to verify repository package
+fixtures without mutating the host:
 
 ```bash
 make verify-sync-package-smoke
 ```
 
-The default smoke path builds the current `sealos` binary, uses a temporary
-runtime root and local repo, inspects the three package directories, initializes
-and fills the cluster-local repo from package default inputs, runs local-repo
-doctor, validates source inputs, runs source preflight, renders the bundle, runs
-rendered-bundle runtime preflight against a temporary host root, runs `sync plan`,
-and verifies the rendered bundle contains non-blocking `spec.sourcePreflight`
-metadata.
+The default smoke path is a repository gate, not the operator-facing PoC
+install flow. It builds the current `sealos` binary, uses a temporary runtime
+root and local repo, inspects the three package fixture directories,
+initializes and fills the cluster-local repo from package default inputs, runs
+local-repo doctor, validates source inputs, runs source preflight, renders the
+bundle, runs rendered-bundle runtime preflight against a temporary host root,
+runs `sync plan`, and verifies the rendered bundle contains non-blocking
+`spec.sourcePreflight` metadata.
 
 Every smoke run writes an `acceptance-report.yaml` file under its workdir unless
 `--report-file` is passed through `SYNC_PACKAGE_SMOKE_ARGS`. The report records
@@ -332,8 +403,9 @@ make verify-sync-package-apply I_UNDERSTAND_THIS_MUTATES_HOST=1
 The apply acceptance target requires the explicit confirmation variable because
 it mutates the real host by default. It reuses the same source preflight, render,
 runtime preflight, and plan path, then runs `sync apply`, `sync status`,
-`sync diff`, and `validate.sh` against the selected kubeconfig and host root.
-Extra smoke arguments can still be passed through `SYNC_PACKAGE_SMOKE_ARGS`.
+`sync diff`, and legacy repository validation checks against the selected
+kubeconfig and host root. Extra smoke arguments can still be passed through
+`SYNC_PACKAGE_SMOKE_ARGS`.
 
 A stricter mutating acceptance target also validates the current revert loop:
 
@@ -379,97 +451,94 @@ Success criteria:
 
 - `./bin/linux_amd64/sealos version` runs
 
-### Phase 1: Stage Real PoC Assets
+### Phase 1: Select A Release Target
 
 Status:
 
 - completed on this machine
 
-Fastest path on this machine:
-
-- reuse the already installed host binaries for containerd and Kubernetes
-- provide a real Cilium manifest
-
-Command shape:
+The PoC install starts from release metadata that already points at real package
+payloads:
 
 ```bash
-cd <repo-root>
-scripts/poc/minimal-single-node/stage-assets.sh \
-  --kubelet-bin /usr/bin/kubelet \
-  --cilium-manifest /absolute/path/to/real/cilium.yaml
-```
-
-Notes:
-
-- on this machine, `stage-assets.sh` can auto-discover:
-  - `/usr/bin/containerd`
-  - `/usr/bin/containerd-shim-runc-v2`
-  - `/usr/bin/ctr`
-  - `/usr/bin/runc`
-  - `/usr/bin/kubeadm`
-  - `/usr/bin/kubectl`
-- `--kubelet-bin` is still required
-- `--cilium-manifest` is required unless a chart directory and `helm` are
-  provided
-
-Optional helper path if you want the repo to fetch assets instead:
-
-```bash
-cd <repo-root>
-assets_file=/tmp/poc-minimal-assets.env
-scripts/poc/minimal-single-node/fetch-assets.sh > "${assets_file}"
-set -a
-. "${assets_file}"
-set +a
-
-scripts/poc/minimal-single-node/stage-assets.sh \
-  --containerd-bin "${containerd_bin}" \
-  --containerd-shim-bin "${containerd_shim_bin}" \
-  --ctr-bin "${ctr_bin}" \
-  --runc-bin "${runc_bin}" \
-  --kubeadm-bin "${kubeadm_bin}" \
-  --kubelet-bin "${kubelet_bin}" \
-  --kubectl-bin "${kubectl_bin}" \
-  --cilium-manifest "${cilium_manifest}"
+CLUSTER=poc-minimal
+RUNTIME_ROOT=/var/lib/sealos/runtime
+RELEASE_SOURCE=/var/lib/sealos/distribution/release-source
+RELEASE_LINE=minimal-single-node
+RELEASE_CHANNEL=alpha
+LOCAL_REPO=/var/lib/sealos/distribution/${CLUSTER}/local-repo
+KUBECONFIG=/etc/kubernetes/admin.conf
+BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
 ```
 
 Success criteria:
 
-- real binaries exist under:
-  - `packages/containerd/rootfs/usr/bin/`
-  - `packages/kubernetes/rootfs/usr/bin/`
-- `packages/cilium/manifests/cilium.yaml` is a real rendered install manifest
+- `${RELEASE_SOURCE}/channels/${RELEASE_LINE}/${RELEASE_CHANNEL}.yaml` exists
+- the resolved channel points at a BOM with `spec.bomDigest`
+- the BOM component artifacts are digest-pinned OCI package images
 
-### Phase 2: Render The Bundle
+### Phase 2: Initialize Local Repo And Render
 
 Status:
 
 - completed on this machine
 
-Recommended command:
+Initialize the local repo from the selected release target:
 
 ```bash
 cd <repo-root>
-scripts/poc/minimal-single-node/publish-oci.sh \
-  --registry-prefix localhost:5065/poc-minimal > /tmp/poc-oci.env
-
-set -a
-source /tmp/poc-oci.env
-set +a
-
-scripts/poc/minimal-single-node/render.sh --cluster poc-minimal
+sudo ./bin/linux_amd64/sealos sync local-repo init \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --output-dir "$LOCAL_REPO" \
+  --overwrite
 ```
 
-Developer override path when iterating on in-tree package directories:
+The current PoC packages require three local inputs. For the stock PoC values,
+fill them from the tracked package defaults:
 
 ```bash
 cd <repo-root>
-./bin/linux_amd64/sealos sync render \
-  --file scripts/poc/minimal-single-node/bom.yaml \
-  --cluster poc-minimal \
-  --package-source containerd=scripts/poc/minimal-single-node/packages/containerd \
-  --package-source kubernetes=scripts/poc/minimal-single-node/packages/kubernetes \
-  --package-source cilium=scripts/poc/minimal-single-node/packages/cilium
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
+  "${LOCAL_REPO}/inputs/containerd/containerd-config.toml"
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
+  "${LOCAL_REPO}/inputs/kubernetes/kubeadm-cluster-config.yaml"
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
+  "${LOCAL_REPO}/inputs/cilium/cilium-values.yaml"
+```
+
+Validate the source side and render directly with the CLI:
+
+```bash
+sudo ./bin/linux_amd64/sealos sync local-repo doctor \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo ./bin/linux_amd64/sealos sync validate \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo ./bin/linux_amd64/sealos sync render \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
 ```
 
 Success criteria:
@@ -482,10 +551,9 @@ Success criteria:
 - the OCI-backed render path pulls package images from a registry and still
   produces the same rendered bundle shape
 - pulled package images are cached under the cluster runtime distribution store by image digest
-- the local override path still works for in-tree development without buildah or
-  registry usage
+- local repo doctor and source validation pass without blocking diagnostics
 
-### Phase 3: Apply On A Real Host
+### Phase 3: Preflight And Apply On A Real Host
 
 Status:
 
@@ -512,10 +580,17 @@ Product CLI command used on this host:
 
 ```bash
 cd <repo-root>
-./bin/linux_amd64/sealos sync apply \
-  --cluster poc-minimal \
-  --bundle-dir <sealos-run-root>/distribution/bundles/current \
-  --kubeconfig /etc/kubernetes/admin.conf
+sudo ./bin/linux_amd64/sealos sync preflight \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --bundle-dir "$BUNDLE" \
+  --kubeconfig "$KUBECONFIG"
+
+sudo ./bin/linux_amd64/sealos sync apply \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --bundle-dir "$BUNDLE" \
+  --kubeconfig "$KUBECONFIG"
 ```
 
 Expected apply order in the current `sync apply` executor:
@@ -533,7 +608,7 @@ Expected apply order in the current `sync apply` executor:
 11. Kubernetes healthcheck
 12. apply Cilium manifests
 13. Cilium healthcheck
-14. optional `validate.sh`
+14. health checks with Kubernetes rollout and `sync status` commands
 
 Success criteria:
 
@@ -551,20 +626,22 @@ Command:
 
 ```bash
 cd <repo-root>
-scripts/poc/minimal-single-node/validate.sh \
-  --cluster poc-minimal \
-  --bundle-dir <sealos-run-root>/distribution/bundles/current \
-  --kubeconfig /etc/kubernetes/admin.conf
+kubectl --kubeconfig "$KUBECONFIG" get nodes -o wide
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status ds/cilium --timeout=180s
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status deploy/cilium-operator --timeout=180s
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status deploy/coredns --timeout=180s
+sudo ./bin/linux_amd64/sealos sync status \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER"
 ```
 
-Validation checks already implemented:
+Validation checks:
 
-- API readiness via `/readyz`
 - node readiness
 - `coredns` rollout
 - `cilium` daemonset rollout
 - `cilium-operator` deployment rollout
-- smoke pod scheduling and readiness
+- rendered/applied distribution state is visible through `sync status`
 
 ## Milestone Status
 
@@ -576,9 +653,10 @@ Status:
 
 Exit criteria:
 
-- `sealos sync render` succeeds from local package sources
+- `sealos sync render` succeeds from a selected BOM or `ReleaseChannel`
+- no PoC wrapper is required for target selection or render
 
-### Milestone 2: Real-Payload Bundle
+### Milestone 2: Real-Payload Release Target
 
 Status:
 
@@ -586,9 +664,8 @@ Status:
 
 Exit criteria:
 
-- placeholder payloads are replaced with real runtime, Kubernetes, and Cilium
-  assets
-- bundle is re-rendered after staging
+- the selected BOM points at digest-pinned package artifacts
+- rendered bundles contain real runtime, Kubernetes, and Cilium payloads
 
 ### Milestone 3: Single-Node Host Bootstrap
 
@@ -611,7 +688,7 @@ Status:
 Exit criteria:
 
 - Cilium is healthy
-- smoke pod reaches `Ready`
+- distribution status is available after apply
 
 ## Main Risks
 
@@ -619,15 +696,15 @@ Exit criteria:
 
 Mitigation:
 
-- keep the doc explicit that placeholders are acceptable for render tests but
-  not for host bootstrap
-- always stage assets before the final render used for install
+- keep the doc explicit that in-tree placeholder package directories are
+  development fixtures, not install targets
+- always render host installs from a published release target
 
 ### Risk: Repeatability on a fresh host
 
 Mitigation:
 
-- keep the repo scripts executable and scriptable
+- keep the install path as explicit `sealos sync` commands
 - keep generated artifacts out of git by default
 - preserve the exact package versions and host prerequisites in this doc
 
@@ -650,15 +727,11 @@ Mitigation:
 
 1. Reboot this host once and rerun a short health check to confirm swap stays
    disabled and the cluster survives restart as expected.
-2. Decide whether the real Cilium manifest under
-   `scripts/poc/minimal-single-node/packages/cilium/manifests/cilium.yaml`
-   should remain tracked or return to a generated-only workflow.
-3. Use `scripts/poc/minimal-single-node/bootstrap.sh` as the default repeatable
-   prepared-host path. It now exercises `publish -> render -> apply` through the
-   OCI-backed package flow, and should be extended only if new host
-   prerequisites or package inputs appear.
-4. If this PoC will be reused, add a reset or cleanup script for tearing down
-   the single-node cluster between runs.
+2. Publish the minimal PoC release source as a stable test fixture outside the
+   repository checkout.
+3. Keep CI helper scripts scoped to fixture generation and repository gates.
+4. Add a protected real-host multi-node validation path that runs the same
+   scriptless `sync render -> preflight -> apply -> status` sequence.
 
 ## Bottom Line
 
@@ -669,18 +742,18 @@ Kubernetes PoC:
 - one Kubernetes package
 - one Cilium package
 - one BOM
-- one render command
-- one end-to-end bootstrap wrapper
-- one `sync apply` command
-- one PoC-only validator
+- one release target selection
+- one local repo initialization path
+- one `sync render -> preflight -> apply -> status` command sequence
 
 The core PoC is no longer hypothetical in this repo or on this host:
 
 - `sealos` built successfully
-- real payloads were staged successfully
-- the bundle rendered successfully
+- a digest-pinned release target rendered successfully
+- preflight and apply succeeded
 - the single-node control plane bootstrapped successfully
 - Cilium became healthy
-- the smoke pod reached `Ready`
+- distribution status was available after apply
 
-The next work is hardening and repeatability, not first-time feasibility.
+The next work is hardening release publication and repeatability, not first-time
+feasibility.

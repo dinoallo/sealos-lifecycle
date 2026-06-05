@@ -15,17 +15,17 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	"github.com/labring/sealos/pkg/distribution"
 	"github.com/labring/sealos/pkg/distribution/agent"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
@@ -37,8 +37,15 @@ const (
 
 	DistributionTargetReasonReconcileSucceeded = "ReconcileSucceeded"
 	DistributionTargetReasonReconcileFailed    = "ReconcileFailed"
+	DistributionTargetReasonReconcilePartial   = "ReconcilePartiallyFailed"
 	DistributionTargetReasonRolloutPaused      = "RolloutPaused"
 	DistributionTargetReasonRolloutRolledBack  = "RolloutRolledBack"
+
+	DistributionTargetPhaseSucceeded       DistributionTargetPhase = "Succeeded"
+	DistributionTargetPhaseRetrying        DistributionTargetPhase = "Retrying"
+	DistributionTargetPhasePartiallyFailed DistributionTargetPhase = "PartiallyFailed"
+	DistributionTargetPhasePaused          DistributionTargetPhase = "Paused"
+	DistributionTargetPhaseRollbackHold    DistributionTargetPhase = "RollbackHold"
 )
 
 var GroupVersion = schema.GroupVersion{Group: distribution.GroupName, Version: distribution.Version}
@@ -47,6 +54,9 @@ type DistributionTargetSpec struct {
 	ClusterName        string                      `json:"clusterName,omitempty"`
 	BOMPath            string                      `json:"bomPath,omitempty"`
 	ReleaseChannelPath string                      `json:"releaseChannelPath,omitempty"`
+	ReleaseSource      string                      `json:"releaseSource,omitempty"`
+	ReleaseLine        string                      `json:"releaseLine,omitempty"`
+	Channel            string                      `json:"channel,omitempty"`
 	LocalRepoPath      string                      `json:"localRepoPath,omitempty"`
 	LocalPatchRevision string                      `json:"localPatchRevision,omitempty"`
 	PackageSources     []DistributionPackageSource `json:"packageSources,omitempty"`
@@ -56,6 +66,7 @@ type DistributionTargetSpec struct {
 	RolloutPolicyRef   *DistributionPolicyRef      `json:"rolloutPolicyRef,omitempty"`
 	RolloutBatchSize   int                         `json:"rolloutBatchSize,omitempty"`
 	RequeueAfter       *metav1.Duration            `json:"requeueAfter,omitempty"`
+	RetryBackoff       *metav1.Duration            `json:"retryBackoff,omitempty"`
 }
 
 type DistributionPackageSource struct {
@@ -76,11 +87,18 @@ type DistributionRolloutPolicyStatus struct {
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
+type DistributionTargetPhase string
+
 type DistributionTargetStatus struct {
-	ObservedGeneration int64                        `json:"observedGeneration,omitempty"`
-	LastReconcileTime  *metav1.Time                 `json:"lastReconcileTime,omitempty"`
-	LastResult         *DistributionReconcileResult `json:"lastResult,omitempty"`
-	Conditions         []metav1.Condition           `json:"conditions,omitempty"`
+	ObservedGeneration int64                         `json:"observedGeneration,omitempty"`
+	Phase              DistributionTargetPhase       `json:"phase,omitempty"`
+	LastReconcileTime  *metav1.Time                  `json:"lastReconcileTime,omitempty"`
+	LastResult         *DistributionReconcileResult  `json:"lastResult,omitempty"`
+	RetryCount         int64                         `json:"retryCount,omitempty"`
+	NextRetryTime      *metav1.Time                  `json:"nextRetryTime,omitempty"`
+	HoldReason         string                        `json:"holdReason,omitempty"`
+	LastDiagnostic     *DistributionTargetDiagnostic `json:"lastDiagnostic,omitempty"`
+	Conditions         []metav1.Condition            `json:"conditions,omitempty"`
 }
 
 type DistributionReconcileResult struct {
@@ -91,6 +109,13 @@ type DistributionReconcileResult struct {
 	BundlePath         string `json:"bundlePath,omitempty"`
 	DesiredStateDigest string `json:"desiredStateDigest,omitempty"`
 	AppliedRevision    string `json:"appliedRevisionPath,omitempty"`
+}
+
+type DistributionTargetDiagnostic struct {
+	Type    string       `json:"type,omitempty"`
+	Reason  string       `json:"reason,omitempty"`
+	Message string       `json:"message,omitempty"`
+	Time    *metav1.Time `json:"time,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -107,8 +132,8 @@ type DistributionTarget struct {
 // +kubebuilder:object:root=true
 
 type DistributionTargetList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `                     json:",inline"`
+	metav1.ListMeta `                     json:"metadata,omitempty"`
 	Items           []DistributionTarget `json:"items"`
 }
 
@@ -126,8 +151,8 @@ type DistributionRolloutPolicy struct {
 // +kubebuilder:object:root=true
 
 type DistributionRolloutPolicyList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `                            json:",inline"`
+	metav1.ListMeta `                            json:"metadata,omitempty"`
 	Items           []DistributionRolloutPolicy `json:"items"`
 }
 
@@ -268,6 +293,10 @@ func (s *DistributionTargetSpec) DeepCopyInto(out *DistributionTargetSpec) {
 		requeueAfter := *s.RequeueAfter
 		out.RequeueAfter = &requeueAfter
 	}
+	if s.RetryBackoff != nil {
+		retryBackoff := *s.RetryBackoff
+		out.RetryBackoff = &retryBackoff
+	}
 }
 
 func (s *DistributionRolloutPolicySpec) DeepCopyInto(out *DistributionRolloutPolicySpec) {
@@ -292,6 +321,18 @@ func (s *DistributionTargetStatus) DeepCopyInto(out *DistributionTargetStatus) {
 		lastResult := *s.LastResult
 		out.LastResult = &lastResult
 	}
+	if s.NextRetryTime != nil {
+		nextRetryTime := *s.NextRetryTime
+		out.NextRetryTime = &nextRetryTime
+	}
+	if s.LastDiagnostic != nil {
+		lastDiagnostic := *s.LastDiagnostic
+		out.LastDiagnostic = &lastDiagnostic
+		if s.LastDiagnostic.Time != nil {
+			diagnosticTime := *s.LastDiagnostic.Time
+			out.LastDiagnostic.Time = &diagnosticTime
+		}
+	}
 	if s.Conditions != nil {
 		out.Conditions = make([]metav1.Condition, len(s.Conditions))
 		copy(out.Conditions, s.Conditions)
@@ -299,11 +340,41 @@ func (s *DistributionTargetStatus) DeepCopyInto(out *DistributionTargetStatus) {
 }
 
 func (s DistributionTargetSpec) Validate() error {
-	if strings.TrimSpace(s.BOMPath) == "" && strings.TrimSpace(s.ReleaseChannelPath) == "" {
-		return fmt.Errorf("one of spec.bomPath or spec.releaseChannelPath is required")
+	lookupFields := 0
+	if strings.TrimSpace(s.ReleaseSource) != "" {
+		lookupFields++
 	}
-	if strings.TrimSpace(s.BOMPath) != "" && strings.TrimSpace(s.ReleaseChannelPath) != "" {
-		return fmt.Errorf("use either spec.bomPath or spec.releaseChannelPath, not both")
+	if strings.TrimSpace(s.ReleaseLine) != "" {
+		lookupFields++
+	}
+	if strings.TrimSpace(s.Channel) != "" {
+		lookupFields++
+	}
+	lookupSelected := lookupFields > 0
+	targets := 0
+	if strings.TrimSpace(s.BOMPath) != "" {
+		targets++
+	}
+	if strings.TrimSpace(s.ReleaseChannelPath) != "" {
+		targets++
+	}
+	if lookupSelected {
+		targets++
+	}
+	if targets == 0 {
+		return errors.New(
+			"one of spec.bomPath, spec.releaseChannelPath, or spec.releaseSource with spec.releaseLine and spec.channel is required",
+		)
+	}
+	if targets > 1 {
+		return errors.New(
+			"use only one target selector: spec.bomPath, spec.releaseChannelPath, or spec.releaseSource with spec.releaseLine and spec.channel",
+		)
+	}
+	if lookupSelected && lookupFields != 3 {
+		return errors.New(
+			"spec.releaseSource, spec.releaseLine, and spec.channel must be set together",
+		)
 	}
 	if s.RolloutBatchSize < 0 {
 		return fmt.Errorf("spec.rolloutBatchSize cannot be negative")
@@ -313,6 +384,9 @@ func (s DistributionTargetSpec) Validate() error {
 	}
 	if s.RequeueAfter != nil && s.RequeueAfter.Duration < 0 {
 		return fmt.Errorf("spec.requeueAfter cannot be negative")
+	}
+	if s.RetryBackoff != nil && s.RetryBackoff.Duration < 0 {
+		return errors.New("spec.retryBackoff cannot be negative")
 	}
 	seen := make(map[string]struct{}, len(s.PackageSources))
 	for i, source := range s.PackageSources {
@@ -344,12 +418,17 @@ func (s DistributionTargetSpec) AgentOptions(defaults Defaults) (agent.Options, 
 		return agent.Options{}, err
 	}
 	if s.RolloutPolicyRef != nil {
-		return agent.Options{}, fmt.Errorf("spec.rolloutPolicyRef requires resolving a DistributionRolloutPolicy")
+		return agent.Options{}, errors.New(
+			"spec.rolloutPolicyRef requires resolving a DistributionRolloutPolicy",
+		)
 	}
 	return s.agentOptions(defaults, reconcile.RolloutStrategy{BatchSize: s.RolloutBatchSize})
 }
 
-func (s DistributionTargetSpec) AgentOptionsWithRollout(defaults Defaults, rollout reconcile.RolloutStrategy) (agent.Options, error) {
+func (s DistributionTargetSpec) AgentOptionsWithRollout(
+	defaults Defaults,
+	rollout reconcile.RolloutStrategy,
+) (agent.Options, error) {
 	if err := s.Validate(); err != nil {
 		return agent.Options{}, err
 	}
@@ -359,7 +438,10 @@ func (s DistributionTargetSpec) AgentOptionsWithRollout(defaults Defaults, rollo
 	return s.agentOptions(defaults, rollout)
 }
 
-func (s DistributionTargetSpec) agentOptions(defaults Defaults, rollout reconcile.RolloutStrategy) (agent.Options, error) {
+func (s DistributionTargetSpec) agentOptions(
+	defaults Defaults,
+	rollout reconcile.RolloutStrategy,
+) (agent.Options, error) {
 	clusterName := strings.TrimSpace(s.ClusterName)
 	if clusterName == "" {
 		clusterName = strings.TrimSpace(defaults.ClusterName)
@@ -392,8 +474,14 @@ func (s DistributionTargetSpec) agentOptions(defaults Defaults, rollout reconcil
 	}
 
 	return agent.Options{
-		ClusterName:        clusterName,
-		Target:             agent.TargetOptions{BOMPath: strings.TrimSpace(s.BOMPath), ReleaseChannelPath: strings.TrimSpace(s.ReleaseChannelPath)},
+		ClusterName: clusterName,
+		Target: agent.TargetOptions{
+			BOMPath:            strings.TrimSpace(s.BOMPath),
+			ReleaseChannelPath: strings.TrimSpace(s.ReleaseChannelPath),
+			ReleaseSource:      strings.TrimSpace(s.ReleaseSource),
+			ReleaseLine:        strings.TrimSpace(s.ReleaseLine),
+			Channel:            strings.TrimSpace(s.Channel),
+		},
 		LocalRepoPath:      strings.TrimSpace(s.LocalRepoPath),
 		LocalPatchRevision: strings.TrimSpace(s.LocalPatchRevision),
 		PackageSources:     packageSources,

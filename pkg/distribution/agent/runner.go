@@ -25,8 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencontainers/go-digest"
-
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
@@ -34,11 +32,15 @@ import (
 	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
 	"github.com/labring/sealos/pkg/distribution/state"
+	"github.com/opencontainers/go-digest"
 )
 
 type TargetOptions struct {
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 }
 
 type PackageSource struct {
@@ -61,12 +63,12 @@ type Options struct {
 }
 
 type Result struct {
-	ClusterName        string `json:"clusterName" yaml:"clusterName"`
-	BOMName            string `json:"bomName" yaml:"bomName"`
-	Revision           string `json:"revision" yaml:"revision"`
-	Channel            string `json:"channel" yaml:"channel"`
-	BundlePath         string `json:"bundlePath" yaml:"bundlePath"`
-	DesiredStateDigest string `json:"desiredStateDigest" yaml:"desiredStateDigest"`
+	ClusterName        string `json:"clusterName"         yaml:"clusterName"`
+	BOMName            string `json:"bomName"             yaml:"bomName"`
+	Revision           string `json:"revision"            yaml:"revision"`
+	Channel            string `json:"channel"             yaml:"channel"`
+	BundlePath         string `json:"bundlePath"          yaml:"bundlePath"`
+	DesiredStateDigest string `json:"desiredStateDigest"  yaml:"desiredStateDigest"`
 	AppliedRevision    string `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
 }
 
@@ -79,8 +81,12 @@ type Runner struct {
 type resolvedTarget struct {
 	bom                *bom.BOM
 	bomPath            string
+	bomDigest          string
 	releaseChannel     *bom.ReleaseChannelDocument
 	releaseChannelPath string
+	releaseSource      string
+	releaseLine        string
+	channel            bom.ReleaseChannel
 }
 
 type packageLoader struct {
@@ -200,11 +206,29 @@ func normalizeOptions(opts Options) Options {
 func resolveTarget(opts TargetOptions) (*resolvedTarget, error) {
 	bomPath := strings.TrimSpace(opts.BOMPath)
 	channelPath := strings.TrimSpace(opts.ReleaseChannelPath)
+	releaseSource := strings.TrimSpace(opts.ReleaseSource)
+	releaseLine := strings.TrimSpace(opts.ReleaseLine)
+	channel := bom.ReleaseChannel(strings.TrimSpace(opts.Channel))
+	lookupSelected := releaseSource != "" || releaseLine != "" || channel != ""
+	selected := 0
+	if bomPath != "" {
+		selected++
+	}
+	if channelPath != "" {
+		selected++
+	}
+	if lookupSelected {
+		selected++
+	}
 	switch {
-	case bomPath == "" && channelPath == "":
-		return nil, fmt.Errorf("one of BOMPath or ReleaseChannelPath is required")
-	case bomPath != "" && channelPath != "":
-		return nil, fmt.Errorf("use either BOMPath or ReleaseChannelPath, not both")
+	case selected == 0:
+		return nil, errors.New(
+			"one of BOMPath, ReleaseChannelPath, or ReleaseSource with ReleaseLine and Channel is required",
+		)
+	case selected > 1:
+		return nil, errors.New(
+			"use only one target selector: BOMPath, ReleaseChannelPath, or ReleaseSource with ReleaseLine and Channel",
+		)
 	case channelPath != "":
 		resolved, err := bom.ResolveReleaseChannelFile(channelPath)
 		if err != nil {
@@ -213,8 +237,30 @@ func resolveTarget(opts TargetOptions) (*resolvedTarget, error) {
 		return &resolvedTarget{
 			bom:                resolved.BOM,
 			bomPath:            resolved.BOMPath,
+			bomDigest:          resolved.BOMDigest,
 			releaseChannel:     resolved.Channel,
 			releaseChannelPath: channelPath,
+		}, nil
+	case lookupSelected:
+		if releaseSource == "" || releaseLine == "" || channel == "" {
+			return nil, errors.New("ReleaseSource, ReleaseLine, and Channel must be set together")
+		}
+		resolved, err := bom.ResolveReleaseChannelLookup(bom.ReleaseChannelLookupOptions{
+			DistributionLine: releaseLine,
+			Channel:          channel,
+			Source:           releaseSource,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &resolvedTarget{
+			bom:            resolved.BOM,
+			bomPath:        resolved.BOMPath,
+			bomDigest:      resolved.BOMDigest,
+			releaseChannel: resolved.Channel,
+			releaseSource:  releaseSource,
+			releaseLine:    releaseLine,
+			channel:        channel,
 		}, nil
 	default:
 		doc, err := bom.LoadFile(bomPath)
@@ -236,7 +282,11 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 	if strings.TrimSpace(opts.LocalRepoPath) != "" {
 		localRepoPath, err = filepath.Abs(opts.LocalRepoPath)
 		if err != nil {
-			return reconcile.Options{}, fmt.Errorf("resolve local repo path %q: %w", opts.LocalRepoPath, err)
+			return reconcile.Options{}, fmt.Errorf(
+				"resolve local repo path %q: %w",
+				opts.LocalRepoPath,
+				err,
+			)
 		}
 		repo, err = localrepo.Load(localRepoPath)
 		if err != nil {
@@ -248,7 +298,9 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 	var fallbackSources hydrate.SourceProvider
 	if len(localRoots) < target.bom.PackageCount() {
 		if opts.Mounter == nil {
-			return reconcile.Options{}, fmt.Errorf("image mounter cannot be nil when BOM components are not fully backed by package sources")
+			return reconcile.Options{}, errors.New(
+				"image mounter cannot be nil when BOM components are not fully backed by package sources",
+			)
 		}
 		resolver := &cachedArtifactResolver{
 			cache: &ocipackage.Cache{
@@ -260,7 +312,13 @@ func materializeOptions(target *resolvedTarget, opts Options) (reconcile.Options
 		fallbackSources = resolver
 	}
 
-	provenance, err := renderProvenance(target, localRepoPath, repo, opts.LocalPatchRevision, localRoots)
+	provenance, err := renderProvenance(
+		target,
+		localRepoPath,
+		repo,
+		opts.LocalPatchRevision,
+		localRoots,
+	)
 	if err != nil {
 		return reconcile.Options{}, err
 	}
@@ -295,7 +353,10 @@ func cacheRoot(opts Options) string {
 	return filepath.Join(reconcile.DistributionRootPath(opts.ClusterName), "package-cache")
 }
 
-func resolvePackageSources(doc *bom.BOM, sources []PackageSource) (map[string]string, map[string]*packageformat.ComponentPackage, error) {
+func resolvePackageSources(
+	doc *bom.BOM,
+	sources []PackageSource,
+) (map[string]string, map[string]*packageformat.ComponentPackage, error) {
 	localRoots := make(map[string]string, len(sources))
 	localPackages := make(map[string]*packageformat.ComponentPackage, len(sources))
 	if len(sources) == 0 {
@@ -334,37 +395,60 @@ func resolvePackageSources(doc *bom.BOM, sources []PackageSource) (map[string]st
 	return localRoots, localPackages, nil
 }
 
-func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localrepo.Repo, localPatchRevision string, packageSources map[string]string) (hydrate.RenderProvenance, error) {
+func renderProvenance(
+	target *resolvedTarget,
+	localRepoPath string,
+	repo *localrepo.Repo,
+	localPatchRevision string,
+	packageSources map[string]string,
+) (hydrate.RenderProvenance, error) {
 	provenance := hydrate.RenderProvenance{
 		LocalRepoPath:      strings.TrimSpace(localRepoPath),
 		LocalPatchRevision: strings.TrimSpace(localPatchRevision),
 	}
 	if target != nil && target.releaseChannel != nil {
 		provenance.DistributionLine = target.releaseChannel.Distribution()
+		provenance.ReleaseChannel = string(target.releaseChannel.Spec.Channel)
+	}
+	if target != nil {
+		provenance.ReleaseSource = strings.TrimSpace(target.releaseSource)
 	}
 	if target != nil && strings.TrimSpace(target.releaseChannelPath) != "" {
 		absChannelPath, err := filepath.Abs(target.releaseChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve ReleaseChannel path %q: %w", target.releaseChannelPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf(
+				"resolve ReleaseChannel path %q: %w",
+				target.releaseChannelPath,
+				err,
+			)
 		}
 		provenance.ReleaseChannelPath = absChannelPath
 		data, err := os.ReadFile(absChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read ReleaseChannel path %q: %w", absChannelPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf(
+				"read ReleaseChannel path %q: %w",
+				absChannelPath,
+				err,
+			)
 		}
 		provenance.ReleaseChannelDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if target != nil && strings.TrimSpace(target.bomPath) != "" {
-		absBOMPath, err := filepath.Abs(target.bomPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.bomPath, err)
+		if isRemoteTargetPath(target.bomPath) {
+			provenance.BOMPath = strings.TrimSpace(target.bomPath)
+			provenance.BOMDigest = strings.TrimSpace(target.bomDigest)
+		} else {
+			absBOMPath, err := filepath.Abs(target.bomPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.bomPath, err)
+			}
+			provenance.BOMPath = absBOMPath
+			data, err := os.ReadFile(absBOMPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
+			}
+			provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 		}
-		provenance.BOMPath = absBOMPath
-		data, err := os.ReadFile(absBOMPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
-		}
-		provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if repo != nil {
 		provenance.LocalRepoRevision = repo.Revision
@@ -379,16 +463,28 @@ func renderProvenance(target *resolvedTarget, localRepoPath string, repo *localr
 		for _, name := range names {
 			sourceDigest, err := hydrate.DigestDirectory(packageSources[name])
 			if err != nil {
-				return hydrate.RenderProvenance{}, fmt.Errorf("digest package source %q: %w", packageSources[name], err)
+				return hydrate.RenderProvenance{}, fmt.Errorf(
+					"digest package source %q: %w",
+					packageSources[name],
+					err,
+				)
 			}
-			provenance.PackageSources = append(provenance.PackageSources, hydrate.RenderProvenancePackageSource{
-				Component: name,
-				Path:      packageSources[name],
-				Digest:    sourceDigest.String(),
-			})
+			provenance.PackageSources = append(
+				provenance.PackageSources,
+				hydrate.RenderProvenancePackageSource{
+					Component: name,
+					Path:      packageSources[name],
+					Digest:    sourceDigest.String(),
+				},
+			)
 		}
 	}
 	return provenance, nil
+}
+
+func isRemoteTargetPath(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 func (l packageLoader) Load(image string) (*packageformat.ComponentPackage, error) {
@@ -434,11 +530,19 @@ func (r *cachedArtifactResolver) Source(component hydrate.ComponentPlan) (hydrat
 		return hydrate.Source{}, fmt.Errorf("cached artifact resolver cannot be nil")
 	}
 	if strings.TrimSpace(component.Artifact) == "" {
-		return hydrate.Source{}, fmt.Errorf("artifact reference for component %q cannot be empty", component.Name)
+		return hydrate.Source{}, fmt.Errorf(
+			"artifact reference for component %q cannot be empty",
+			component.Name,
+		)
 	}
 	root, _, err := r.cache.Ensure(component.Artifact)
 	if err != nil {
-		return hydrate.Source{}, fmt.Errorf("cache component %q artifact %q: %w", component.Name, component.Artifact, err)
+		return hydrate.Source{}, fmt.Errorf(
+			"cache component %q artifact %q: %w",
+			component.Name,
+			component.Artifact,
+			err,
+		)
 	}
 	return hydrate.Source{Root: root}, nil
 }
@@ -469,7 +573,11 @@ func markDegraded(clusterName, reason string, err error) error {
 	return err
 }
 
-func sleepContext(sleep func(context.Context, time.Duration) error, ctx context.Context, d time.Duration) error {
+func sleepContext(
+	sleep func(context.Context, time.Duration) error,
+	ctx context.Context,
+	d time.Duration,
+) error {
 	if sleep != nil {
 		return sleep(ctx, d)
 	}

@@ -1,7 +1,7 @@
 # Sealos Distribution Controller 安装指南
 
-本文说明如何安装当前 `DistributionTarget` controller manifests，并启动一个最小的
-controller 驱动 reconcile loop。
+本文说明如何安装当前 `DistributionTarget` controller manifests，并启动一个 controller 驱动
+reconcile loop。
 
 ## 会安装什么
 
@@ -14,10 +14,19 @@ controller 驱动 reconcile loop。
 - `sealos-distribution-controller` service account、role 和 role binding
 - 一个运行 `sealos-agent --controller` 的 deployment
 
+当前有两个安装 profile：
+
+| Profile | 路径 | 用途 |
+| --- | --- | --- |
+| `host-agent` | `deploy/distribution-controller/base` | 默认开发和兼容 profile。它是当前最小可用的 privileged host-mount agent 路径。 |
+| `production-host-agent` | `deploy/distribution-controller/overlays/production-host-agent` | 面向可信生命周期控制平面节点的生产硬化 profile。它保留同一个 privileged host-agent 执行模型，但增加显式节点 label gate、host tool preflight、resource requests/limits、profile labels 和 release bundle 渲染支持。 |
+
 controller 会 watch `sealos-system` 里的 `DistributionTarget` 对象，把每个 target
-映射成一次现有 agent reconcile pass，并写入 `Ready` 和 `Degraded` status
-condition。target 可以通过 `spec.rolloutPolicyRef` 引用同 namespace 下的
-`DistributionRolloutPolicy`；policy 更新后会重新 enqueue 引用它的 targets。
+映射成一次现有 agent reconcile pass，并写入显式 status state machine：
+`status.phase`、`Ready` 和 `Degraded` conditions、retry count、next retry time、
+hold reason、last diagnostic，以及 Kubernetes events。target 可以通过
+`spec.rolloutPolicyRef` 引用同 namespace 下的 `DistributionRolloutPolicy`；policy
+更新后会重新 enqueue 引用它的 targets。
 
 service account RBAC 只覆盖被 watch 的 API、status 更新、leader election leases 和
 events。rendered bundle apply 仍然使用 `spec.kubeconfigPath` 或 deployment 默认值选择的
@@ -48,6 +57,18 @@ rendered bundle 时调用 host tools。因此示例 deployment 使用 privileged
 `node-role.kubernetes.io/control-plane` 或 `node-role.kubernetes.io/master` label 的节点，
 并容忍对应的 `NoSchedule` taints，确保 host admin kubeconfig 存在。
 
+生产安装应使用 `production-host-agent` profile，并且只给可信的生命周期节点打上运行
+controller 的 label：
+
+```bash
+kubectl label node <control-plane-node> sealos.io/distribution-controller=true
+```
+
+production profile 会在 controller 启动前运行 `host-tool-preflight` init container。
+preflight 要求 `kubectl`、`systemctl`、`tar`、`sh`、`/host/etc/kubernetes/admin.conf`
+和 `/var/lib/sealos` 能通过镜像或挂载的 host paths 访问。升级时要保持这些依赖稳定；如果修改
+host tool 列表，应把它当成 controller release checklist 的一部分。
+
 ## 安装 Controller
 
 如果使用 tagged release，先用已发布的 controller 镜像渲染 release bundle：
@@ -60,6 +81,16 @@ make render-distribution-controller-bundle \
 默认会输出到 `dist/distribution-controller/`。安装方式：
 
 ```bash
+kubectl apply -f dist/distribution-controller/install.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+生产安装需要显式渲染硬化 profile：
+
+```bash
+make render-distribution-controller-bundle \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT \
+  DISTRIBUTION_CONTROLLER_PROFILE=production-host-agent
 kubectl apply -f dist/distribution-controller/install.yaml
 kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
 ```
@@ -131,6 +162,10 @@ make verify-distribution-controller-real-cluster \
   DISTRIBUTION_CONTROLLER_SMOKE_ARGS="--kubeconfig ~/.kube/config --artifact-dir /tmp/controller-smoke"
 ```
 
+如果要 smoke production profile，在确认目标节点已经带有
+`sealos.io/distribution-controller=true` label 且 host tool preflight 依赖已经存在后，增加
+`DISTRIBUTION_CONTROLLER_PROFILE=production-host-agent`。
+
 如果 smoke 在开始访问集群后失败，脚本会把诊断信息写到指定 artifact 目录：controller
 Deployment 和 Pod 的 describe、最近 controller logs、CRD 状态、smoke target/policy YAML，
 以及最近的 `sealos-system` resources/events。
@@ -165,6 +200,22 @@ kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
 kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
 ```
 
+production profile 升级时，用相同 profile 渲染新的 release bundle，并按相同顺序应用渲染结果。
+滚动 Deployment 前，确认 `sealos.io/distribution-controller=true` 节点 label 仍然指向预期的
+control-plane 节点：
+
+```bash
+make render-distribution-controller-bundle \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT \
+  DISTRIBUTION_CONTROLLER_PROFILE=production-host-agent
+kubectl apply -f dist/distribution-controller/crd.yaml
+kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
+kubectl apply -f dist/distribution-controller/rbac.yaml
+kubectl apply -f dist/distribution-controller/deployment.template.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
 如果继续复用同一个可变镜像 tag，应用 manifest 后重启 deployment，让 pod 按
 `imagePullPolicy` 和节点镜像缓存状态重新拉取：
 
@@ -193,8 +244,17 @@ kubectl apply -f deploy/distribution-controller/examples/distribution-target-bom
 kubectl apply -f deploy/distribution-controller/examples/distribution-target-channel.yaml
 ```
 
-controller 要求 `spec.bomPath` 和 `spec.releaseChannelPath` 必须二选一，且不能同时设置。
-这两个路径都必须能在 controller pod 内读取。示例 `DistributionRolloutPolicy` 设置了
+如果集群要按 distribution line 和 channel 从 release metadata source 解析目标：
+
+```bash
+kubectl apply -f deploy/distribution-controller/examples/distribution-target-lookup.yaml
+```
+
+controller 要求只能设置一种 target selector：`spec.bomPath`、`spec.releaseChannelPath`，
+或者 `spec.releaseSource`、`spec.releaseLine`、`spec.channel` 三元组。本地路径必须能在
+controller pod 内读取。HTTP(S) release source 会通过
+`/v1/distributions/{line}/channels/{channel}` 解析，并且必须返回 digest-pinned
+的 `ReleaseChannel` target。示例 `DistributionRolloutPolicy` 设置了
 `spec.strategy.batchSize: 1`、`spec.strategy.canary.batchSize: 1`、
 `spec.strategy.pause.afterCanary: true`、`spec.strategy.healthGate: true` 和
 `spec.strategy.failureAction: Rollback`。这会让符合条件的 host-targeted steps 一次滚动一个
@@ -214,16 +274,30 @@ kubectl -n sealos-system describe distributiontarget default-platform
 kubectl -n sealos-system logs deploy/sealos-distribution-controller -c sealos-agent
 ```
 
-成功后，target 会报告 `Ready=True`、`Degraded=False`、解析出来的 BOM revision、
-desired state digest 和 applied revision path。
+成功后，target 会报告 `phase=Succeeded`、`Ready=True`、`Degraded=False`、解析出来的
+BOM revision、desired state digest 和 applied revision path。失败 target 在
+`spec.retryBackoff` 调度下一次 reconcile 时会报告 `phase=Retrying`；agent 同时返回 result
+和 error 时报告 `phase=PartiallyFailed`；post-canary operator hold 报告
+`phase=Paused`；rollback 到上一次成功 revision 后报告 `phase=RollbackHold`。
+`kubectl describe distributiontarget ...` 也会显示最近一次状态迁移产生的 events。
+
+fleet 层的 target 聚合、rollout 进度、健康证据、promotion gate 和失败归档请使用
+[Controller fleet observability](./controller-fleet-observability.md)。
 
 ## 当前边界
 
-这只是最小 controller 安装路径。`DistributionRolloutPolicy` 当前持久化的是
-rendered-bundle executor 使用的 host rollout batch size、第一批 canary size、可选的
-post-canary pause、可选的逐批 health gate，以及 stop-or-rollback failure action。这些设置只作用于符合条件的
-all-node runtime-rootfs host batches。pause gate 和 rollback result 都是 operator action hold，
-不是按 host 保存的 rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
-它还没有加入 registry-backed `ReleaseChannel` lookup、controller 驱动的 promotion
-automation，也不是覆盖所有 multi-node workflow 的 package 级安全模型。本地 channel 文件可以另外通过
+controller 已经为每个 target 提供持久 reconcile state machine，但 rollout execution unit
+仍然是 rendered bundle。`DistributionRolloutPolicy` 当前持久化的是 rendered-bundle executor
+使用的 host rollout batch size、第一批 canary size、可选的 post-canary pause、可选的逐批
+health gate，以及 stop-or-rollback failure action。这些设置作用于符合条件的 host batches；
+`sync plan` 会为 rootfs、host-file、manifest、chart、patch、values、各类 package hook
+phase、local patch approval 和 generated host projection 报告 package/phase safety
+profiles。pause gate 和 rollback result 都是 operator action hold，不是按 host 保存的
+rollout cursor；继续时会按更新后的 target 或 policy 重新进入符合条件的 apply path。
+controller 驱动的 promotion automation 和 durable per-package rollout cursor 还没有加入。本地 channel 文件可以另外通过
 `sealos sync promote` 推进；controller 仍然委托给现有 BOM 驱动的 render/apply agent 路径。
+
+controller RBAC 会有意保持 namespace-scoped 到 `sealos-system`：它读取
+`DistributionTarget` 和 `DistributionRolloutPolicy`，更新 `DistributionTarget/status`，
+写入 leader-election leases，并发送 events。Kubernetes object apply 权限来自 target 或
+deployment 默认值选择的 kubeconfig，不来自 controller service account RBAC。

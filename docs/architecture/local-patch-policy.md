@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft with current single-node MVP behavior
+Implemented MVP contract
 
 ## Summary
 
@@ -23,6 +23,8 @@ The current decision is intentionally narrow:
   still do not create a package/BOM-scoped policy surface
 - after render, the bundle-carried policy artifact becomes the effective policy
   source of truth for compare, validation, and `sync commit`
+- the canonical resolver is `hydrate.SelectLocalPatchPolicy`; render and
+  `sync validate` use the same source-selection and precedence result
 
 ## Related Documents
 
@@ -42,6 +44,8 @@ The current decision is intentionally narrow:
   [pkg/distribution/hydrate/policy.go](../../pkg/distribution/hydrate/policy.go)
 - Current plan assembly:
   [pkg/distribution/reconcile/materialize.go](../../pkg/distribution/reconcile/materialize.go)
+- Operator preflight output:
+  [cmd/sealos/cmd/sync_validate.go](../../cmd/sealos/cmd/sync_validate.go)
 
 ## Why This Needs A Separate Design
 
@@ -162,6 +166,13 @@ The current resolution order is:
 6. Record source, scope, name, path, and digest in `bundle.yaml`.
 7. Require later policy consumers to read the rendered bundle artifact, not the
    ambient local repo.
+
+The canonical implementation of steps 1-4 is
+`hydrate.SelectLocalPatchPolicy`. `sync render` uses that selection when
+materializing the bundle, and `sync validate` exposes the same decision through
+`localPolicySource`, `localPolicy`, `localPolicyName`, `localPolicyScope`, and
+`localPolicyCandidates`. The candidates list is an operator-audit view of which
+external policy declarations were present and which one won precedence.
 
 The current MVP does not merge multiple policy layers. If the package source
 would be the effective source and more than one package declares a policy,

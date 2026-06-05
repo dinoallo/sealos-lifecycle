@@ -108,8 +108,24 @@ KUBECONFIG=/etc/kubernetes/admin.conf
 BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
 ```
 
-In the examples below, use either `--file "$TARGET_BOM"` or
-`--release-channel "$TARGET_CHANNEL"`. Do not pass both.
+Use a release metadata source when the cluster should resolve a channel from
+the release service:
+
+```bash
+CLUSTER=poc-minimal
+RELEASE_SOURCE=https://release.sealos.example
+RELEASE_LINE=default-platform
+RELEASE_CHANNEL=stable
+LOCAL_REPO=/var/lib/sealos/distribution/${CLUSTER}/local-repo
+KUBECONFIG=/etc/kubernetes/admin.conf
+BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
+```
+
+In the examples below, use exactly one target selector:
+
+- `--file "$TARGET_BOM"`
+- `--release-channel "$TARGET_CHANNEL"`
+- `--release-source "$RELEASE_SOURCE" --release-line "$RELEASE_LINE" --channel "$RELEASE_CHANNEL"`
 
 ## Install With An Explicit BOM
 
@@ -190,7 +206,9 @@ sudo $SEALOS sync status \
 
 Use the same flow, replacing `--file "$TARGET_BOM"` with
 `--release-channel "$TARGET_CHANNEL"` in `local-repo init`,
-`local-repo doctor`, `validate`, and `render`:
+`local-repo doctor`, `validate`, and `render`. For release-service lookup,
+replace the target flags with
+`--release-source "$RELEASE_SOURCE" --release-line "$RELEASE_LINE" --channel "$RELEASE_CHANNEL"`:
 
 ```bash
 sudo $SEALOS sync render \
@@ -200,29 +218,233 @@ sudo $SEALOS sync render \
   --local-repo "$LOCAL_REPO"
 ```
 
-The current resolver only reads a local `ReleaseChannel` file. It does not yet
-perform registry/API-backed lookup by distribution line and channel.
-
-## Current PoC Shortcut
-
-For the repository's minimal single-node PoC, the convenience wrapper is:
-
 ```bash
-sudo scripts/poc/minimal-single-node/bootstrap.sh \
-  --cluster poc-minimal
+sudo $SEALOS sync render \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
 ```
 
-That wrapper:
+The release metadata source must return a `ReleaseChannel` document for
+`/v1/distributions/{line}/channels/{channel}`. The resolved channel must point
+at a BOM with `spec.bomDigest`, and Sealos verifies the fetched BOM digest
+before render.
 
-1. builds `sealos`
-2. starts a temporary local registry
-3. publishes the three PoC packages as OCI package images
-4. renders from the generated OCI-backed BOM
-5. runs `sealos sync apply`
-6. runs the PoC validator
+## Scriptless Minimal PoC
 
-This shortcut is useful for repository development and validation. It is not the
-intended long-term user-facing install interface.
+The repository PoC should now be exercised with the same 0-to-1 operator flow
+described above. The PoC install path does not call helper scripts such as
+`fetch-assets.sh`, `stage-assets.sh`, `publish-oci.sh`, `render.sh`, or
+`bootstrap.sh`.
+
+Those helpers may still exist for CI fixture generation and release-build
+experiments because this repository does not commit large runtime, Kubernetes,
+or Cilium payloads. They are not the operator-facing PoC.
+
+Start from a release target whose component packages are already published and
+whose BOM is digest-pinned:
+
+```bash
+CLUSTER=poc-minimal
+RUNTIME_ROOT=/var/lib/sealos/runtime
+RELEASE_SOURCE=/var/lib/sealos/distribution/release-source
+RELEASE_LINE=minimal-single-node
+RELEASE_CHANNEL=alpha
+LOCAL_REPO=/var/lib/sealos/distribution/${CLUSTER}/local-repo
+KUBECONFIG=/etc/kubernetes/admin.conf
+BUNDLE="${RUNTIME_ROOT}/${CLUSTER}/distribution/bundles/current"
+```
+
+For a local filesystem release source, verify that the channel metadata exists:
+
+```bash
+test -f "${RELEASE_SOURCE}/channels/${RELEASE_LINE}/${RELEASE_CHANNEL}.yaml"
+```
+
+Initialize the cluster-local repo from that target:
+
+```bash
+sudo $SEALOS sync local-repo init \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --output-dir "$LOCAL_REPO" \
+  --overwrite
+```
+
+For the current in-repo PoC defaults, fill the generated inputs from the tracked
+package default files:
+
+```bash
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/containerd/files/etc/containerd/config.toml \
+  "${LOCAL_REPO}/inputs/containerd/containerd-config.toml"
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/kubernetes/files/etc/kubernetes/kubeadm.yaml \
+  "${LOCAL_REPO}/inputs/kubernetes/kubeadm-cluster-config.yaml"
+sudo install -D -m 0644 \
+  scripts/poc/minimal-single-node/packages/cilium/files/values/basic.yaml \
+  "${LOCAL_REPO}/inputs/cilium/cilium-values.yaml"
+```
+
+Then run the guide flow directly:
+
+```bash
+sudo $SEALOS sync local-repo doctor \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo $SEALOS sync validate \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo $SEALOS sync render \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --release-source "$RELEASE_SOURCE" \
+  --release-line "$RELEASE_LINE" \
+  --channel "$RELEASE_CHANNEL" \
+  --local-repo "$LOCAL_REPO"
+
+sudo $SEALOS sync preflight \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --bundle-dir "$BUNDLE" \
+  --kubeconfig "$KUBECONFIG"
+
+sudo $SEALOS sync apply \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER" \
+  --bundle-dir "$BUNDLE" \
+  --kubeconfig "$KUBECONFIG"
+```
+
+Validate with normal cluster and distribution commands:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" get nodes -o wide
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status ds/cilium --timeout=180s
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status deploy/cilium-operator --timeout=180s
+kubectl --kubeconfig "$KUBECONFIG" -n kube-system rollout status deploy/coredns --timeout=180s
+sudo $SEALOS sync status \
+  --runtime-root "$RUNTIME_ROOT" \
+  --cluster "$CLUSTER"
+```
+
+For a multi-node PoC, use the same commands with a cluster name that already has
+a Sealos `Clusterfile` and SSH inventory. `sync render`, `sync plan`,
+`sync preflight`, and `sync apply` resolve `allNodes`, `firstMaster`, and
+cluster-scoped targets from that cluster state; no PoC wrapper is needed.
+
+For the safe multi-node Day 0 acceptance gate:
+
+```bash
+make verify-day0-multinode-acceptance
+```
+
+That gate renders the PoC package set against a three-node inventory, checks
+`allNodes`, `firstMaster`, and `cluster` target resolution in `sync plan`, and
+runs fake-remote reconcile coverage for kubeadm join config generation, remote
+first-master kubeconfig fetches, and multi-node execution targeting. It also
+keeps Cilium in the rendered package set so the application/CNI package remains
+part of Day 0 acceptance. The GitHub workflow
+`.github/workflows/day0_multi_node_acceptance.yml` runs the same safe gate
+without mutating hosts.
+
+That gate is repository validation. It is safe and does not mutate hosts.
+
+For a non-mutating repository check of the scriptless guide path, provide an
+existing release source and run:
+
+```bash
+make verify-day0-guide-render \
+  DAY0_RELEASE_SOURCE=/var/lib/sealos/distribution/release-source \
+  DAY0_RELEASE_LINE=minimal-single-node \
+  DAY0_RELEASE_CHANNEL=alpha \
+  DAY0_CLUSTER=poc-minimal-ci
+```
+
+This target runs `local-repo init`, fills the stock PoC local inputs, runs
+`local-repo doctor`, `validate`, and `render`, and then checks that the bundle
+and applied-revision files were written. It does not fetch assets, publish OCI
+packages, or apply to a host.
+
+## Package Set Boundary
+
+The current Day 0 PoC release set is intentionally limited to the installable
+cluster baseline:
+
+| Package | Owner | Required Local Input | Health Check |
+| --- | --- | --- | --- |
+| `containerd-runtime` | node runtime platform owner | `containerd-config` | runtime service and local runtime tooling report healthy |
+| `kubernetes-rootfs` | cluster platform owner | `kubeadm-cluster-config` | kube-apiserver is reachable, nodes register, and bootstrap manifests apply |
+| `cilium-cni` | network platform owner | `cilium-values` | Cilium DaemonSet and operator rollouts complete |
+
+The next package-set expansion is a product contract, not part of the current
+PoC BOM yet:
+
+- `kubernetes-control-plane-patch`: SRE-owned hardening overlays with
+  policy/admission/static-pod inputs and API/static-Pod projection healthcheck
+- `csi-driver-*`: storage-owned addon with backend Secret refs,
+  topology/storage-class inputs, controller/node healthchecks, and data-plane
+  protection notes
+- `ingress-controller-*`: network/edge-owned addon with ingress class,
+  exposure/TLS/load-balancer inputs, and route/webhook healthchecks
+- `observability-stack`: observability-owned addon with retention, storage,
+  external endpoint inputs, and collector/dashboard/alert healthchecks
+
+Do not add these packages to Day 0 until the package directory, local repo
+templates, healthcheck hook, acceptance evidence, and rollback/reset boundary
+are present.
+
+## Repeat-Run Cleanup
+
+The scriptless PoC has a cleanup entrypoint for state that is safe to regenerate:
+rendered bundle state, cluster-local repo content, temporary workdirs, and
+optional remote staged bundle mirrors. The default cleanup path does not remove
+Kubernetes, CRI, kubelet, containerd, `Clusterfile`, `admin.conf`, or host data:
+
+```bash
+make cleanup-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster poc-minimal \
+    --runtime-root /var/lib/sealos/runtime \
+    --distribution-root /var/lib/sealos/distribution"
+```
+
+For multi-node reruns where `sync apply` has copied staged bundle mirrors to
+remote hosts, add `--remote-staged` only when the cluster has a default-runtime
+`Clusterfile` that `sealos exec -c <cluster>` can use:
+
+```bash
+make cleanup-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster sealos-distribution-test --remote-staged"
+```
+
+Resetting Kubernetes/CRI state is a separate destructive operation. It is never
+part of the default cleanup path. Use it only on disposable PoC hosts:
+
+```bash
+I_UNDERSTAND_THIS_MUTATES_HOST=1 make reset-day0-poc \
+  DAY0_CLEANUP_ARGS="--cluster poc-minimal"
+```
+
+For scriptless installs that use `--runtime-root /var/lib/sealos/runtime`,
+prefer the safe cleanup target before rerendering. Use `reset-day0-poc` only
+when the target cluster also exists in the default Sealos runtime root used by
+`sealos reset`, because `sealos reset` does not accept `--runtime-root`.
 
 ## Development-Only Local Package Flow
 
@@ -238,17 +460,18 @@ $SEALOS sync render \
   --package-source cilium=scripts/poc/minimal-single-node/packages/cilium
 ```
 
-For that development path, package templates must first be filled with real
-assets. That is why the PoC has:
+This is a renderer development path, not the 0-to-1 PoC install path. It is
+installable only when those local package directories already contain full real
+payloads. Ordinary installers should consume already-published, digest-pinned
+packages through a BOM or `ReleaseChannel`.
 
-```bash
-scripts/poc/minimal-single-node/stage-assets.sh \
-  --kubelet-bin /usr/bin/kubelet \
-  --cilium-manifest /absolute/path/to/cilium.yaml
-```
-
-This should be treated as release-builder or developer work. Ordinary installers
-should consume already-published, digest-pinned packages.
+The product does not expose a package-direct install path. Commands such as
+`sealos sync package pull` or `--package-source` are package authoring and
+renderer development tools. They do not replace the Day 0 release contract:
+operators still select a BOM or `ReleaseChannel`, render a bundle, run
+preflight, and apply that bundle. Keeping install execution behind the
+BOM/bundle boundary is what preserves dependency ordering, local input binding,
+render provenance, drift ownership, and rollback history.
 
 ## Completion Criteria
 
@@ -263,9 +486,10 @@ Day 0 is complete when:
 
 ## Current Boundaries
 
-- The local `ReleaseChannel` resolver is file-backed only.
-- The minimal PoC is single-node and prepared-host oriented.
-- `stage-assets.sh` exists because this repository does not commit large
-  runtime/Kubernetes/Cilium payloads as release artifacts.
-- A productized install should move package assembly to release build/publish
-  automation so users only select a target and run validate/render/apply.
+- The operator-facing PoC assumes release assets already exist. Package assembly
+  belongs to release build/publish automation.
+- Helper scripts remain in the repository for CI fixture generation and package
+  development, but they are no longer the PoC install interface.
+- Multi-node Day 0 has CLI-driven render/plan/preflight/apply support; the
+  default GitHub gate remains non-mutating unless a protected environment is
+  used for real hosts.

@@ -18,16 +18,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/opencontainers/go-digest"
-	"github.com/spf13/cobra"
-	"sigs.k8s.io/yaml"
 
 	"github.com/labring/sealos/pkg/buildah"
 	"github.com/labring/sealos/pkg/constants"
@@ -43,6 +40,9 @@ import (
 	promotionpolicy "github.com/labring/sealos/pkg/distribution/promotion"
 	"github.com/labring/sealos/pkg/distribution/reconcile"
 	"github.com/labring/sealos/pkg/distribution/state"
+	"github.com/opencontainers/go-digest"
+	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 type syncOutputFormat string
@@ -53,7 +53,8 @@ const (
 )
 
 func addSyncOutputFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVar(target, "output", string(syncOutputFormatYAML), "output format: yaml or json")
+	cmd.Flags().
+		StringVar(target, "output", string(syncOutputFormatYAML), "output format: yaml or json")
 }
 
 func writeSyncOutput(cmd *cobra.Command, value any, format, subject string) error {
@@ -80,23 +81,32 @@ func writeSyncOutput(cmd *cobra.Command, value any, format, subject string) erro
 
 type syncBuildahFactory func(id string) (buildah.Interface, error)
 
-var newSyncBuildah syncBuildahFactory = buildah.New
-var newSyncMountedArtifactResolver = defaultSyncMountedArtifactResolver
-var newSyncCachedArtifactResolver = defaultSyncCachedArtifactResolver
-var outputSyncKubectl = defaultSyncKubectlOutput
-var runSyncApply = reconcile.Apply
-var repairSyncGeneratedControlPlaneHost = reconcile.RepairGeneratedControlPlaneHost
+var (
+	newSyncBuildah                      syncBuildahFactory = buildah.New
+	newSyncCachedArtifactResolver                          = defaultSyncCachedArtifactResolver
+	outputSyncKubectl                                      = defaultSyncKubectlOutput
+	runSyncApply                                           = reconcile.Apply
+	repairSyncGeneratedControlPlaneHost                    = reconcile.RepairGeneratedControlPlaneHost
+)
 
 type syncTargetOptions struct {
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 }
 
 type syncResolvedTarget struct {
 	BOM                    *bom.BOM
 	BOMPath                string
+	BOMDigest              string
 	ReleaseChannelDocument *bom.ReleaseChannelDocument
 	ReleaseChannelPath     string
+	ReleaseChannelSource   string
+	ReleaseSource          string
+	ReleaseLine            string
+	Channel                bom.ReleaseChannel
 }
 
 func (t *syncResolvedTarget) runtimeChannel() bom.ReleaseChannel {
@@ -106,19 +116,48 @@ func (t *syncResolvedTarget) runtimeChannel() bom.ReleaseChannel {
 	return t.ReleaseChannelDocument.Spec.Channel
 }
 
-func addSyncTargetFlags(cmd *cobra.Command, bomPath, releaseChannelPath *string, bomUsage string) {
+func addSyncTargetFlags(
+	cmd *cobra.Command,
+	bomPath, releaseChannelPath, releaseSource, releaseLine, channel *string,
+	bomUsage string,
+) {
 	cmd.Flags().StringVarP(bomPath, "file", "f", "", bomUsage)
-	cmd.Flags().StringVar(releaseChannelPath, "release-channel", "", "path to a ReleaseChannel file to resolve before loading the target BOM")
+	cmd.Flags().
+		StringVar(releaseChannelPath, "release-channel", "", "path to a ReleaseChannel file to resolve before loading the target BOM")
+	cmd.Flags().
+		StringVar(releaseSource, "release-source", "", "release metadata source URL or directory used with --release-line and --channel")
+	cmd.Flags().
+		StringVar(releaseLine, "release-line", "", "distribution line to resolve from --release-source")
+	cmd.Flags().
+		StringVar(channel, "channel", "", "release channel to resolve from --release-source: alpha, beta, or stable")
 }
 
 func resolveSyncTarget(opts syncTargetOptions) (*syncResolvedTarget, error) {
 	bomPath := strings.TrimSpace(opts.BOMPath)
 	channelPath := strings.TrimSpace(opts.ReleaseChannelPath)
+	releaseSource := strings.TrimSpace(opts.ReleaseSource)
+	releaseLine := strings.TrimSpace(opts.ReleaseLine)
+	channel := bom.ReleaseChannel(strings.TrimSpace(opts.Channel))
+	lookupSelected := releaseSource != "" || releaseLine != "" || channel != ""
+	selected := 0
+	if bomPath != "" {
+		selected++
+	}
+	if channelPath != "" {
+		selected++
+	}
+	if lookupSelected {
+		selected++
+	}
 	switch {
-	case bomPath == "" && channelPath == "":
-		return nil, fmt.Errorf("one of --file or --release-channel is required")
-	case bomPath != "" && channelPath != "":
-		return nil, fmt.Errorf("use either --file or --release-channel, not both")
+	case selected == 0:
+		return nil, errors.New(
+			"one of --file, --release-channel, or --release-source with --release-line and --channel is required",
+		)
+	case selected > 1:
+		return nil, errors.New(
+			"use only one target selector: --file, --release-channel, or --release-source with --release-line and --channel",
+		)
 	case channelPath != "":
 		resolved, err := bom.ResolveReleaseChannelFile(channelPath)
 		if err != nil {
@@ -127,8 +166,34 @@ func resolveSyncTarget(opts syncTargetOptions) (*syncResolvedTarget, error) {
 		return &syncResolvedTarget{
 			BOM:                    resolved.BOM,
 			BOMPath:                resolved.BOMPath,
+			BOMDigest:              resolved.BOMDigest,
 			ReleaseChannelDocument: resolved.Channel,
 			ReleaseChannelPath:     channelPath,
+			ReleaseChannelSource:   resolved.ChannelSource,
+		}, nil
+	case lookupSelected:
+		if releaseSource == "" || releaseLine == "" || channel == "" {
+			return nil, errors.New(
+				"--release-source, --release-line, and --channel must be set together",
+			)
+		}
+		resolved, err := bom.ResolveReleaseChannelLookup(bom.ReleaseChannelLookupOptions{
+			DistributionLine: releaseLine,
+			Channel:          channel,
+			Source:           releaseSource,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &syncResolvedTarget{
+			BOM:                    resolved.BOM,
+			BOMPath:                resolved.BOMPath,
+			BOMDigest:              resolved.BOMDigest,
+			ReleaseChannelDocument: resolved.Channel,
+			ReleaseChannelSource:   resolved.ChannelSource,
+			ReleaseSource:          releaseSource,
+			ReleaseLine:            releaseLine,
+			Channel:                channel,
 		}, nil
 	default:
 		doc, err := bom.LoadFile(bomPath)
@@ -144,7 +209,8 @@ func resolveSyncTarget(opts syncTargetOptions) (*syncResolvedTarget, error) {
 
 func addSyncRuntimeRootFlag(cmd *cobra.Command) {
 	var runtimeRoot string
-	cmd.Flags().StringVar(&runtimeRoot, "runtime-root", "", "override the cluster runtime root used to resolve sync state, bundles, and inventory")
+	cmd.Flags().
+		StringVar(&runtimeRoot, "runtime-root", "", "override the cluster runtime root used to resolve sync state, bundles, and inventory")
 	previousPreRunE := cmd.PreRunE
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		if previousPreRunE != nil {
@@ -200,8 +266,174 @@ func newSyncCmd() *cobra.Command {
 	cmd.AddCommand(newSyncPolicyReportCmd())
 	cmd.AddCommand(newSyncPolicyGateCmd())
 	cmd.AddCommand(newSyncHealthProofCmd())
+	cmd.AddCommand(newSyncDeriveCmd())
 	cmd.AddCommand(newSyncPromoteCmd())
+	cmd.AddCommand(newSyncReleaseMetadataCmd())
 	return cmd
+}
+
+func newSyncDeriveCmd() *cobra.Command {
+	var flags struct {
+		sourceBOM    string
+		outputRoot   string
+		line         string
+		revision     string
+		channel      string
+		channelName  string
+		labels       []string
+		replacements []string
+		output       string
+	}
+
+	cmd := &cobra.Command{
+		Use:          "derive",
+		Short:        "Create a derived distribution BOM and ReleaseChannel from an existing BOM",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			labels, err := parseSyncKeyValueFlags(flags.labels, "--label")
+			if err != nil {
+				return err
+			}
+			replacements, err := parseSyncArtifactReplacementFlags(flags.replacements)
+			if err != nil {
+				return err
+			}
+			result, err := bom.DeriveDistributionFile(bom.DeriveDistributionOptions{
+				SourceBOMPath: flags.sourceBOM,
+				OutputRoot:    flags.outputRoot,
+				Line:          flags.line,
+				Revision:      flags.revision,
+				Channel:       bom.ReleaseChannel(strings.TrimSpace(flags.channel)),
+				ChannelName:   flags.channelName,
+				Labels:        labels,
+				Replacements:  replacements,
+			})
+			if err != nil {
+				return err
+			}
+			out := syncDeriveOutput{
+				SourceBOMPath:      result.SourceBOMPath,
+				SourceLine:         result.SourceLine,
+				SourceRevision:     result.SourceRevision,
+				OutputRoot:         result.OutputRoot,
+				Line:               result.BOM.Metadata.Name,
+				Revision:           result.BOM.Spec.Revision,
+				Channel:            string(result.Channel.Spec.Channel),
+				BOMPath:            result.BOMPath,
+				BOMDigest:          result.BOMDigest,
+				ReleaseChannelPath: result.ChannelPath,
+				ReleaseChannel:     result.Channel,
+				Replacements:       result.Replacements,
+			}
+			return writeSyncOutput(cmd, out, flags.output, "derived distribution result")
+		},
+	}
+	cmd.Flags().StringVar(&flags.sourceBOM, "source-bom", "", "path to the source BOM to clone")
+	cmd.Flags().
+		StringVar(&flags.outputRoot, "output-root", "", "release source root where derived BOM and channel documents are written")
+	cmd.Flags().
+		StringVar(&flags.line, "line", "", "derived distribution line written to metadata.name")
+	cmd.Flags().
+		StringVar(&flags.revision, "revision", "", "derived BOM revision written to spec.revision")
+	cmd.Flags().
+		StringVar(&flags.channel, "channel", string(bom.ChannelAlpha), "release channel object to write for the derived revision: alpha, beta, or stable")
+	cmd.Flags().
+		StringVar(&flags.channelName, "channel-name", "", "optional ReleaseChannel metadata.name; defaults to <line>-<channel>")
+	cmd.Flags().
+		StringArrayVar(&flags.labels, "label", nil, "metadata label override on the derived BOM, as key=value; repeatable")
+	cmd.Flags().
+		StringArrayVar(&flags.replacements, "replace-artifact", nil, "package artifact replacement as package,key=value,...; keys: artifactName,image,digest,version,sourcePath,sourceDigest; repeatable")
+	addSyncOutputFlag(cmd, &flags.output)
+	for _, name := range []string{"source-bom", "output-root", "line", "revision"} {
+		if err := cmd.MarkFlagRequired(name); err != nil {
+			panic(err)
+		}
+	}
+	return cmd
+}
+
+type syncDeriveOutput struct {
+	SourceBOMPath      string                          `json:"sourceBOMPath"          yaml:"sourceBOMPath"`
+	SourceLine         string                          `json:"sourceLine"             yaml:"sourceLine"`
+	SourceRevision     string                          `json:"sourceRevision"         yaml:"sourceRevision"`
+	OutputRoot         string                          `json:"outputRoot"             yaml:"outputRoot"`
+	Line               string                          `json:"line"                   yaml:"line"`
+	Revision           string                          `json:"revision"               yaml:"revision"`
+	Channel            string                          `json:"channel"                yaml:"channel"`
+	BOMPath            string                          `json:"bomPath"                yaml:"bomPath"`
+	BOMDigest          string                          `json:"bomDigest"              yaml:"bomDigest"`
+	ReleaseChannelPath string                          `json:"releaseChannelPath"     yaml:"releaseChannelPath"`
+	ReleaseChannel     *bom.ReleaseChannelDocument     `json:"releaseChannel"         yaml:"releaseChannel"`
+	Replacements       []bom.ArtifactReplacementResult `json:"replacements,omitempty" yaml:"replacements,omitempty"`
+}
+
+func parseSyncKeyValueFlags(values []string, flagName string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	parsed := make(map[string]string, len(values))
+	for _, value := range values {
+		key, itemValue, ok := strings.Cut(value, "=")
+		key = strings.TrimSpace(key)
+		itemValue = strings.TrimSpace(itemValue)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("%s value %q must use key=value", flagName, value)
+		}
+		parsed[key] = itemValue
+	}
+	return parsed, nil
+}
+
+func parseSyncArtifactReplacementFlags(values []string) ([]bom.ArtifactReplacement, error) {
+	replacements := make([]bom.ArtifactReplacement, 0, len(values))
+	for i, value := range values {
+		replacement, err := parseSyncArtifactReplacementFlag(value)
+		if err != nil {
+			return nil, fmt.Errorf("--replace-artifact[%d]: %w", i, err)
+		}
+		replacements = append(replacements, replacement)
+	}
+	return replacements, nil
+}
+
+func parseSyncArtifactReplacementFlag(value string) (bom.ArtifactReplacement, error) {
+	parts := strings.Split(value, ",")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return bom.ArtifactReplacement{}, errors.New("package name cannot be empty")
+	}
+	replacement := bom.ArtifactReplacement{
+		PackageName: strings.TrimSpace(parts[0]),
+	}
+	for _, part := range parts[1:] {
+		key, partValue, ok := strings.Cut(part, "=")
+		key = strings.TrimSpace(key)
+		partValue = strings.TrimSpace(partValue)
+		if !ok || key == "" {
+			return bom.ArtifactReplacement{}, fmt.Errorf("entry %q must use key=value", part)
+		}
+		switch key {
+		case "artifactName":
+			replacement.ArtifactName = partValue
+		case "image":
+			replacement.Image = partValue
+		case "digest":
+			replacement.Digest = partValue
+		case "version":
+			replacement.Version = partValue
+		case "sourcePath":
+			replacement.SourcePath = partValue
+		case "sourceDigest":
+			replacement.SourceDigest = partValue
+		default:
+			return bom.ArtifactReplacement{}, fmt.Errorf("unsupported key %q", key)
+		}
+	}
+	if replacement.ArtifactName == "" && replacement.Image == "" && replacement.Digest == "" &&
+		replacement.Version == "" && replacement.SourcePath == "" && replacement.SourceDigest == "" {
+		return bom.ArtifactReplacement{}, errors.New("at least one replacement field is required")
+	}
+	return replacement, nil
 }
 
 func newSyncPromoteCmd() *cobra.Command {
@@ -210,6 +442,7 @@ func newSyncPromoteCmd() *cobra.Command {
 		targetBOMFile      string
 		sourceChannel      string
 		healthProofFile    string
+		validationCohort   string
 		reason             string
 		approvedBy         string
 		approvedAt         string
@@ -232,38 +465,50 @@ func newSyncPromoteCmd() *cobra.Command {
 			}
 
 			result, err := bom.PromoteReleaseChannelFile(bom.PromoteReleaseChannelOptions{
-				ChannelPath:     flags.releaseChannelFile,
-				TargetBOMPath:   flags.targetBOMFile,
-				SourceChannel:   bom.ReleaseChannel(strings.TrimSpace(flags.sourceChannel)),
-				HealthProofPath: flags.healthProofFile,
-				Reason:          flags.reason,
-				ApprovedBy:      flags.approvedBy,
-				ApprovedAt:      approvedAt,
+				ChannelPath:      flags.releaseChannelFile,
+				TargetBOMPath:    flags.targetBOMFile,
+				SourceChannel:    bom.ReleaseChannel(strings.TrimSpace(flags.sourceChannel)),
+				ValidationCohort: flags.validationCohort,
+				HealthProofPath:  flags.healthProofFile,
+				Reason:           flags.reason,
+				ApprovedBy:       flags.approvedBy,
+				ApprovedAt:       approvedAt,
 			})
 			if err != nil {
 				return err
 			}
 			out := syncPromoteOutput{
-				ReleaseChannelPath: result.ChannelPath,
-				BOMPath:            result.BOMPath,
-				Line:               result.Channel.Distribution(),
-				Channel:            string(result.Channel.Spec.Channel),
-				FromRevision:       result.FromRevision,
-				ToRevision:         result.ToRevision,
-				Changed:            result.Changed,
-				Promotion:          result.Promotion,
-				PolicyDecision:     result.Decision,
+				ReleaseChannelPath:   result.ChannelPath,
+				BOMPath:              result.BOMPath,
+				Line:                 result.Channel.Distribution(),
+				Channel:              string(result.Channel.Spec.Channel),
+				FromRevision:         result.FromRevision,
+				ToRevision:           result.ToRevision,
+				Changed:              result.Changed,
+				Promotion:            result.Promotion,
+				PolicyDecision:       result.Decision,
+				CandidatePath:        result.CandidatePath,
+				PromotionHistoryPath: result.PromotionHistoryPath,
 			}
 			return writeSyncOutput(cmd, out, flags.output, "promotion result")
 		},
 	}
-	cmd.Flags().StringVar(&flags.releaseChannelFile, "release-channel", "", "path to the local ReleaseChannel file to advance")
-	cmd.Flags().StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
-	cmd.Flags().StringVar(&flags.sourceChannel, "source-channel", "", "release channel that produced the target BOM; defaults to the target channel")
-	cmd.Flags().StringVar(&flags.healthProofFile, "health-proof", "", "DistributionHealthProof file that must pass when the target channel policy requires proof")
-	cmd.Flags().StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
-	cmd.Flags().StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
-	cmd.Flags().StringVar(&flags.approvedAt, "approved-at", "", "approval timestamp in RFC3339 format; defaults to the current time")
+	cmd.Flags().
+		StringVar(&flags.releaseChannelFile, "release-channel", "", "path to the local ReleaseChannel file to advance")
+	cmd.Flags().
+		StringVar(&flags.targetBOMFile, "target-bom", "", "path to the target BOM revision file")
+	cmd.Flags().
+		StringVar(&flags.sourceChannel, "source-channel", "", "release channel that produced the target BOM; defaults to the target channel")
+	cmd.Flags().
+		StringVar(&flags.healthProofFile, "health-proof", "", "DistributionHealthProof file that must pass when the target channel policy requires proof")
+	cmd.Flags().
+		StringVar(&flags.validationCohort, "validation-cohort", "", "validation cohort name recorded with the candidate revision and promotion history")
+	cmd.Flags().
+		StringVar(&flags.reason, "reason", "", "human-readable reason or evidence summary for the promotion")
+	cmd.Flags().
+		StringVar(&flags.approvedBy, "approved-by", "", "operator, team, or automation identity approving the promotion")
+	cmd.Flags().
+		StringVar(&flags.approvedAt, "approved-at", "", "approval timestamp in RFC3339 format; defaults to the current time")
 	addSyncOutputFlag(cmd, &flags.output)
 	if err := cmd.MarkFlagRequired("release-channel"); err != nil {
 		panic(err)
@@ -281,15 +526,17 @@ func newSyncPromoteCmd() *cobra.Command {
 }
 
 type syncPromoteOutput struct {
-	ReleaseChannelPath string                       `json:"releaseChannelPath" yaml:"releaseChannelPath"`
-	BOMPath            string                       `json:"bomPath" yaml:"bomPath"`
-	Line               string                       `json:"line" yaml:"line"`
-	Channel            string                       `json:"channel" yaml:"channel"`
-	FromRevision       string                       `json:"fromRevision" yaml:"fromRevision"`
-	ToRevision         string                       `json:"toRevision" yaml:"toRevision"`
-	Changed            bool                         `json:"changed" yaml:"changed"`
-	Promotion          bom.DistributionPromotionRef `json:"promotion" yaml:"promotion"`
-	PolicyDecision     *promotionpolicy.Decision    `json:"policyDecision,omitempty" yaml:"policyDecision,omitempty"`
+	ReleaseChannelPath   string                       `json:"releaseChannelPath"             yaml:"releaseChannelPath"`
+	BOMPath              string                       `json:"bomPath"                        yaml:"bomPath"`
+	Line                 string                       `json:"line"                           yaml:"line"`
+	Channel              string                       `json:"channel"                        yaml:"channel"`
+	FromRevision         string                       `json:"fromRevision"                   yaml:"fromRevision"`
+	ToRevision           string                       `json:"toRevision"                     yaml:"toRevision"`
+	Changed              bool                         `json:"changed"                        yaml:"changed"`
+	Promotion            bom.DistributionPromotionRef `json:"promotion"                      yaml:"promotion"`
+	PolicyDecision       *promotionpolicy.Decision    `json:"policyDecision,omitempty"       yaml:"policyDecision,omitempty"`
+	CandidatePath        string                       `json:"candidatePath,omitempty"        yaml:"candidatePath,omitempty"`
+	PromotionHistoryPath string                       `json:"promotionHistoryPath,omitempty" yaml:"promotionHistoryPath,omitempty"`
 }
 
 func newSyncPolicyApprovalScanCmd() *cobra.Command {
@@ -329,9 +576,12 @@ func newSyncPolicyApprovalScanCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&flags.root, "root", ".", "root directory to recursively scan for LocalPatchPolicyGateApproval YAML files")
-	cmd.Flags().IntVar(&flags.approvalExpiryWarningDays, "approval-expiry-warning-days", defaultConfig.ApprovalExpiryWarningDays, "number of days before approval expiry that should be treated as near-expiry")
-	cmd.Flags().BoolVar(&flags.failWhenApprovalExpiresSoon, "fail-when-approval-expires-soon", defaultConfig.FailOnApprovalExpiresSoon, "treat near-expiry approvals as blocking scan failures instead of warnings")
+	cmd.Flags().
+		StringVar(&flags.root, "root", ".", "root directory to recursively scan for LocalPatchPolicyGateApproval YAML files")
+	cmd.Flags().
+		IntVar(&flags.approvalExpiryWarningDays, "approval-expiry-warning-days", defaultConfig.ApprovalExpiryWarningDays, "number of days before approval expiry that should be treated as near-expiry")
+	cmd.Flags().
+		BoolVar(&flags.failWhenApprovalExpiresSoon, "fail-when-approval-expires-soon", defaultConfig.FailOnApprovalExpiresSoon, "treat near-expiry approvals as blocking scan failures instead of warnings")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
@@ -380,9 +630,12 @@ func newSyncPolicyReportCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "policy report result")
 		},
 	}
-	cmd.Flags().StringVar(&flags.oldPolicy, "old-policy", "", "path to the previous LocalPatchPolicy YAML")
-	cmd.Flags().StringVar(&flags.newPolicy, "new-policy", "", "path to the candidate LocalPatchPolicy YAML")
-	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "optional local repo root used to evaluate current patch compatibility")
+	cmd.Flags().
+		StringVar(&flags.oldPolicy, "old-policy", "", "path to the previous LocalPatchPolicy YAML")
+	cmd.Flags().
+		StringVar(&flags.newPolicy, "new-policy", "", "path to the candidate LocalPatchPolicy YAML")
+	cmd.Flags().
+		StringVar(&flags.localRepo, "local-repo", "", "optional local repo root used to evaluate current patch compatibility")
 	addSyncOutputFlag(cmd, &flags.output)
 	if err := cmd.MarkFlagRequired("old-policy"); err != nil {
 		panic(err)
@@ -469,14 +722,22 @@ func newSyncPolicyGateCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&flags.oldPolicy, "old-policy", "", "path to the previous LocalPatchPolicy YAML")
-	cmd.Flags().StringVar(&flags.newPolicy, "new-policy", "", "path to the candidate LocalPatchPolicy YAML")
-	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "optional local repo root used to evaluate current patch compatibility")
-	cmd.Flags().StringVar(&flags.approvalFile, "approval-file", "", "optional LocalPatchPolicyGateApproval YAML that explicitly approves specific gate violations")
-	cmd.Flags().BoolVar(&flags.allowWidening, "allow-widening", false, "allow widening LocalPatchPolicy changes without failing the gate")
-	cmd.Flags().BoolVar(&flags.allowIncompatiblePatch, "allow-incompatible-patches", false, "allow the candidate policy to reject existing local patches without failing the gate")
-	cmd.Flags().IntVar(&flags.approvalExpiryWarningDays, "approval-expiry-warning-days", defaultGateConfig.ApprovalExpiryWarningDays, "number of days before approval expiry that should be treated as near-expiry")
-	cmd.Flags().BoolVar(&flags.failWhenApprovalExpiresSoon, "fail-when-approval-expires-soon", defaultGateConfig.FailOnApprovalExpiresSoon, "treat near-expiry approvals as blocking gate violations instead of warnings")
+	cmd.Flags().
+		StringVar(&flags.oldPolicy, "old-policy", "", "path to the previous LocalPatchPolicy YAML")
+	cmd.Flags().
+		StringVar(&flags.newPolicy, "new-policy", "", "path to the candidate LocalPatchPolicy YAML")
+	cmd.Flags().
+		StringVar(&flags.localRepo, "local-repo", "", "optional local repo root used to evaluate current patch compatibility")
+	cmd.Flags().
+		StringVar(&flags.approvalFile, "approval-file", "", "optional LocalPatchPolicyGateApproval YAML that explicitly approves specific gate violations")
+	cmd.Flags().
+		BoolVar(&flags.allowWidening, "allow-widening", false, "allow widening LocalPatchPolicy changes without failing the gate")
+	cmd.Flags().
+		BoolVar(&flags.allowIncompatiblePatch, "allow-incompatible-patches", false, "allow the candidate policy to reject existing local patches without failing the gate")
+	cmd.Flags().
+		IntVar(&flags.approvalExpiryWarningDays, "approval-expiry-warning-days", defaultGateConfig.ApprovalExpiryWarningDays, "number of days before approval expiry that should be treated as near-expiry")
+	cmd.Flags().
+		BoolVar(&flags.failWhenApprovalExpiresSoon, "fail-when-approval-expires-soon", defaultGateConfig.FailOnApprovalExpiresSoon, "treat near-expiry approvals as blocking gate violations instead of warnings")
 	addSyncOutputFlag(cmd, &flags.output)
 	if err := cmd.MarkFlagRequired("old-policy"); err != nil {
 		panic(err)
@@ -491,6 +752,9 @@ func newSyncRenderCmd() *cobra.Command {
 	var flags struct {
 		bomFile             string
 		releaseChannelFile  string
+		releaseSource       string
+		releaseLine         string
+		channel             string
 		clusterName         string
 		localRepo           string
 		localPatchRevision  string
@@ -515,6 +779,9 @@ components when iterating on package directories in-tree.
 			target, err := resolveSyncTarget(syncTargetOptions{
 				BOMPath:            flags.bomFile,
 				ReleaseChannelPath: flags.releaseChannelFile,
+				ReleaseSource:      flags.releaseSource,
+				ReleaseLine:        flags.releaseLine,
+				Channel:            flags.channel,
 			})
 			if err != nil {
 				return err
@@ -526,6 +793,9 @@ components when iterating on package directories in-tree.
 					ClusterName:        flags.clusterName,
 					BOMPath:            flags.bomFile,
 					ReleaseChannelPath: flags.releaseChannelFile,
+					ReleaseSource:      flags.releaseSource,
+					ReleaseLine:        flags.releaseLine,
+					Channel:            flags.channel,
 					LocalRepoPath:      flags.localRepo,
 					PackageSources:     flags.packageSources,
 				})
@@ -538,12 +808,25 @@ components when iterating on package directories in-tree.
 					if err := writeSyncOutput(cmd, renderOut, flags.output, "render result"); err != nil {
 						return err
 					}
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: sync render source preflight blocked: %s\n", strings.Join(out.BlockedReasons, "; "))
-					return fmt.Errorf("sync render source preflight blocked: %s", strings.Join(out.BlockedReasons, "; "))
+					fmt.Fprintf(
+						cmd.ErrOrStderr(),
+						"error: sync render source preflight blocked: %s\n",
+						strings.Join(out.BlockedReasons, "; "),
+					)
+					return fmt.Errorf(
+						"sync render source preflight blocked: %s",
+						strings.Join(out.BlockedReasons, "; "),
+					)
 				}
 			}
 
-			opts, err := newSyncMaterializeOptions(target, flags.clusterName, flags.localRepo, flags.localPatchRevision, flags.packageSources)
+			opts, err := newSyncMaterializeOptions(
+				target,
+				flags.clusterName,
+				flags.localRepo,
+				flags.localPatchRevision,
+				flags.packageSources,
+			)
 			if err != nil {
 				return err
 			}
@@ -560,7 +843,11 @@ components when iterating on package directories in-tree.
 				return err
 			}
 			if preflight.Blocked {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: rendered bundle would be blocked by sync apply preflight: %s\n", strings.Join(preflight.BlockedReasons, "; "))
+				fmt.Fprintf(
+					cmd.ErrOrStderr(),
+					"warning: rendered bundle would be blocked by sync apply preflight: %s\n",
+					strings.Join(preflight.BlockedReasons, "; "),
+				)
 			}
 
 			out := syncRenderOutput{
@@ -574,33 +861,50 @@ components when iterating on package directories in-tree.
 				DesiredStateDigest: result.DesiredStateDigest,
 				AppliedRevision:    state.AppliedRevisionPath(flags.clusterName),
 				SourcePreflight:    sourcePreflight,
-				Preflight:          newSyncPreflightOutput(flags.clusterName, result.BundlePath, preflight),
+				Preflight: newSyncPreflightOutput(
+					flags.clusterName,
+					result.BundlePath,
+					preflight,
+				),
 			}
 			return writeSyncOutput(cmd, out, flags.output, "render result")
 		},
 	}
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file to render")
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to materialize desired state for")
-	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "path to a cluster-local repo that provides input bindings during render")
-	cmd.Flags().StringVar(&flags.localPatchRevision, "local-patch-revision", "", "optional local patch revision recorded in applied state")
-	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local development")
-	cmd.Flags().BoolVar(&flags.skipSourcePreflight, "skip-source-preflight", false, "skip source readiness preflight before render; intended only for development or debugging")
+	addSyncTargetFlags(
+		cmd,
+		&flags.bomFile,
+		&flags.releaseChannelFile,
+		&flags.releaseSource,
+		&flags.releaseLine,
+		&flags.channel,
+		"path to the BOM file to render",
+	)
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to materialize desired state for")
+	cmd.Flags().
+		StringVar(&flags.localRepo, "local-repo", "", "path to a cluster-local repo that provides input bindings during render")
+	cmd.Flags().
+		StringVar(&flags.localPatchRevision, "local-patch-revision", "", "optional local patch revision recorded in applied state")
+	cmd.Flags().
+		StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local development")
+	cmd.Flags().
+		BoolVar(&flags.skipSourcePreflight, "skip-source-preflight", false, "skip source readiness preflight before render; intended only for development or debugging")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
 
 type syncRenderOutput struct {
-	ClusterName        string                     `json:"clusterName" yaml:"clusterName"`
-	BOMName            string                     `json:"bomName,omitempty" yaml:"bomName,omitempty"`
-	Revision           string                     `json:"revision,omitempty" yaml:"revision,omitempty"`
-	Channel            string                     `json:"channel,omitempty" yaml:"channel,omitempty"`
-	LocalRepoRevision  string                     `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
-	RenderProvenance   hydrate.RenderProvenance   `json:"renderProvenance,omitempty" yaml:"renderProvenance,omitempty"`
-	BundlePath         string                     `json:"bundlePath,omitempty" yaml:"bundlePath,omitempty"`
-	DesiredStateDigest string                     `json:"desiredStateDigest,omitempty" yaml:"desiredStateDigest,omitempty"`
+	ClusterName        string                     `json:"clusterName"                   yaml:"clusterName"`
+	BOMName            string                     `json:"bomName,omitempty"             yaml:"bomName,omitempty"`
+	Revision           string                     `json:"revision,omitempty"            yaml:"revision,omitempty"`
+	Channel            string                     `json:"channel,omitempty"             yaml:"channel,omitempty"`
+	LocalRepoRevision  string                     `json:"localRepoRevision,omitempty"   yaml:"localRepoRevision,omitempty"`
+	RenderProvenance   hydrate.RenderProvenance   `json:"renderProvenance,omitempty"    yaml:"renderProvenance,omitempty"`
+	BundlePath         string                     `json:"bundlePath,omitempty"          yaml:"bundlePath,omitempty"`
+	DesiredStateDigest string                     `json:"desiredStateDigest,omitempty"  yaml:"desiredStateDigest,omitempty"`
 	AppliedRevision    string                     `json:"appliedRevisionPath,omitempty" yaml:"appliedRevisionPath,omitempty"`
-	SourcePreflight    *syncSourcePreflightOutput `json:"sourcePreflight,omitempty" yaml:"sourcePreflight,omitempty"`
-	Preflight          syncPreflightOutput        `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	SourcePreflight    *syncSourcePreflightOutput `json:"sourcePreflight,omitempty"     yaml:"sourcePreflight,omitempty"`
+	Preflight          syncPreflightOutput        `json:"preflight,omitempty"           yaml:"preflight,omitempty"`
 }
 
 type syncPolicyApprovalScanOutput struct {
@@ -613,6 +917,9 @@ func newSyncPreflightCmd() *cobra.Command {
 		clusterName            string
 		bomFile                string
 		releaseChannelFile     string
+		releaseSource          string
+		releaseLine            string
+		channel                string
 		localRepo              string
 		bundleDir              string
 		kubeconfigPath         string
@@ -636,14 +943,23 @@ would pass sync apply freshness and runtime readiness gates.
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(flags.bomFile) != "" || strings.TrimSpace(flags.releaseChannelFile) != "" {
+			if strings.TrimSpace(flags.bomFile) != "" ||
+				strings.TrimSpace(flags.releaseChannelFile) != "" ||
+				strings.TrimSpace(flags.releaseSource) != "" ||
+				strings.TrimSpace(flags.releaseLine) != "" ||
+				strings.TrimSpace(flags.channel) != "" {
 				if strings.TrimSpace(flags.bundleDir) != "" {
-					return errors.New("use either --file/--release-channel for source preflight or --bundle-dir for rendered bundle preflight, not both")
+					return errors.New(
+						"use either target selector flags for source preflight or --bundle-dir for rendered bundle preflight, not both",
+					)
 				}
 				out := runSyncSourcePreflight(syncSourcePreflightOptions{
 					ClusterName:        flags.clusterName,
 					BOMPath:            flags.bomFile,
 					ReleaseChannelPath: flags.releaseChannelFile,
+					ReleaseSource:      flags.releaseSource,
+					ReleaseLine:        flags.releaseLine,
+					Channel:            flags.channel,
 					LocalRepoPath:      flags.localRepo,
 					PackageSources:     flags.packageSources,
 				})
@@ -651,8 +967,15 @@ would pass sync apply freshness and runtime readiness gates.
 					return err
 				}
 				if out.Blocked {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: sync source preflight blocked: %s\n", strings.Join(out.BlockedReasons, "; "))
-					return fmt.Errorf("sync source preflight blocked: %s", strings.Join(out.BlockedReasons, "; "))
+					fmt.Fprintf(
+						cmd.ErrOrStderr(),
+						"error: sync source preflight blocked: %s\n",
+						strings.Join(out.BlockedReasons, "; "),
+					)
+					return fmt.Errorf(
+						"sync source preflight blocked: %s",
+						strings.Join(out.BlockedReasons, "; "),
+					)
 				}
 				return nil
 			}
@@ -678,39 +1001,62 @@ would pass sync apply freshness and runtime readiness gates.
 				return err
 			}
 			if preflight.Blocked {
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: sync preflight blocked: %s\n", strings.Join(preflight.BlockedReasons, "; "))
-				return fmt.Errorf("sync preflight blocked: %s", strings.Join(preflight.BlockedReasons, "; "))
+				fmt.Fprintf(
+					cmd.ErrOrStderr(),
+					"error: sync preflight blocked: %s\n",
+					strings.Join(preflight.BlockedReasons, "; "),
+				)
+				return fmt.Errorf(
+					"sync preflight blocked: %s",
+					strings.Join(preflight.BlockedReasons, "; "),
+				)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to preflight desired state for")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file for source preflight")
-	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "cluster-local repo root for source preflight")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
-	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for rendered bundle runtime preflight")
-	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for rendered bundle runtime preflight")
-	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for source preflight")
-	cmd.Flags().BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "treat a stale executionTopology snapshot as allowed for this preflight check")
-	cmd.Flags().BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "treat stale render inputs as allowed for this preflight check")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to preflight desired state for")
+	addSyncTargetFlags(
+		cmd,
+		&flags.bomFile,
+		&flags.releaseChannelFile,
+		&flags.releaseSource,
+		&flags.releaseLine,
+		&flags.channel,
+		"path to the BOM file for source preflight",
+	)
+	cmd.Flags().
+		StringVar(&flags.localRepo, "local-repo", "", "cluster-local repo root for source preflight")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
+	cmd.Flags().
+		StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for rendered bundle runtime preflight")
+	cmd.Flags().
+		StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for rendered bundle runtime preflight")
+	cmd.Flags().
+		StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for source preflight")
+	cmd.Flags().
+		BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "treat a stale executionTopology snapshot as allowed for this preflight check")
+	cmd.Flags().
+		BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "treat stale render inputs as allowed for this preflight check")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
 
 type syncPreflightOutput struct {
-	ClusterName       string                         `json:"clusterName" yaml:"clusterName"`
-	BundlePath        string                         `json:"bundlePath" yaml:"bundlePath"`
-	BOMName           string                         `json:"bomName" yaml:"bomName"`
-	Revision          string                         `json:"revision" yaml:"revision"`
-	Channel           string                         `json:"channel" yaml:"channel"`
-	State             syncPreflightState             `json:"state" yaml:"state"`
-	Summary           string                         `json:"summary" yaml:"summary"`
-	RecommendedAction syncPreflightRecommendedAction `json:"recommendedAction" yaml:"recommendedAction"`
+	ClusterName       string                         `json:"clusterName"              yaml:"clusterName"`
+	BundlePath        string                         `json:"bundlePath"               yaml:"bundlePath"`
+	BOMName           string                         `json:"bomName"                  yaml:"bomName"`
+	Revision          string                         `json:"revision"                 yaml:"revision"`
+	Channel           string                         `json:"channel"                  yaml:"channel"`
+	State             syncPreflightState             `json:"state"                    yaml:"state"`
+	Summary           string                         `json:"summary"                  yaml:"summary"`
+	RecommendedAction syncPreflightRecommendedAction `json:"recommendedAction"        yaml:"recommendedAction"`
 	RefreshCommand    string                         `json:"refreshCommand,omitempty" yaml:"refreshCommand,omitempty"`
-	TopologyStatus    syncTopologyStatus             `json:"topologyStatus" yaml:"topologyStatus"`
-	RenderInputStatus syncRenderInputStatus          `json:"renderInputStatus" yaml:"renderInputStatus"`
-	RuntimeStatus     *syncRuntimePreflightOutput    `json:"runtimeStatus,omitempty" yaml:"runtimeStatus,omitempty"`
-	Blocked           bool                           `json:"blocked" yaml:"blocked"`
+	TopologyStatus    syncTopologyStatus             `json:"topologyStatus"           yaml:"topologyStatus"`
+	RenderInputStatus syncRenderInputStatus          `json:"renderInputStatus"        yaml:"renderInputStatus"`
+	RuntimeStatus     *syncRuntimePreflightOutput    `json:"runtimeStatus,omitempty"  yaml:"runtimeStatus,omitempty"`
+	Blocked           bool                           `json:"blocked"                  yaml:"blocked"`
 	BlockedReasons    []string                       `json:"blockedReasons,omitempty" yaml:"blockedReasons,omitempty"`
 }
 
@@ -718,36 +1064,42 @@ type syncSourcePreflightOptions struct {
 	ClusterName        string
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 	LocalRepoPath      string
 	PackageSources     []string
 }
 
 type syncSourcePreflightSummary struct {
-	Components       int `json:"components" yaml:"components"`
-	RequiredInputs   int `json:"requiredInputs" yaml:"requiredInputs"`
-	BoundInputs      int `json:"boundInputs" yaml:"boundInputs"`
-	LocalResources   int `json:"localResources" yaml:"localResources"`
-	LocalPatches     int `json:"localPatches" yaml:"localPatches"`
-	DoctorErrors     int `json:"doctorErrors" yaml:"doctorErrors"`
-	DoctorWarnings   int `json:"doctorWarnings" yaml:"doctorWarnings"`
-	ValidateErrors   int `json:"validateErrors" yaml:"validateErrors"`
+	Components       int `json:"components"       yaml:"components"`
+	RequiredInputs   int `json:"requiredInputs"   yaml:"requiredInputs"`
+	BoundInputs      int `json:"boundInputs"      yaml:"boundInputs"`
+	LocalResources   int `json:"localResources"   yaml:"localResources"`
+	LocalPatches     int `json:"localPatches"     yaml:"localPatches"`
+	DoctorErrors     int `json:"doctorErrors"     yaml:"doctorErrors"`
+	DoctorWarnings   int `json:"doctorWarnings"   yaml:"doctorWarnings"`
+	ValidateErrors   int `json:"validateErrors"   yaml:"validateErrors"`
 	ValidateWarnings int `json:"validateWarnings" yaml:"validateWarnings"`
 }
 
 type syncSourcePreflightOutput struct {
-	ClusterName        string                         `json:"clusterName" yaml:"clusterName"`
-	BOMPath            string                         `json:"bomPath" yaml:"bomPath"`
+	ClusterName        string                         `json:"clusterName"                  yaml:"clusterName"`
+	BOMPath            string                         `json:"bomPath"                      yaml:"bomPath"`
 	ReleaseChannelPath string                         `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
-	LocalRepo          string                         `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	State              syncPreflightState             `json:"state" yaml:"state"`
-	Summary            string                         `json:"summary" yaml:"summary"`
-	RecommendedAction  syncPreflightRecommendedAction `json:"recommendedAction" yaml:"recommendedAction"`
-	RenderCommand      string                         `json:"renderCommand,omitempty" yaml:"renderCommand,omitempty"`
-	Blocked            bool                           `json:"blocked" yaml:"blocked"`
-	BlockedReasons     []string                       `json:"blockedReasons,omitempty" yaml:"blockedReasons,omitempty"`
-	Counts             syncSourcePreflightSummary     `json:"counts" yaml:"counts"`
-	LocalRepoDoctor    *syncLocalRepoDoctorOutput     `json:"localRepoDoctor,omitempty" yaml:"localRepoDoctor,omitempty"`
-	Validate           syncValidateOutput             `json:"validate" yaml:"validate"`
+	ReleaseSource      string                         `json:"releaseSource,omitempty"      yaml:"releaseSource,omitempty"`
+	ReleaseLine        string                         `json:"releaseLine,omitempty"        yaml:"releaseLine,omitempty"`
+	Channel            string                         `json:"channel,omitempty"            yaml:"channel,omitempty"`
+	LocalRepo          string                         `json:"localRepo,omitempty"          yaml:"localRepo,omitempty"`
+	State              syncPreflightState             `json:"state"                        yaml:"state"`
+	Summary            string                         `json:"summary"                      yaml:"summary"`
+	RecommendedAction  syncPreflightRecommendedAction `json:"recommendedAction"            yaml:"recommendedAction"`
+	RenderCommand      string                         `json:"renderCommand,omitempty"      yaml:"renderCommand,omitempty"`
+	Blocked            bool                           `json:"blocked"                      yaml:"blocked"`
+	BlockedReasons     []string                       `json:"blockedReasons,omitempty"     yaml:"blockedReasons,omitempty"`
+	Counts             syncSourcePreflightSummary     `json:"counts"                       yaml:"counts"`
+	LocalRepoDoctor    *syncLocalRepoDoctorOutput     `json:"localRepoDoctor,omitempty"    yaml:"localRepoDoctor,omitempty"`
+	Validate           syncValidateOutput             `json:"validate"                     yaml:"validate"`
 }
 
 func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflightOutput {
@@ -759,6 +1111,9 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 		ClusterName:        clusterName,
 		BOMPath:            strings.TrimSpace(opts.BOMPath),
 		ReleaseChannelPath: strings.TrimSpace(opts.ReleaseChannelPath),
+		ReleaseSource:      strings.TrimSpace(opts.ReleaseSource),
+		ReleaseLine:        strings.TrimSpace(opts.ReleaseLine),
+		Channel:            strings.TrimSpace(opts.Channel),
 		LocalRepo:          strings.TrimSpace(opts.LocalRepoPath),
 	}
 
@@ -767,6 +1122,9 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 			ClusterName:        clusterName,
 			BOMPath:            opts.BOMPath,
 			ReleaseChannelPath: opts.ReleaseChannelPath,
+			ReleaseSource:      opts.ReleaseSource,
+			ReleaseLine:        opts.ReleaseLine,
+			Channel:            opts.Channel,
 			LocalRepoPath:      opts.LocalRepoPath,
 			PackageSources:     opts.PackageSources,
 		})
@@ -775,7 +1133,10 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 		out.Counts.DoctorErrors = doctor.Summary.Errors
 		out.Counts.DoctorWarnings = doctor.Summary.Warnings
 		if !doctor.Passed {
-			out.BlockedReasons = append(out.BlockedReasons, fmt.Sprintf("local repo doctor found %d blocking issue(s)", doctor.Summary.Errors))
+			out.BlockedReasons = append(
+				out.BlockedReasons,
+				fmt.Sprintf("local repo doctor found %d blocking issue(s)", doctor.Summary.Errors),
+			)
 		}
 	}
 
@@ -783,6 +1144,9 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 		ClusterName:        clusterName,
 		BOMPath:            opts.BOMPath,
 		ReleaseChannelPath: opts.ReleaseChannelPath,
+		ReleaseSource:      opts.ReleaseSource,
+		ReleaseLine:        opts.ReleaseLine,
+		Channel:            opts.Channel,
 		LocalRepoPath:      opts.LocalRepoPath,
 		PackageSources:     opts.PackageSources,
 	})
@@ -792,6 +1156,15 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 	}
 	if strings.TrimSpace(validate.ReleaseChannelPath) != "" {
 		out.ReleaseChannelPath = validate.ReleaseChannelPath
+	}
+	if strings.TrimSpace(validate.ReleaseSource) != "" {
+		out.ReleaseSource = validate.ReleaseSource
+	}
+	if strings.TrimSpace(validate.ReleaseLine) != "" {
+		out.ReleaseLine = validate.ReleaseLine
+	}
+	if strings.TrimSpace(validate.Channel) != "" {
+		out.Channel = validate.Channel
 	}
 	if out.LocalRepo == "" {
 		out.LocalRepo = validate.LocalRepo
@@ -804,7 +1177,10 @@ func runSyncSourcePreflight(opts syncSourcePreflightOptions) syncSourcePreflight
 	out.Counts.ValidateErrors = validate.Summary.Errors
 	out.Counts.ValidateWarnings = validate.Summary.Warnings
 	if !validate.Passed {
-		out.BlockedReasons = append(out.BlockedReasons, fmt.Sprintf("sync validate found %d blocking issue(s)", validate.Summary.Errors))
+		out.BlockedReasons = append(
+			out.BlockedReasons,
+			fmt.Sprintf("sync validate found %d blocking issue(s)", validate.Summary.Errors),
+		)
 	}
 
 	out.Blocked = len(out.BlockedReasons) > 0
@@ -830,6 +1206,8 @@ func syncSourcePreflightRenderCommand(clusterName string, opts syncSourcePreflig
 	args := []string{"sealos", "sync", "render", "--cluster", clusterName}
 	if strings.TrimSpace(opts.ReleaseChannelPath) != "" {
 		args = append(args, "--release-channel", strings.TrimSpace(opts.ReleaseChannelPath))
+	} else if strings.TrimSpace(opts.ReleaseSource) != "" || strings.TrimSpace(opts.ReleaseLine) != "" || strings.TrimSpace(opts.Channel) != "" {
+		args = append(args, "--release-source", strings.TrimSpace(opts.ReleaseSource), "--release-line", strings.TrimSpace(opts.ReleaseLine), "--channel", strings.TrimSpace(opts.Channel))
 	} else {
 		args = append(args, "--file", strings.TrimSpace(opts.BOMPath))
 	}
@@ -939,8 +1317,15 @@ func newSyncApplyCmd() *cobra.Command {
 				if err := writeSyncApplyOutput(cmd, out, flags.output); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "error: sync apply blocked: %s\n", strings.Join(preflight.BlockedReasons, "; "))
-				return fmt.Errorf("sync apply blocked: %s", strings.Join(preflight.BlockedReasons, "; "))
+				fmt.Fprintf(
+					cmd.ErrOrStderr(),
+					"error: sync apply blocked: %s\n",
+					strings.Join(preflight.BlockedReasons, "; "),
+				)
+				return fmt.Errorf(
+					"sync apply blocked: %s",
+					strings.Join(preflight.BlockedReasons, "; "),
+				)
 			}
 
 			result, err := runSyncApply(reconcile.ApplyOptions{
@@ -973,44 +1358,60 @@ func newSyncApplyCmd() *cobra.Command {
 			}
 			outputPreflight := preflight
 			outputPreflight.Bundle = appliedBundle
-			out := newSyncApplyOutput(flags.clusterName, result.BundlePath, result.DesiredStateDigest, outputPreflight)
+			out := newSyncApplyOutput(
+				flags.clusterName,
+				result.BundlePath,
+				result.DesiredStateDigest,
+				outputPreflight,
+			)
 			return writeSyncApplyOutput(cmd, out, flags.output)
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of single-node cluster to apply desired state for")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory that matches the cluster rendered state; defaults to the cluster current bundle")
-	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for manifest and healthcheck steps")
-	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for rootfs and file projection during apply")
-	cmd.Flags().IntVar(&flags.rolloutBatchSize, "rollout-batch-size", 0, "maximum hosts to process per rollout batch for host-targeted steps; 0 means all hosts")
-	cmd.Flags().IntVar(&flags.rolloutCanarySize, "rollout-canary-size", 0, "hosts to process in the first canary batch before normal rollout batches; 0 disables canary")
-	cmd.Flags().BoolVar(&flags.rolloutPauseAfterCanary, "rollout-pause-after-canary", false, "pause after the canary batch completes instead of advancing to later rollout batches")
-	cmd.Flags().BoolVar(&flags.rolloutHealthGate, "rollout-health-gate", false, "run component healthcheck hooks after each eligible host rollout batch before advancing")
-	cmd.Flags().StringVar(&flags.rolloutFailureAction, "rollout-failure-action", "", "rollout failure action: empty or Stop to leave the failed desired state recorded, Rollback to re-apply the last successful revision")
-	cmd.Flags().BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "allow applying a bundle whose executionTopology snapshot differs from the current Clusterfile topology")
-	cmd.Flags().BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "allow applying a bundle whose recorded render inputs differ from current local inputs")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of single-node cluster to apply desired state for")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory that matches the cluster rendered state; defaults to the cluster current bundle")
+	cmd.Flags().
+		StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for manifest and healthcheck steps")
+	cmd.Flags().
+		StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for rootfs and file projection during apply")
+	cmd.Flags().
+		IntVar(&flags.rolloutBatchSize, "rollout-batch-size", 0, "maximum hosts to process per rollout batch for host-targeted steps; 0 means all hosts")
+	cmd.Flags().
+		IntVar(&flags.rolloutCanarySize, "rollout-canary-size", 0, "hosts to process in the first canary batch before normal rollout batches; 0 disables canary")
+	cmd.Flags().
+		BoolVar(&flags.rolloutPauseAfterCanary, "rollout-pause-after-canary", false, "pause after the canary batch completes instead of advancing to later rollout batches")
+	cmd.Flags().
+		BoolVar(&flags.rolloutHealthGate, "rollout-health-gate", false, "run component healthcheck hooks after each eligible host rollout batch before advancing")
+	cmd.Flags().
+		StringVar(&flags.rolloutFailureAction, "rollout-failure-action", "", "rollout failure action: empty or Stop to leave the failed desired state recorded, Rollback to re-apply the last successful revision")
+	cmd.Flags().
+		BoolVar(&flags.allowStaleTopology, "allow-stale-topology", false, "allow applying a bundle whose executionTopology snapshot differs from the current Clusterfile topology")
+	cmd.Flags().
+		BoolVar(&flags.allowStaleRenderInputs, "allow-stale-render-inputs", false, "allow applying a bundle whose recorded render inputs differ from current local inputs")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
 
 type syncApplyOutput struct {
-	ClusterName        string                         `json:"clusterName" yaml:"clusterName"`
-	BOMName            string                         `json:"bomName" yaml:"bomName"`
-	Revision           string                         `json:"revision" yaml:"revision"`
-	Channel            string                         `json:"channel" yaml:"channel"`
-	BundlePath         string                         `json:"bundlePath" yaml:"bundlePath"`
-	DesiredStateDigest string                         `json:"desiredStateDigest" yaml:"desiredStateDigest"`
-	AppliedRevision    string                         `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
-	SourcePreflight    *hydrate.SourcePreflight       `json:"sourcePreflight,omitempty" yaml:"sourcePreflight,omitempty"`
-	State              syncPreflightState             `json:"state,omitempty" yaml:"state,omitempty"`
-	Summary            string                         `json:"summary,omitempty" yaml:"summary,omitempty"`
+	ClusterName        string                         `json:"clusterName"                 yaml:"clusterName"`
+	BOMName            string                         `json:"bomName"                     yaml:"bomName"`
+	Revision           string                         `json:"revision"                    yaml:"revision"`
+	Channel            string                         `json:"channel"                     yaml:"channel"`
+	BundlePath         string                         `json:"bundlePath"                  yaml:"bundlePath"`
+	DesiredStateDigest string                         `json:"desiredStateDigest"          yaml:"desiredStateDigest"`
+	AppliedRevision    string                         `json:"appliedRevisionPath"         yaml:"appliedRevisionPath"`
+	SourcePreflight    *hydrate.SourcePreflight       `json:"sourcePreflight,omitempty"   yaml:"sourcePreflight,omitempty"`
+	State              syncPreflightState             `json:"state,omitempty"             yaml:"state,omitempty"`
+	Summary            string                         `json:"summary,omitempty"           yaml:"summary,omitempty"`
 	RecommendedAction  syncPreflightRecommendedAction `json:"recommendedAction,omitempty" yaml:"recommendedAction,omitempty"`
-	RefreshCommand     string                         `json:"refreshCommand,omitempty" yaml:"refreshCommand,omitempty"`
-	TopologyStatus     syncTopologyStatus             `json:"topologyStatus" yaml:"topologyStatus"`
-	RenderInputStatus  syncRenderInputStatus          `json:"renderInputStatus" yaml:"renderInputStatus"`
-	RuntimeStatus      *syncRuntimePreflightOutput    `json:"runtimeStatus,omitempty" yaml:"runtimeStatus,omitempty"`
-	Blocked            bool                           `json:"blocked,omitempty" yaml:"blocked,omitempty"`
-	BlockedReasons     []string                       `json:"blockedReasons,omitempty" yaml:"blockedReasons,omitempty"`
-	Warnings           []string                       `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	RefreshCommand     string                         `json:"refreshCommand,omitempty"    yaml:"refreshCommand,omitempty"`
+	TopologyStatus     syncTopologyStatus             `json:"topologyStatus"              yaml:"topologyStatus"`
+	RenderInputStatus  syncRenderInputStatus          `json:"renderInputStatus"           yaml:"renderInputStatus"`
+	RuntimeStatus      *syncRuntimePreflightOutput    `json:"runtimeStatus,omitempty"     yaml:"runtimeStatus,omitempty"`
+	Blocked            bool                           `json:"blocked,omitempty"           yaml:"blocked,omitempty"`
+	BlockedReasons     []string                       `json:"blockedReasons,omitempty"    yaml:"blockedReasons,omitempty"`
+	Warnings           []string                       `json:"warnings,omitempty"          yaml:"warnings,omitempty"`
 }
 
 type syncPreflightState string
@@ -1049,31 +1450,57 @@ type syncApplyPreflightOptions struct {
 	AllowStaleRenderInputs bool
 }
 
-func syncApplyPreflight(clusterName, bundlePath string, allowStaleTopology, allowStaleRenderInputs bool) (syncApplyPreflightResult, error) {
+func syncApplyPreflight(
+	clusterName, bundlePath string,
+	allowStaleTopology, allowStaleRenderInputs bool,
+) (syncApplyPreflightResult, error) {
 	bundle, err := reconcile.LoadBundle(bundlePath)
 	if err != nil {
 		return syncApplyPreflightResult{}, err
 	}
-	return syncApplyPreflightForBundle(clusterName, bundle, allowStaleTopology, allowStaleRenderInputs), nil
+	return syncApplyPreflightForBundle(
+		clusterName,
+		bundle,
+		allowStaleTopology,
+		allowStaleRenderInputs,
+	), nil
 }
 
-func syncApplyPreflightWithRuntime(opts syncApplyPreflightOptions) (syncApplyPreflightResult, error) {
+func syncApplyPreflightWithRuntime(
+	opts syncApplyPreflightOptions,
+) (syncApplyPreflightResult, error) {
 	bundle, err := reconcile.LoadBundle(opts.BundlePath)
 	if err != nil {
 		return syncApplyPreflightResult{}, err
 	}
-	return syncApplyPreflightForBundleWithRuntime(opts.ClusterName, bundle, opts.AllowStaleTopology, opts.AllowStaleRenderInputs, syncRuntimePreflightOptions{
-		ClusterName:    opts.ClusterName,
-		Bundle:         bundle,
-		HostRoot:       opts.HostRoot,
-		KubeconfigPath: opts.KubeconfigPath,
-	}), nil
+	return syncApplyPreflightForBundleWithRuntime(
+		opts.ClusterName,
+		bundle,
+		opts.AllowStaleTopology,
+		opts.AllowStaleRenderInputs,
+		syncRuntimePreflightOptions{
+			ClusterName:    opts.ClusterName,
+			Bundle:         bundle,
+			HostRoot:       opts.HostRoot,
+			KubeconfigPath: opts.KubeconfigPath,
+		},
+	), nil
 }
 
-func syncApplyPreflightForBundle(clusterName string, bundle *hydrate.Bundle, allowStaleTopology, allowStaleRenderInputs bool) syncApplyPreflightResult {
+func syncApplyPreflightForBundle(
+	clusterName string,
+	bundle *hydrate.Bundle,
+	allowStaleTopology, allowStaleRenderInputs bool,
+) syncApplyPreflightResult {
 	topologyStatus := syncTopologyStatusForBundle(clusterName, bundle)
 	renderInputStatus := syncRenderInputStatusForBundle(bundle)
-	blockedReasons := syncApplyBlockedReasons(topologyStatus, renderInputStatus, nil, allowStaleTopology, allowStaleRenderInputs)
+	blockedReasons := syncApplyBlockedReasons(
+		topologyStatus,
+		renderInputStatus,
+		nil,
+		allowStaleTopology,
+		allowStaleRenderInputs,
+	)
 	return syncApplyPreflightResult{
 		Bundle:            bundle,
 		TopologyStatus:    topologyStatus,
@@ -1083,11 +1510,22 @@ func syncApplyPreflightForBundle(clusterName string, bundle *hydrate.Bundle, all
 	}
 }
 
-func syncApplyPreflightForBundleWithRuntime(clusterName string, bundle *hydrate.Bundle, allowStaleTopology, allowStaleRenderInputs bool, runtimeOpts syncRuntimePreflightOptions) syncApplyPreflightResult {
+func syncApplyPreflightForBundleWithRuntime(
+	clusterName string,
+	bundle *hydrate.Bundle,
+	allowStaleTopology, allowStaleRenderInputs bool,
+	runtimeOpts syncRuntimePreflightOptions,
+) syncApplyPreflightResult {
 	topologyStatus := syncTopologyStatusForBundle(clusterName, bundle)
 	renderInputStatus := syncRenderInputStatusForBundle(bundle)
 	runtimeStatus := runSyncRuntimePreflight(runtimeOpts)
-	blockedReasons := syncApplyBlockedReasons(topologyStatus, renderInputStatus, &runtimeStatus, allowStaleTopology, allowStaleRenderInputs)
+	blockedReasons := syncApplyBlockedReasons(
+		topologyStatus,
+		renderInputStatus,
+		&runtimeStatus,
+		allowStaleTopology,
+		allowStaleRenderInputs,
+	)
 	return syncApplyPreflightResult{
 		Bundle:            bundle,
 		TopologyStatus:    topologyStatus,
@@ -1098,7 +1536,10 @@ func syncApplyPreflightForBundleWithRuntime(clusterName string, bundle *hydrate.
 	}
 }
 
-func newSyncPreflightOutput(clusterName, bundlePath string, preflight syncApplyPreflightResult) syncPreflightOutput {
+func newSyncPreflightOutput(
+	clusterName, bundlePath string,
+	preflight syncApplyPreflightResult,
+) syncPreflightOutput {
 	state, summary, action := syncPreflightDecision(preflight)
 	out := syncPreflightOutput{
 		ClusterName:       clusterName,
@@ -1121,9 +1562,12 @@ func newSyncPreflightOutput(clusterName, bundlePath string, preflight syncApplyP
 	return out
 }
 
-func syncPreflightDecision(preflight syncApplyPreflightResult) (syncPreflightState, string, syncPreflightRecommendedAction) {
+func syncPreflightDecision(
+	preflight syncApplyPreflightResult,
+) (syncPreflightState, string, syncPreflightRecommendedAction) {
 	if preflight.Blocked {
-		if preflight.TopologyStatus.State == syncTopologyStateStale || preflight.RenderInputStatus.State == syncRenderInputStateStale {
+		if preflight.TopologyStatus.State == syncTopologyStateStale ||
+			preflight.RenderInputStatus.State == syncRenderInputStateStale {
 			return syncPreflightStateBlocked, "bundle is not safe to apply without refreshing or explicitly overriding stale checks", syncPreflightRecommendedActionRerender
 		}
 		if preflight.RuntimeStatus != nil && preflight.RuntimeStatus.Blocked {
@@ -1131,16 +1575,20 @@ func syncPreflightDecision(preflight syncApplyPreflightResult) (syncPreflightSta
 		}
 		return syncPreflightStateBlocked, "bundle is not safe to apply", syncPreflightRecommendedActionInspect
 	}
-	if preflight.TopologyStatus.State == syncTopologyStateStale || preflight.RenderInputStatus.State == syncRenderInputStateStale {
+	if preflight.TopologyStatus.State == syncTopologyStateStale ||
+		preflight.RenderInputStatus.State == syncRenderInputStateStale {
 		return syncPreflightStateWarning, "bundle has stale inputs or topology but this check allowed override flags", syncPreflightRecommendedActionApplyWithOverride
 	}
-	if preflight.RuntimeStatus != nil && preflight.RuntimeStatus.State == syncPreflightStateWarning {
+	if preflight.RuntimeStatus != nil &&
+		preflight.RuntimeStatus.State == syncPreflightStateWarning {
 		return syncPreflightStateWarning, "bundle passed blocking checks with runtime warnings", syncPreflightRecommendedActionInspect
 	}
-	if preflight.TopologyStatus.State == syncTopologyStateUnknown || preflight.RenderInputStatus.State == syncRenderInputStateUnknown {
+	if preflight.TopologyStatus.State == syncTopologyStateUnknown ||
+		preflight.RenderInputStatus.State == syncRenderInputStateUnknown {
 		return syncPreflightStateWarning, "bundle freshness could not be fully verified", syncPreflightRecommendedActionInspect
 	}
-	if preflight.TopologyStatus.State == syncTopologyStateMissing || preflight.RenderInputStatus.State == syncRenderInputStateMissing {
+	if preflight.TopologyStatus.State == syncTopologyStateMissing ||
+		preflight.RenderInputStatus.State == syncRenderInputStateMissing {
 		return syncPreflightStateWarning, "bundle is missing freshness metadata; re-render to initialize tracking before production apply", syncPreflightRecommendedActionInspect
 	}
 	return syncPreflightStateReady, "bundle passed apply preflight checks", syncPreflightRecommendedActionApply
@@ -1150,7 +1598,10 @@ func writeSyncPreflightOutput(cmd *cobra.Command, out syncPreflightOutput, forma
 	return writeSyncOutput(cmd, out, format, "preflight result")
 }
 
-func newSyncApplyOutput(clusterName, bundlePath, desiredStateDigest string, preflight syncApplyPreflightResult) syncApplyOutput {
+func newSyncApplyOutput(
+	clusterName, bundlePath, desiredStateDigest string,
+	preflight syncApplyPreflightResult,
+) syncApplyOutput {
 	preflightState, summary, action := syncPreflightDecision(preflight)
 	out := syncApplyOutput{
 		ClusterName:        clusterName,
@@ -1181,13 +1632,24 @@ func writeSyncApplyOutput(cmd *cobra.Command, out syncApplyOutput, format string
 	return writeSyncOutput(cmd, out, format, "apply result")
 }
 
-func syncApplyBlockedReasons(topologyStatus syncTopologyStatus, renderInputStatus syncRenderInputStatus, runtimeStatus *syncRuntimePreflightOutput, allowStaleTopology, allowStaleRenderInputs bool) []string {
+func syncApplyBlockedReasons(
+	topologyStatus syncTopologyStatus,
+	renderInputStatus syncRenderInputStatus,
+	runtimeStatus *syncRuntimePreflightOutput,
+	allowStaleTopology, allowStaleRenderInputs bool,
+) []string {
 	var reasons []string
 	if topologyStatus.State == syncTopologyStateStale && !allowStaleTopology {
-		reasons = append(reasons, "bundle executionTopology is stale; re-run sync render or pass --allow-stale-topology")
+		reasons = append(
+			reasons,
+			"bundle executionTopology is stale; re-run sync render or pass --allow-stale-topology",
+		)
 	}
 	if renderInputStatus.State == syncRenderInputStateStale && !allowStaleRenderInputs {
-		reasons = append(reasons, "render inputs are stale; re-run sync render or pass --allow-stale-render-inputs")
+		reasons = append(
+			reasons,
+			"render inputs are stale; re-run sync render or pass --allow-stale-render-inputs",
+		)
 	}
 	if runtimeStatus != nil && runtimeStatus.Blocked {
 		reasons = append(reasons, runtimeStatus.BlockedReasons...)
@@ -1199,7 +1661,12 @@ func syncWarnApplyPreflight(cmd *cobra.Command, preflight syncApplyPreflightResu
 	topologyStatus := preflight.TopologyStatus
 	renderInputStatus := preflight.RenderInputStatus
 	if topologyStatus.State == syncTopologyStateStale {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s; refresh with: %s\n", topologyStatus.Message, topologyStatus.RefreshCommand)
+		fmt.Fprintf(
+			cmd.ErrOrStderr(),
+			"warning: %s; refresh with: %s\n",
+			topologyStatus.Message,
+			topologyStatus.RefreshCommand,
+		)
 	}
 	if renderInputStatus.State == syncRenderInputStateStale {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", renderInputStatus.Message)
@@ -1235,7 +1702,13 @@ func newSyncDiffCmd() *cobra.Command {
 				return err
 			}
 
-			result, err := syncCompareBundle(flags.clusterName, bundle, bundlePath, flags.kubeconfigPath, flags.hostRoot)
+			result, err := syncCompareBundle(
+				flags.clusterName,
+				bundle,
+				bundlePath,
+				flags.kubeconfigPath,
+				flags.hostRoot,
+			)
 			if err != nil {
 				return err
 			}
@@ -1244,7 +1717,12 @@ func newSyncDiffCmd() *cobra.Command {
 				return err
 			}
 			statusSummary := compare.SummarizeStatus(result)
-			persisted, updated, err := persistSyncObservedState(flags.clusterName, bundlePath, result.Summary, statusSummary)
+			persisted, updated, err := persistSyncObservedState(
+				flags.clusterName,
+				bundlePath,
+				result.Summary,
+				statusSummary,
+			)
 			if err != nil {
 				return err
 			}
@@ -1253,15 +1731,19 @@ func newSyncDiffCmd() *cobra.Command {
 			}
 
 			out := syncDiffOutput{
-				ClusterName:                 flags.clusterName,
-				BOMName:                     bundle.Spec.BOMName,
-				Revision:                    bundle.Spec.Revision,
-				Channel:                     string(bundle.Spec.Channel),
-				BundlePath:                  bundlePath,
-				AppliedRevision:             state.AppliedRevisionPath(flags.clusterName),
-				LocalPatchPolicy:            syncLocalPatchPolicyFromBundle(bundle),
-				SourcePreflight:             bundle.Spec.SourcePreflight,
-				Preflight:                   newSyncPreflightOutput(flags.clusterName, bundlePath, preflight),
+				ClusterName:      flags.clusterName,
+				BOMName:          bundle.Spec.BOMName,
+				Revision:         bundle.Spec.Revision,
+				Channel:          string(bundle.Spec.Channel),
+				BundlePath:       bundlePath,
+				AppliedRevision:  state.AppliedRevisionPath(flags.clusterName),
+				LocalPatchPolicy: syncLocalPatchPolicyFromBundle(bundle),
+				SourcePreflight:  bundle.Spec.SourcePreflight,
+				Preflight: newSyncPreflightOutput(
+					flags.clusterName,
+					bundlePath,
+					preflight,
+				),
 				TopologyStatus:              preflight.TopologyStatus,
 				RenderInputStatus:           preflight.RenderInputStatus,
 				CurrentState:                statusSummary.State,
@@ -1284,10 +1766,14 @@ func newSyncDiffCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "diff result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to diff against")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
-	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
-	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to diff against")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
+	cmd.Flags().
+		StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
+	cmd.Flags().
+		StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
@@ -1321,7 +1807,13 @@ func newSyncStatusCmd() *cobra.Command {
 				return err
 			}
 
-			result, err := syncCompareBundle(flags.clusterName, bundle, bundlePath, flags.kubeconfigPath, flags.hostRoot)
+			result, err := syncCompareBundle(
+				flags.clusterName,
+				bundle,
+				bundlePath,
+				flags.kubeconfigPath,
+				flags.hostRoot,
+			)
 			if err != nil {
 				return err
 			}
@@ -1337,15 +1829,19 @@ func newSyncStatusCmd() *cobra.Command {
 			}
 
 			out := syncStatusOutput{
-				ClusterName:                 flags.clusterName,
-				BOMName:                     bundle.Spec.BOMName,
-				Revision:                    bundle.Spec.Revision,
-				Channel:                     string(bundle.Spec.Channel),
-				BundlePath:                  bundlePath,
-				AppliedRevision:             state.AppliedRevisionPath(flags.clusterName),
-				LocalPatchPolicy:            syncLocalPatchPolicyFromBundle(bundle),
-				SourcePreflight:             bundle.Spec.SourcePreflight,
-				Preflight:                   newSyncPreflightOutput(flags.clusterName, bundlePath, preflight),
+				ClusterName:      flags.clusterName,
+				BOMName:          bundle.Spec.BOMName,
+				Revision:         bundle.Spec.Revision,
+				Channel:          string(bundle.Spec.Channel),
+				BundlePath:       bundlePath,
+				AppliedRevision:  state.AppliedRevisionPath(flags.clusterName),
+				LocalPatchPolicy: syncLocalPatchPolicyFromBundle(bundle),
+				SourcePreflight:  bundle.Spec.SourcePreflight,
+				Preflight: newSyncPreflightOutput(
+					flags.clusterName,
+					bundlePath,
+					preflight,
+				),
 				TopologyStatus:              preflight.TopologyStatus,
 				RenderInputStatus:           preflight.RenderInputStatus,
 				CurrentState:                statusSummary.State,
@@ -1373,10 +1869,14 @@ func newSyncStatusCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "status result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to inspect")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
-	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
-	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to inspect")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
+	cmd.Flags().
+		StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
+	cmd.Flags().
+		StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
@@ -1417,14 +1917,25 @@ func newSyncCommitCmd() *cobra.Command {
 			}
 
 			resolver := newSyncKubectlResolver(flags.kubeconfigPath)
-			current, err := syncCompareBundle(flags.clusterName, bundle, bundlePath, flags.kubeconfigPath, flags.hostRoot)
+			current, err := syncCompareBundle(
+				flags.clusterName,
+				bundle,
+				bundlePath,
+				flags.kubeconfigPath,
+				flags.hostRoot,
+			)
 			if err != nil {
 				return err
 			}
 			commitHostRoot := flags.hostRoot
 			cleanupCommitHostRoot := func() {}
 			if strings.TrimSpace(flags.host) != "" {
-				commitHostRoot, cleanupCommitHostRoot, err = syncPrepareCommitHostRoot(flags.clusterName, bundle, flags.hostRoot, flags.host)
+				commitHostRoot, cleanupCommitHostRoot, err = syncPrepareCommitHostRoot(
+					flags.clusterName,
+					bundle,
+					flags.hostRoot,
+					flags.host,
+				)
 				if err != nil {
 					return err
 				}
@@ -1449,12 +1960,23 @@ func newSyncCommitCmd() *cobra.Command {
 				return err
 			}
 
-			updatedCompare, err := syncCompareBundle(flags.clusterName, bundle, bundlePath, flags.kubeconfigPath, flags.hostRoot)
+			updatedCompare, err := syncCompareBundle(
+				flags.clusterName,
+				bundle,
+				bundlePath,
+				flags.kubeconfigPath,
+				flags.hostRoot,
+			)
 			if err != nil {
 				return err
 			}
 			statusSummary := compare.SummarizeStatus(updatedCompare)
-			persisted, observedUpdated, err := persistSyncObservedState(flags.clusterName, bundlePath, updatedCompare.Summary, statusSummary)
+			persisted, observedUpdated, err := persistSyncObservedState(
+				flags.clusterName,
+				bundlePath,
+				updatedCompare.Summary,
+				statusSummary,
+			)
 			if err != nil {
 				return err
 			}
@@ -1485,12 +2007,18 @@ func newSyncCommitCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "commit result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to commit local-owned drift for")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
-	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "path to the cluster-local repo whose patch files should be updated")
-	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
-	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
-	cmd.Flags().StringVar(&flags.host, "host", "", "optional host identity to commit a multi-node local-input host path from")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to commit local-owned drift for")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
+	cmd.Flags().
+		StringVar(&flags.localRepo, "local-repo", "", "path to the cluster-local repo whose patch files should be updated")
+	cmd.Flags().
+		StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
+	cmd.Flags().
+		StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
+	cmd.Flags().
+		StringVar(&flags.host, "host", "", "optional host identity to commit a multi-node local-input host path from")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
@@ -1549,12 +2077,26 @@ func newSyncRevertCmd() *cobra.Command {
 				return err
 			}
 
-			beforeCompare, err := syncCompareBundle(flags.clusterName, bundle, bundlePath, flags.kubeconfigPath, flags.hostRoot)
+			beforeCompare, err := syncCompareBundle(
+				flags.clusterName,
+				bundle,
+				bundlePath,
+				flags.kubeconfigPath,
+				flags.hostRoot,
+			)
 			if err != nil {
 				return err
 			}
 			beforeStatus := compare.SummarizeStatus(beforeCompare)
-			revertTargets, err := planSyncRevertTargets(bundle, beforeCompare, scope, selector, flags.host, flags.component, flags.hostPath)
+			revertTargets, err := planSyncRevertTargets(
+				bundle,
+				beforeCompare,
+				scope,
+				selector,
+				flags.host,
+				flags.component,
+				flags.hostPath,
+			)
 			if err != nil {
 				return err
 			}
@@ -1567,12 +2109,23 @@ func newSyncRevertCmd() *cobra.Command {
 				reverted = true
 			}
 
-			currentCompare, err := syncCompareBundle(flags.clusterName, bundle, bundlePath, flags.kubeconfigPath, flags.hostRoot)
+			currentCompare, err := syncCompareBundle(
+				flags.clusterName,
+				bundle,
+				bundlePath,
+				flags.kubeconfigPath,
+				flags.hostRoot,
+			)
 			if err != nil {
 				return err
 			}
 			currentStatus := compare.SummarizeStatus(currentCompare)
-			persisted, updated, err := persistSyncObservedState(flags.clusterName, bundlePath, currentCompare.Summary, currentStatus)
+			persisted, updated, err := persistSyncObservedState(
+				flags.clusterName,
+				bundlePath,
+				currentCompare.Summary,
+				currentStatus,
+			)
 			if err != nil {
 				return err
 			}
@@ -1607,18 +2160,30 @@ func newSyncRevertCmd() *cobra.Command {
 			return writeSyncOutput(cmd, out, flags.output, "revert result")
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to revert live drift for")
-	cmd.Flags().StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
-	cmd.Flags().StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
-	cmd.Flags().StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
-	cmd.Flags().StringVar(&flags.scope, "scope", string(syncRevertScopeAll), "revert scope: all or local")
-	cmd.Flags().StringVar(&flags.apiVersion, "api-version", "", "optional apiVersion for exact object-scoped revert")
-	cmd.Flags().StringVar(&flags.kind, "kind", "", "optional kind for exact object-scoped revert; must be paired with --name")
-	cmd.Flags().StringVar(&flags.namespace, "namespace", "", "optional namespace for exact object-scoped revert")
-	cmd.Flags().StringVar(&flags.name, "name", "", "optional object name for exact object-scoped revert; must be paired with --kind")
-	cmd.Flags().StringVar(&flags.host, "host", "", "optional execution host for exact host-scoped revert; required only when the same tracked host path drifts on multiple nodes")
-	cmd.Flags().StringVar(&flags.component, "component", "", "optional component name for exact host-scoped revert when the same tracked host path drifts from multiple components")
-	cmd.Flags().StringVar(&flags.hostPath, "host-path", "", "optional absolute tracked host path for exact host-scoped revert")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster to revert live drift for")
+	cmd.Flags().
+		StringVar(&flags.bundleDir, "bundle-dir", "", "path to a rendered bundle directory; defaults to the cluster current bundle")
+	cmd.Flags().
+		StringVar(&flags.kubeconfigPath, "kubeconfig", "/etc/kubernetes/admin.conf", "path to the admin kubeconfig used for live object lookup")
+	cmd.Flags().
+		StringVar(&flags.hostRoot, "host-root", string(os.PathSeparator), "host filesystem root used for tracked host path lookup")
+	cmd.Flags().
+		StringVar(&flags.scope, "scope", string(syncRevertScopeAll), "revert scope: all or local")
+	cmd.Flags().
+		StringVar(&flags.apiVersion, "api-version", "", "optional apiVersion for exact object-scoped revert")
+	cmd.Flags().
+		StringVar(&flags.kind, "kind", "", "optional kind for exact object-scoped revert; must be paired with --name")
+	cmd.Flags().
+		StringVar(&flags.namespace, "namespace", "", "optional namespace for exact object-scoped revert")
+	cmd.Flags().
+		StringVar(&flags.name, "name", "", "optional object name for exact object-scoped revert; must be paired with --kind")
+	cmd.Flags().
+		StringVar(&flags.host, "host", "", "optional execution host for exact host-scoped revert; required only when the same tracked host path drifts on multiple nodes")
+	cmd.Flags().
+		StringVar(&flags.component, "component", "", "optional component name for exact host-scoped revert when the same tracked host path drifts from multiple components")
+	cmd.Flags().
+		StringVar(&flags.hostPath, "host-path", "", "optional absolute tracked host path for exact host-scoped revert")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
@@ -1643,76 +2208,76 @@ func newSyncKubectlResolver(kubeconfigPath string) compare.ObjectResolver {
 }
 
 type syncStatusOutput struct {
-	ClusterName                 string                         `json:"clusterName" yaml:"clusterName"`
-	BOMName                     string                         `json:"bomName" yaml:"bomName"`
-	Revision                    string                         `json:"revision" yaml:"revision"`
-	Channel                     string                         `json:"channel" yaml:"channel"`
-	BundlePath                  string                         `json:"bundlePath" yaml:"bundlePath"`
-	AppliedRevision             string                         `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
-	LocalPatchPolicy            *syncLocalPatchPolicyOutput    `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
-	SourcePreflight             *hydrate.SourcePreflight       `json:"sourcePreflight,omitempty" yaml:"sourcePreflight,omitempty"`
-	Preflight                   syncPreflightOutput            `json:"preflight" yaml:"preflight"`
-	TopologyStatus              syncTopologyStatus             `json:"topologyStatus" yaml:"topologyStatus"`
-	RenderInputStatus           syncRenderInputStatus          `json:"renderInputStatus" yaml:"renderInputStatus"`
-	Headline                    string                         `json:"headline" yaml:"headline"`
-	DesiredStateDigest          string                         `json:"desiredStateDigest,omitempty" yaml:"desiredStateDigest,omitempty"`
-	LocalRepoRevision           string                         `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
-	LocalPatchRevision          string                         `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
-	RecordedState               state.ClusterState             `json:"recordedState,omitempty" yaml:"recordedState,omitempty"`
-	RecordedObservedSummary     *state.ObservedSummary         `json:"recordedObservedSummary,omitempty" yaml:"recordedObservedSummary,omitempty"`
-	CurrentState                state.ClusterState             `json:"currentState" yaml:"currentState"`
-	LastAppliedTime             string                         `json:"lastAppliedTime,omitempty" yaml:"lastAppliedTime,omitempty"`
-	Summary                     compare.Summary                `json:"summary" yaml:"summary"`
-	OperatorActionSummary       compare.OperatorActionSummary  `json:"operatorActionSummary" yaml:"operatorActionSummary"`
-	MixedOwnershipObjects       []compare.MixedOwnershipObject `json:"mixedOwnershipObjects,omitempty" yaml:"mixedOwnershipObjects,omitempty"`
-	DirtyObjects                []compare.ObjectIssue          `json:"dirtyObjects,omitempty" yaml:"dirtyObjects,omitempty"`
-	OrphanObjects               []compare.ObjectIssue          `json:"orphanObjects,omitempty" yaml:"orphanObjects,omitempty"`
+	ClusterName                 string                         `json:"clusterName"                           yaml:"clusterName"`
+	BOMName                     string                         `json:"bomName"                               yaml:"bomName"`
+	Revision                    string                         `json:"revision"                              yaml:"revision"`
+	Channel                     string                         `json:"channel"                               yaml:"channel"`
+	BundlePath                  string                         `json:"bundlePath"                            yaml:"bundlePath"`
+	AppliedRevision             string                         `json:"appliedRevisionPath"                   yaml:"appliedRevisionPath"`
+	LocalPatchPolicy            *syncLocalPatchPolicyOutput    `json:"localPatchPolicy,omitempty"            yaml:"localPatchPolicy,omitempty"`
+	SourcePreflight             *hydrate.SourcePreflight       `json:"sourcePreflight,omitempty"             yaml:"sourcePreflight,omitempty"`
+	Preflight                   syncPreflightOutput            `json:"preflight"                             yaml:"preflight"`
+	TopologyStatus              syncTopologyStatus             `json:"topologyStatus"                        yaml:"topologyStatus"`
+	RenderInputStatus           syncRenderInputStatus          `json:"renderInputStatus"                     yaml:"renderInputStatus"`
+	Headline                    string                         `json:"headline"                              yaml:"headline"`
+	DesiredStateDigest          string                         `json:"desiredStateDigest,omitempty"          yaml:"desiredStateDigest,omitempty"`
+	LocalRepoRevision           string                         `json:"localRepoRevision,omitempty"           yaml:"localRepoRevision,omitempty"`
+	LocalPatchRevision          string                         `json:"localPatchRevision,omitempty"          yaml:"localPatchRevision,omitempty"`
+	RecordedState               state.ClusterState             `json:"recordedState,omitempty"               yaml:"recordedState,omitempty"`
+	RecordedObservedSummary     *state.ObservedSummary         `json:"recordedObservedSummary,omitempty"     yaml:"recordedObservedSummary,omitempty"`
+	CurrentState                state.ClusterState             `json:"currentState"                          yaml:"currentState"`
+	LastAppliedTime             string                         `json:"lastAppliedTime,omitempty"             yaml:"lastAppliedTime,omitempty"`
+	Summary                     compare.Summary                `json:"summary"                               yaml:"summary"`
+	OperatorActionSummary       compare.OperatorActionSummary  `json:"operatorActionSummary"                 yaml:"operatorActionSummary"`
+	MixedOwnershipObjects       []compare.MixedOwnershipObject `json:"mixedOwnershipObjects,omitempty"       yaml:"mixedOwnershipObjects,omitempty"`
+	DirtyObjects                []compare.ObjectIssue          `json:"dirtyObjects,omitempty"                yaml:"dirtyObjects,omitempty"`
+	OrphanObjects               []compare.ObjectIssue          `json:"orphanObjects,omitempty"               yaml:"orphanObjects,omitempty"`
 	PolicyEligibleOrphanObjects []compare.ObjectIssue          `json:"policyEligibleOrphanObjects,omitempty" yaml:"policyEligibleOrphanObjects,omitempty"`
-	HostPathConflicts           []compare.HostPathConflict     `json:"hostPathConflicts,omitempty" yaml:"hostPathConflicts,omitempty"`
-	LocalInputHostSplits        []compare.LocalInputHostSplit  `json:"localInputHostSplits,omitempty" yaml:"localInputHostSplits,omitempty"`
-	DirtyHostPaths              []compare.HostPathIssue        `json:"dirtyHostPaths,omitempty" yaml:"dirtyHostPaths,omitempty"`
-	OrphanHostPaths             []compare.HostPathIssue        `json:"orphanHostPaths,omitempty" yaml:"orphanHostPaths,omitempty"`
-	Warnings                    []string                       `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	HostPathConflicts           []compare.HostPathConflict     `json:"hostPathConflicts,omitempty"           yaml:"hostPathConflicts,omitempty"`
+	LocalInputHostSplits        []compare.LocalInputHostSplit  `json:"localInputHostSplits,omitempty"        yaml:"localInputHostSplits,omitempty"`
+	DirtyHostPaths              []compare.HostPathIssue        `json:"dirtyHostPaths,omitempty"              yaml:"dirtyHostPaths,omitempty"`
+	OrphanHostPaths             []compare.HostPathIssue        `json:"orphanHostPaths,omitempty"             yaml:"orphanHostPaths,omitempty"`
+	Warnings                    []string                       `json:"warnings,omitempty"                    yaml:"warnings,omitempty"`
 }
 
 type syncCommitOutput struct {
-	ClusterName          string                         `json:"clusterName" yaml:"clusterName"`
-	BOMName              string                         `json:"bomName" yaml:"bomName"`
-	Revision             string                         `json:"revision" yaml:"revision"`
-	Channel              string                         `json:"channel" yaml:"channel"`
-	BundlePath           string                         `json:"bundlePath" yaml:"bundlePath"`
-	AppliedRevision      string                         `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
-	DesiredStateDigest   string                         `json:"desiredStateDigest" yaml:"desiredStateDigest"`
-	LocalRepoRevision    string                         `json:"localRepoRevision" yaml:"localRepoRevision"`
-	CommittedObjects     []distcommit.CommittedObject   `json:"committedObjects,omitempty" yaml:"committedObjects,omitempty"`
+	ClusterName          string                         `json:"clusterName"                  yaml:"clusterName"`
+	BOMName              string                         `json:"bomName"                      yaml:"bomName"`
+	Revision             string                         `json:"revision"                     yaml:"revision"`
+	Channel              string                         `json:"channel"                      yaml:"channel"`
+	BundlePath           string                         `json:"bundlePath"                   yaml:"bundlePath"`
+	AppliedRevision      string                         `json:"appliedRevisionPath"          yaml:"appliedRevisionPath"`
+	DesiredStateDigest   string                         `json:"desiredStateDigest"           yaml:"desiredStateDigest"`
+	LocalRepoRevision    string                         `json:"localRepoRevision"            yaml:"localRepoRevision"`
+	CommittedObjects     []distcommit.CommittedObject   `json:"committedObjects,omitempty"   yaml:"committedObjects,omitempty"`
 	CommittedHostPaths   []distcommit.CommittedHostPath `json:"committedHostPaths,omitempty" yaml:"committedHostPaths,omitempty"`
-	RequestedHost        string                         `json:"requestedHost,omitempty" yaml:"requestedHost,omitempty"`
-	CurrentState         state.ClusterState             `json:"currentState" yaml:"currentState"`
-	CurrentCompare       *compare.Result                `json:"currentCompare" yaml:"currentCompare"`
-	ObservationPersisted bool                           `json:"observationPersisted" yaml:"observationPersisted"`
-	RecordedRevision     *syncRecordedRevisionOutput    `json:"recordedRevision,omitempty" yaml:"recordedRevision,omitempty"`
+	RequestedHost        string                         `json:"requestedHost,omitempty"      yaml:"requestedHost,omitempty"`
+	CurrentState         state.ClusterState             `json:"currentState"                 yaml:"currentState"`
+	CurrentCompare       *compare.Result                `json:"currentCompare"               yaml:"currentCompare"`
+	ObservationPersisted bool                           `json:"observationPersisted"         yaml:"observationPersisted"`
+	RecordedRevision     *syncRecordedRevisionOutput    `json:"recordedRevision,omitempty"   yaml:"recordedRevision,omitempty"`
 }
 
 type syncRevertOutput struct {
-	ClusterName          string                      `json:"clusterName" yaml:"clusterName"`
-	BOMName              string                      `json:"bomName" yaml:"bomName"`
-	Revision             string                      `json:"revision" yaml:"revision"`
-	Channel              string                      `json:"channel" yaml:"channel"`
-	BundlePath           string                      `json:"bundlePath" yaml:"bundlePath"`
-	AppliedRevision      string                      `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
-	RequestedScope       syncRevertScope             `json:"requestedScope" yaml:"requestedScope"`
-	RequestedObject      *syncObjectSelectorOutput   `json:"requestedObject,omitempty" yaml:"requestedObject,omitempty"`
-	RequestedHost        string                      `json:"requestedHost,omitempty" yaml:"requestedHost,omitempty"`
+	ClusterName          string                      `json:"clusterName"                  yaml:"clusterName"`
+	BOMName              string                      `json:"bomName"                      yaml:"bomName"`
+	Revision             string                      `json:"revision"                     yaml:"revision"`
+	Channel              string                      `json:"channel"                      yaml:"channel"`
+	BundlePath           string                      `json:"bundlePath"                   yaml:"bundlePath"`
+	AppliedRevision      string                      `json:"appliedRevisionPath"          yaml:"appliedRevisionPath"`
+	RequestedScope       syncRevertScope             `json:"requestedScope"               yaml:"requestedScope"`
+	RequestedObject      *syncObjectSelectorOutput   `json:"requestedObject,omitempty"    yaml:"requestedObject,omitempty"`
+	RequestedHost        string                      `json:"requestedHost,omitempty"      yaml:"requestedHost,omitempty"`
 	RequestedComponent   string                      `json:"requestedComponent,omitempty" yaml:"requestedComponent,omitempty"`
-	RequestedHostPath    string                      `json:"requestedHostPath,omitempty" yaml:"requestedHostPath,omitempty"`
-	BeforeState          state.ClusterState          `json:"beforeState" yaml:"beforeState"`
-	CurrentState         state.ClusterState          `json:"currentState" yaml:"currentState"`
-	Reverted             bool                        `json:"reverted" yaml:"reverted"`
-	RevertedObjects      []compare.ObjectIssue       `json:"revertedObjects,omitempty" yaml:"revertedObjects,omitempty"`
-	RevertedHostPaths    []compare.HostPathIssue     `json:"revertedHostPaths,omitempty" yaml:"revertedHostPaths,omitempty"`
-	CurrentCompare       *compare.Result             `json:"currentCompare" yaml:"currentCompare"`
-	ObservationPersisted bool                        `json:"observationPersisted" yaml:"observationPersisted"`
-	RecordedRevision     *syncRecordedRevisionOutput `json:"recordedRevision,omitempty" yaml:"recordedRevision,omitempty"`
+	RequestedHostPath    string                      `json:"requestedHostPath,omitempty"  yaml:"requestedHostPath,omitempty"`
+	BeforeState          state.ClusterState          `json:"beforeState"                  yaml:"beforeState"`
+	CurrentState         state.ClusterState          `json:"currentState"                 yaml:"currentState"`
+	Reverted             bool                        `json:"reverted"                     yaml:"reverted"`
+	RevertedObjects      []compare.ObjectIssue       `json:"revertedObjects,omitempty"    yaml:"revertedObjects,omitempty"`
+	RevertedHostPaths    []compare.HostPathIssue     `json:"revertedHostPaths,omitempty"  yaml:"revertedHostPaths,omitempty"`
+	CurrentCompare       *compare.Result             `json:"currentCompare"               yaml:"currentCompare"`
+	ObservationPersisted bool                        `json:"observationPersisted"         yaml:"observationPersisted"`
+	RecordedRevision     *syncRecordedRevisionOutput `json:"recordedRevision,omitempty"   yaml:"recordedRevision,omitempty"`
 }
 
 type syncRevertScope string
@@ -1731,66 +2296,66 @@ type syncObjectSelector struct {
 
 type syncObjectSelectorOutput struct {
 	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
-	Kind       string `json:"kind" yaml:"kind"`
-	Namespace  string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Name       string `json:"name" yaml:"name"`
+	Kind       string `json:"kind"                 yaml:"kind"`
+	Namespace  string `json:"namespace,omitempty"  yaml:"namespace,omitempty"`
+	Name       string `json:"name"                 yaml:"name"`
 }
 
 type syncDiffOutput struct {
-	ClusterName                 string                        `json:"clusterName" yaml:"clusterName"`
-	BOMName                     string                        `json:"bomName" yaml:"bomName"`
-	Revision                    string                        `json:"revision" yaml:"revision"`
-	Channel                     string                        `json:"channel" yaml:"channel"`
-	BundlePath                  string                        `json:"bundlePath" yaml:"bundlePath"`
-	AppliedRevision             string                        `json:"appliedRevisionPath" yaml:"appliedRevisionPath"`
-	LocalPatchPolicy            *syncLocalPatchPolicyOutput   `json:"localPatchPolicy,omitempty" yaml:"localPatchPolicy,omitempty"`
-	SourcePreflight             *hydrate.SourcePreflight      `json:"sourcePreflight,omitempty" yaml:"sourcePreflight,omitempty"`
-	Preflight                   syncPreflightOutput           `json:"preflight" yaml:"preflight"`
-	TopologyStatus              syncTopologyStatus            `json:"topologyStatus" yaml:"topologyStatus"`
-	RenderInputStatus           syncRenderInputStatus         `json:"renderInputStatus" yaml:"renderInputStatus"`
-	CurrentState                state.ClusterState            `json:"currentState" yaml:"currentState"`
-	Headline                    string                        `json:"headline" yaml:"headline"`
-	OperatorActionSummary       compare.OperatorActionSummary `json:"operatorActionSummary" yaml:"operatorActionSummary"`
-	HostPathConflicts           []compare.HostPathConflict    `json:"hostPathConflicts,omitempty" yaml:"hostPathConflicts,omitempty"`
-	LocalInputHostSplits        []compare.LocalInputHostSplit `json:"localInputHostSplits,omitempty" yaml:"localInputHostSplits,omitempty"`
-	CurrentCompare              *compare.Result               `json:"currentCompare" yaml:"currentCompare"`
+	ClusterName                 string                        `json:"clusterName"                           yaml:"clusterName"`
+	BOMName                     string                        `json:"bomName"                               yaml:"bomName"`
+	Revision                    string                        `json:"revision"                              yaml:"revision"`
+	Channel                     string                        `json:"channel"                               yaml:"channel"`
+	BundlePath                  string                        `json:"bundlePath"                            yaml:"bundlePath"`
+	AppliedRevision             string                        `json:"appliedRevisionPath"                   yaml:"appliedRevisionPath"`
+	LocalPatchPolicy            *syncLocalPatchPolicyOutput   `json:"localPatchPolicy,omitempty"            yaml:"localPatchPolicy,omitempty"`
+	SourcePreflight             *hydrate.SourcePreflight      `json:"sourcePreflight,omitempty"             yaml:"sourcePreflight,omitempty"`
+	Preflight                   syncPreflightOutput           `json:"preflight"                             yaml:"preflight"`
+	TopologyStatus              syncTopologyStatus            `json:"topologyStatus"                        yaml:"topologyStatus"`
+	RenderInputStatus           syncRenderInputStatus         `json:"renderInputStatus"                     yaml:"renderInputStatus"`
+	CurrentState                state.ClusterState            `json:"currentState"                          yaml:"currentState"`
+	Headline                    string                        `json:"headline"                              yaml:"headline"`
+	OperatorActionSummary       compare.OperatorActionSummary `json:"operatorActionSummary"                 yaml:"operatorActionSummary"`
+	HostPathConflicts           []compare.HostPathConflict    `json:"hostPathConflicts,omitempty"           yaml:"hostPathConflicts,omitempty"`
+	LocalInputHostSplits        []compare.LocalInputHostSplit `json:"localInputHostSplits,omitempty"        yaml:"localInputHostSplits,omitempty"`
+	CurrentCompare              *compare.Result               `json:"currentCompare"                        yaml:"currentCompare"`
 	PolicyEligibleOrphanObjects []compare.ObjectIssue         `json:"policyEligibleOrphanObjects,omitempty" yaml:"policyEligibleOrphanObjects,omitempty"`
-	ObservationPersisted        bool                          `json:"observationPersisted" yaml:"observationPersisted"`
-	PersistedObservedSummary    *state.ObservedSummary        `json:"persistedObservedSummary,omitempty" yaml:"persistedObservedSummary,omitempty"`
-	RecordedRevision            *syncRecordedRevisionOutput   `json:"recordedRevision,omitempty" yaml:"recordedRevision,omitempty"`
-	Warnings                    []string                      `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	ObservationPersisted        bool                          `json:"observationPersisted"                  yaml:"observationPersisted"`
+	PersistedObservedSummary    *state.ObservedSummary        `json:"persistedObservedSummary,omitempty"    yaml:"persistedObservedSummary,omitempty"`
+	RecordedRevision            *syncRecordedRevisionOutput   `json:"recordedRevision,omitempty"            yaml:"recordedRevision,omitempty"`
+	Warnings                    []string                      `json:"warnings,omitempty"                    yaml:"warnings,omitempty"`
 }
 
 type syncPolicyReportOutput struct {
-	OldPolicyPath string               `json:"oldPolicyPath" yaml:"oldPolicyPath"`
-	NewPolicyPath string               `json:"newPolicyPath" yaml:"newPolicyPath"`
+	OldPolicyPath string               `json:"oldPolicyPath"       yaml:"oldPolicyPath"`
+	NewPolicyPath string               `json:"newPolicyPath"       yaml:"newPolicyPath"`
 	LocalRepo     string               `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	Report        *policyreport.Report `json:"report" yaml:"report"`
+	Report        *policyreport.Report `json:"report"              yaml:"report"`
 }
 
 type syncPolicyGateOutput struct {
-	OldPolicyPath string                   `json:"oldPolicyPath" yaml:"oldPolicyPath"`
-	NewPolicyPath string                   `json:"newPolicyPath" yaml:"newPolicyPath"`
-	LocalRepo     string                   `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
+	OldPolicyPath string                   `json:"oldPolicyPath"          yaml:"oldPolicyPath"`
+	NewPolicyPath string                   `json:"newPolicyPath"          yaml:"newPolicyPath"`
+	LocalRepo     string                   `json:"localRepo,omitempty"    yaml:"localRepo,omitempty"`
 	ApprovalFile  string                   `json:"approvalFile,omitempty" yaml:"approvalFile,omitempty"`
-	Gate          *policyreport.GateResult `json:"gate" yaml:"gate"`
-	Report        *policyreport.Report     `json:"report" yaml:"report"`
+	Gate          *policyreport.GateResult `json:"gate"                   yaml:"gate"`
+	Report        *policyreport.Report     `json:"report"                 yaml:"report"`
 }
 
 type syncRecordedRevisionOutput struct {
-	DesiredStateDigest string                 `json:"desiredStateDigest" yaml:"desiredStateDigest"`
-	LocalRepoRevision  string                 `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
+	DesiredStateDigest string                 `json:"desiredStateDigest"           yaml:"desiredStateDigest"`
+	LocalRepoRevision  string                 `json:"localRepoRevision,omitempty"  yaml:"localRepoRevision,omitempty"`
 	LocalPatchRevision string                 `json:"localPatchRevision,omitempty" yaml:"localPatchRevision,omitempty"`
-	State              state.ClusterState     `json:"state" yaml:"state"`
-	ObservedSummary    *state.ObservedSummary `json:"observedSummary,omitempty" yaml:"observedSummary,omitempty"`
-	LastAppliedTime    string                 `json:"lastAppliedTime,omitempty" yaml:"lastAppliedTime,omitempty"`
+	State              state.ClusterState     `json:"state"                        yaml:"state"`
+	ObservedSummary    *state.ObservedSummary `json:"observedSummary,omitempty"    yaml:"observedSummary,omitempty"`
+	LastAppliedTime    string                 `json:"lastAppliedTime,omitempty"    yaml:"lastAppliedTime,omitempty"`
 }
 
 type syncLocalPatchPolicyOutput struct {
-	Source ownership.LocalPatchPolicySource `json:"source" yaml:"source"`
-	Scope  ownership.LocalPatchPolicyScope  `json:"scope" yaml:"scope"`
-	Name   string                           `json:"name" yaml:"name"`
-	Path   string                           `json:"path,omitempty" yaml:"path,omitempty"`
+	Source ownership.LocalPatchPolicySource `json:"source"           yaml:"source"`
+	Scope  ownership.LocalPatchPolicyScope  `json:"scope"            yaml:"scope"`
+	Name   string                           `json:"name"             yaml:"name"`
+	Path   string                           `json:"path,omitempty"   yaml:"path,omitempty"`
 	Digest string                           `json:"digest,omitempty" yaml:"digest,omitempty"`
 }
 
@@ -1841,7 +2406,11 @@ func syncLocalPatchPolicyFromBundle(bundle *hydrate.Bundle) *syncLocalPatchPolic
 	}
 }
 
-func persistSyncObservedState(clusterName, bundlePath string, resultSummary compare.Summary, statusSummary compare.StatusSummary) (*state.AppliedRevision, bool, error) {
+func persistSyncObservedState(
+	clusterName, bundlePath string,
+	resultSummary compare.Summary,
+	statusSummary compare.StatusSummary,
+) (*state.AppliedRevision, bool, error) {
 	if strings.TrimSpace(clusterName) == "" || strings.TrimSpace(bundlePath) == "" {
 		return nil, false, nil
 	}
@@ -1851,10 +2420,19 @@ func persistSyncObservedState(clusterName, bundlePath string, resultSummary comp
 		return nil, false, fmt.Errorf("digest bundle for observed state %q: %w", bundlePath, err)
 	}
 
-	return state.PersistObservedState(clusterName, bundleDigest.String(), statusSummary.State, syncObservedSummary(resultSummary, statusSummary), syncObservedStateMessage(statusSummary))
+	return state.PersistObservedState(
+		clusterName,
+		bundleDigest.String(),
+		statusSummary.State,
+		syncObservedSummary(resultSummary, statusSummary),
+		syncObservedStateMessage(statusSummary),
+	)
 }
 
-func syncObservedSummary(resultSummary compare.Summary, statusSummary compare.StatusSummary) *state.ObservedSummary {
+func syncObservedSummary(
+	resultSummary compare.Summary,
+	statusSummary compare.StatusSummary,
+) *state.ObservedSummary {
 	return &state.ObservedSummary{
 		Total:                resultSummary.Total,
 		Present:              resultSummary.Present,
@@ -1927,7 +2505,11 @@ func syncStatusHeadline(statusSummary compare.StatusSummary) string {
 	)
 }
 
-func syncAnnotateRemediationGuidance(result *compare.Result, bundlePath string, applied *state.AppliedRevision) error {
+func syncAnnotateRemediationGuidance(
+	result *compare.Result,
+	bundlePath string,
+	applied *state.AppliedRevision,
+) error {
 	if result == nil {
 		return nil
 	}
@@ -1962,8 +2544,10 @@ func syncAnnotateRemediationGuidance(result *compare.Result, bundlePath string, 
 		bundleDigest = digest.String()
 	}
 
-	hasRecordedDesiredState := applied != nil && strings.TrimSpace(applied.Spec.DesiredStateDigest) != ""
-	bundleMatchesRecordedDesiredState := hasRecordedDesiredState && bundleDigest == applied.Spec.DesiredStateDigest
+	hasRecordedDesiredState := applied != nil &&
+		strings.TrimSpace(applied.Spec.DesiredStateDigest) != ""
+	bundleMatchesRecordedDesiredState := hasRecordedDesiredState &&
+		bundleDigest == applied.Spec.DesiredStateDigest
 
 	for i := range result.Objects {
 		remediation := result.Objects[i].Remediation
@@ -1994,7 +2578,10 @@ func syncAnnotateRemediationGuidance(result *compare.Result, bundlePath string, 
 	return nil
 }
 
-func syncEvaluateRemediationCommand(guidance compare.HostPathCommandGuidance, hasRecordedDesiredState, bundleMatchesRecordedDesiredState bool) compare.HostPathCommandGuidance {
+func syncEvaluateRemediationCommand(
+	guidance compare.HostPathCommandGuidance,
+	hasRecordedDesiredState, bundleMatchesRecordedDesiredState bool,
+) compare.HostPathCommandGuidance {
 	if len(guidance.Preconditions) == 0 {
 		guidance.Availability = "available"
 		guidance.Reason = ""
@@ -2007,9 +2594,15 @@ func syncEvaluateRemediationCommand(guidance compare.HostPathCommandGuidance, ha
 		case "bundleMatchesRecordedDesiredStateDigest":
 			switch {
 			case !hasRecordedDesiredState:
-				blockers = append(blockers, "no recorded desired state digest is available for this cluster")
+				blockers = append(
+					blockers,
+					"no recorded desired state digest is available for this cluster",
+				)
 			case !bundleMatchesRecordedDesiredState:
-				blockers = append(blockers, "the inspected bundle digest does not match the cluster recorded desired state digest")
+				blockers = append(
+					blockers,
+					"the inspected bundle digest does not match the cluster recorded desired state digest",
+				)
 			}
 		}
 	}
@@ -2064,7 +2657,9 @@ func validateSyncRevertSelection(selector syncObjectSelector, hostPath, componen
 		return fmt.Errorf("object-scoped revert and host-scoped revert cannot be combined")
 	}
 	if selector.active() && strings.TrimSpace(component) != "" {
-		return fmt.Errorf("object-scoped revert and component-scoped host revert cannot be combined")
+		return errors.New(
+			"object-scoped revert and component-scoped host revert cannot be combined",
+		)
 	}
 	if strings.TrimSpace(component) != "" && strings.TrimSpace(hostPath) == "" {
 		return fmt.Errorf("component-scoped host revert requires --host-path")
@@ -2119,7 +2714,13 @@ func (t syncRevertTargets) empty() bool {
 	return len(t.Objects) == 0 && len(t.HostPaths) == 0
 }
 
-func planSyncRevertTargets(bundle *hydrate.Bundle, result *compare.Result, scope syncRevertScope, selector syncObjectSelector, host, component, hostPath string) (syncRevertTargets, error) {
+func planSyncRevertTargets(
+	bundle *hydrate.Bundle,
+	result *compare.Result,
+	scope syncRevertScope,
+	selector syncObjectSelector,
+	host, component, hostPath string,
+) (syncRevertTargets, error) {
 	if result == nil {
 		return syncRevertTargets{}, fmt.Errorf("compare result cannot be nil")
 	}
@@ -2155,32 +2756,60 @@ func planSyncRevertTargets(bundle *hydrate.Bundle, result *compare.Result, scope
 				continue
 			}
 			if !syncCanRevertHostPath(bundle, path) {
-				return syncRevertTargets{}, fmt.Errorf("generated host path %s cannot be reverted yet", path.Tracked.HostPath)
+				return syncRevertTargets{}, fmt.Errorf(
+					"generated host path %s cannot be reverted yet",
+					path.Tracked.HostPath,
+				)
 			}
 			targets = append(targets, path)
 		}
 		switch len(targets) {
 		case 0:
 			if strings.TrimSpace(host) != "" && strings.TrimSpace(component) != "" {
-				return syncRevertTargets{}, fmt.Errorf("no drifted host path matches %s for component %s on host %s", hostPath, component, host)
+				return syncRevertTargets{}, fmt.Errorf(
+					"no drifted host path matches %s for component %s on host %s",
+					hostPath,
+					component,
+					host,
+				)
 			}
 			if strings.TrimSpace(host) != "" {
-				return syncRevertTargets{}, fmt.Errorf("no drifted host path matches %s on host %s", hostPath, host)
+				return syncRevertTargets{}, fmt.Errorf(
+					"no drifted host path matches %s on host %s",
+					hostPath,
+					host,
+				)
 			}
 			if strings.TrimSpace(component) != "" {
-				return syncRevertTargets{}, fmt.Errorf("no drifted host path matches %s for component %s", hostPath, component)
+				return syncRevertTargets{}, fmt.Errorf(
+					"no drifted host path matches %s for component %s",
+					hostPath,
+					component,
+				)
 			}
 			return syncRevertTargets{}, fmt.Errorf("no drifted host path matches %s", hostPath)
 		case 1:
 			if scope == syncRevertScopeLocal && targets[0].State != state.StateDirty {
-				return syncRevertTargets{}, fmt.Errorf("local-scoped revert requires a local-owned drift target, got host path %s%s", targets[0].Tracked.HostPath, syncHostPathHostSuffix(targets[0].Host))
+				return syncRevertTargets{}, fmt.Errorf(
+					"local-scoped revert requires a local-owned drift target, got host path %s%s",
+					targets[0].Tracked.HostPath,
+					syncHostPathHostSuffix(targets[0].Host),
+				)
 			}
 			return syncRevertTargets{HostPaths: targets}, nil
 		default:
 			if strings.TrimSpace(component) != "" {
-				return syncRevertTargets{}, fmt.Errorf("host-scoped revert is ambiguous for %s in component %s; specify --host", hostPath, component)
+				return syncRevertTargets{}, fmt.Errorf(
+					"host-scoped revert is ambiguous for %s in component %s; specify --host",
+					hostPath,
+					component,
+				)
 			}
-			return syncRevertTargets{}, fmt.Errorf("host-scoped revert is ambiguous for %s; specify --host or --component from [%s]", hostPath, strings.Join(syncHostPathTargetComponents(targets), ", "))
+			return syncRevertTargets{}, fmt.Errorf(
+				"host-scoped revert is ambiguous for %s; specify --host or --component from [%s]",
+				hostPath,
+				strings.Join(syncHostPathTargetComponents(targets), ", "),
+			)
 		}
 	}
 
@@ -2194,14 +2823,23 @@ func planSyncRevertTargets(bundle *hydrate.Bundle, result *compare.Result, scope
 		}
 		switch len(targets) {
 		case 0:
-			return syncRevertTargets{}, fmt.Errorf("no drifted object matches %s", syncSelectorIdentity(selector))
+			return syncRevertTargets{}, fmt.Errorf(
+				"no drifted object matches %s",
+				syncSelectorIdentity(selector),
+			)
 		case 1:
 			if scope == syncRevertScopeLocal && targets[0].State != state.StateDirty {
-				return syncRevertTargets{}, fmt.Errorf("local-scoped revert requires a local-owned drift target, got %s", syncTrackedObjectIdentity(targets[0].Tracked))
+				return syncRevertTargets{}, fmt.Errorf(
+					"local-scoped revert requires a local-owned drift target, got %s",
+					syncTrackedObjectIdentity(targets[0].Tracked),
+				)
 			}
 			return syncRevertTargets{Objects: targets}, nil
 		default:
-			return syncRevertTargets{}, fmt.Errorf("object-scoped revert is ambiguous for %s", syncSelectorIdentity(selector))
+			return syncRevertTargets{}, fmt.Errorf(
+				"object-scoped revert is ambiguous for %s",
+				syncSelectorIdentity(selector),
+			)
 		}
 	}
 
@@ -2246,7 +2884,10 @@ func syncCanRevertHostPath(bundle *hydrate.Bundle, target compare.HostPathStatus
 	return syncCanRepairGeneratedControlPlaneHostPath(bundle, target)
 }
 
-func syncCanRepairGeneratedControlPlaneHostPath(bundle *hydrate.Bundle, target compare.HostPathStatus) bool {
+func syncCanRepairGeneratedControlPlaneHostPath(
+	bundle *hydrate.Bundle,
+	target compare.HostPathStatus,
+) bool {
 	if bundle == nil {
 		return false
 	}
@@ -2350,7 +2991,10 @@ func summarizeSyncRevertHostPaths(targets []compare.HostPathStatus) []compare.Ho
 	return issues
 }
 
-func summarizeSyncRevertHostPathReasons(presence compare.ObjectPresence, mismatches []compare.HostPathMismatch) []string {
+func summarizeSyncRevertHostPathReasons(
+	presence compare.ObjectPresence,
+	mismatches []compare.HostPathMismatch,
+) []string {
 	if len(mismatches) == 0 {
 		if presence == compare.ObjectPresenceMissing {
 			return []string{"missing"}
@@ -2404,7 +3048,10 @@ func syncObjectIdentityLess(left, right compare.ObjectIssue) bool {
 	return left.Name < right.Name
 }
 
-func applySyncRevertTargets(clusterName, bundlePath, kubeconfigPath, hostRoot string, targets syncRevertTargets) error {
+func applySyncRevertTargets(
+	clusterName, bundlePath, kubeconfigPath, hostRoot string,
+	targets syncRevertTargets,
+) error {
 	if targets.empty() {
 		return nil
 	}
@@ -2442,21 +3089,42 @@ func applySyncRevertTargets(clusterName, bundlePath, kubeconfigPath, hostRoot st
 	for i, object := range targets.Objects {
 		desired, err := compare.DesiredObjectYAML(bundlePath, object)
 		if err != nil {
-			return fmt.Errorf("render desired object %s: %w", syncTrackedObjectIdentity(object.Tracked), err)
+			return fmt.Errorf(
+				"render desired object %s: %w",
+				syncTrackedObjectIdentity(object.Tracked),
+				err,
+			)
 		}
-		filename := fmt.Sprintf("%03d-%s-%s.yaml", i, sanitizeSyncFilename(object.Tracked.Kind), sanitizeSyncFilename(object.Tracked.Name))
+		filename := fmt.Sprintf(
+			"%03d-%s-%s.yaml",
+			i,
+			sanitizeSyncFilename(object.Tracked.Kind),
+			sanitizeSyncFilename(object.Tracked.Name),
+		)
 		path := filepath.Join(stageDir, filename)
 		if err := os.WriteFile(path, desired, 0o644); err != nil {
-			return fmt.Errorf("write desired object %s: %w", syncTrackedObjectIdentity(object.Tracked), err)
+			return fmt.Errorf(
+				"write desired object %s: %w",
+				syncTrackedObjectIdentity(object.Tracked),
+				err,
+			)
 		}
 		if _, err := outputSyncKubectl("--kubeconfig", kubeconfigPath, "apply", "-f", path); err != nil {
-			return fmt.Errorf("apply desired object %s: %w", syncTrackedObjectIdentity(object.Tracked), err)
+			return fmt.Errorf(
+				"apply desired object %s: %w",
+				syncTrackedObjectIdentity(object.Tracked),
+				err,
+			)
 		}
 	}
 	return nil
 }
 
-func applySyncRevertHostPath(clusterName, bundlePath, kubeconfigPath, hostRoot string, remoteExec syncRemoteExecutor, target compare.HostPathStatus) error {
+func applySyncRevertHostPath(
+	clusterName, bundlePath, kubeconfigPath, hostRoot string,
+	remoteExec syncRemoteExecutor,
+	target compare.HostPathStatus,
+) error {
 	if target.Tracked.ProjectionClass == hydrate.HostPathProjectionClassGenerated {
 		host := target.Host
 		if strings.TrimSpace(host) == "" {
@@ -2490,7 +3158,11 @@ func applySyncRevertHostPath(clusterName, bundlePath, kubeconfigPath, hostRoot s
 	case hydrate.HostPathSymlink:
 		return copySyncSymlink(src, dst, target.Tracked.HostPath)
 	default:
-		return fmt.Errorf("unsupported host path type %q for %s", target.Tracked.Type, target.Tracked.HostPath)
+		return fmt.Errorf(
+			"unsupported host path type %q for %s",
+			target.Tracked.Type,
+			target.Tracked.HostPath,
+		)
 	}
 }
 
@@ -2554,7 +3226,11 @@ func copySyncSymlink(src, dst, trackedPath string) error {
 	return nil
 }
 
-func applySyncRevertRemoteHostPath(bundlePath string, remoteExec syncRemoteExecutor, target compare.HostPathStatus) error {
+func applySyncRevertRemoteHostPath(
+	bundlePath string,
+	remoteExec syncRemoteExecutor,
+	target compare.HostPathStatus,
+) error {
 	if remoteExec == nil {
 		return fmt.Errorf("remote execution client is not configured for host %q", target.Host)
 	}
@@ -2562,7 +3238,12 @@ func applySyncRevertRemoteHostPath(bundlePath string, remoteExec syncRemoteExecu
 	desiredBundlePath := syncHostPathDesiredBundlePath(target)
 	src, err := resolveSyncBundlePath(bundlePath, desiredBundlePath)
 	if err != nil {
-		return fmt.Errorf("resolve desired host path %s%s: %w", target.Tracked.HostPath, syncHostPathHostSuffix(target.Host), err)
+		return fmt.Errorf(
+			"resolve desired host path %s%s: %w",
+			target.Tracked.HostPath,
+			syncHostPathHostSuffix(target.Host),
+			err,
+		)
 	}
 
 	switch target.Tracked.Type {
@@ -2571,17 +3252,30 @@ func applySyncRevertRemoteHostPath(bundlePath string, remoteExec syncRemoteExecu
 			return err
 		}
 		if err := remoteExec.Copy(target.Host, src, target.Tracked.HostPath); err != nil {
-			return fmt.Errorf("copy reverted host path %s%s: %w", target.Tracked.HostPath, syncHostPathHostSuffix(target.Host), err)
+			return fmt.Errorf(
+				"copy reverted host path %s%s: %w",
+				target.Tracked.HostPath,
+				syncHostPathHostSuffix(target.Host),
+				err,
+			)
 		}
 		return nil
 	case hydrate.HostPathSymlink:
 		return copySyncRemoteSymlink(remoteExec, src, target)
 	default:
-		return fmt.Errorf("unsupported host path type %q for %s%s", target.Tracked.Type, target.Tracked.HostPath, syncHostPathHostSuffix(target.Host))
+		return fmt.Errorf(
+			"unsupported host path type %q for %s%s",
+			target.Tracked.Type,
+			target.Tracked.HostPath,
+			syncHostPathHostSuffix(target.Host),
+		)
 	}
 }
 
-func prepareSyncRemoteRegularDestination(remoteExec syncRemoteExecutor, host, trackedPath string) error {
+func prepareSyncRemoteRegularDestination(
+	remoteExec syncRemoteExecutor,
+	host, trackedPath string,
+) error {
 	command := strings.Join([]string{
 		"dst=" + syncShellQuote(trackedPath),
 		`if [ -d "$dst" ]; then`,
@@ -2596,25 +3290,48 @@ func prepareSyncRemoteRegularDestination(remoteExec syncRemoteExecutor, host, tr
 	}, "\n")
 	output, err := remoteExec.CmdToString(host, "/bin/bash -lc "+syncShellQuote(command), "\n")
 	if err != nil {
-		return fmt.Errorf("prepare remote host path %s%s: %w", trackedPath, syncHostPathHostSuffix(host), err)
+		return fmt.Errorf(
+			"prepare remote host path %s%s: %w",
+			trackedPath,
+			syncHostPathHostSuffix(host),
+			err,
+		)
 	}
 	if strings.Contains(output, "directory") {
-		return fmt.Errorf("cannot revert host path %q onto existing directory on host %s", trackedPath, host)
+		return fmt.Errorf(
+			"cannot revert host path %q onto existing directory on host %s",
+			trackedPath,
+			host,
+		)
 	}
 	return nil
 }
 
-func copySyncRemoteSymlink(remoteExec syncRemoteExecutor, src string, target compare.HostPathStatus) error {
+func copySyncRemoteSymlink(
+	remoteExec syncRemoteExecutor,
+	src string,
+	target compare.HostPathStatus,
+) error {
 	info, err := os.Lstat(src)
 	if err != nil {
-		return fmt.Errorf("stat desired host path %q%s: %w", target.Tracked.HostPath, syncHostPathHostSuffix(target.Host), err)
+		return fmt.Errorf(
+			"stat desired host path %q%s: %w",
+			target.Tracked.HostPath,
+			syncHostPathHostSuffix(target.Host),
+			err,
+		)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
 		return fmt.Errorf("desired host path %q is not a symlink", target.Tracked.HostPath)
 	}
 	linkTarget, err := os.Readlink(src)
 	if err != nil {
-		return fmt.Errorf("read desired symlink for host path %q%s: %w", target.Tracked.HostPath, syncHostPathHostSuffix(target.Host), err)
+		return fmt.Errorf(
+			"read desired symlink for host path %q%s: %w",
+			target.Tracked.HostPath,
+			syncHostPathHostSuffix(target.Host),
+			err,
+		)
 	}
 
 	command := strings.Join([]string{
@@ -2629,12 +3346,25 @@ func copySyncRemoteSymlink(remoteExec syncRemoteExecutor, src string, target com
 		`ln -s ` + syncShellQuote(linkTarget) + ` "$dst"`,
 		`printf ok`,
 	}, "\n")
-	output, err := remoteExec.CmdToString(target.Host, "/bin/bash -lc "+syncShellQuote(command), "\n")
+	output, err := remoteExec.CmdToString(
+		target.Host,
+		"/bin/bash -lc "+syncShellQuote(command),
+		"\n",
+	)
 	if err != nil {
-		return fmt.Errorf("write reverted symlink %q%s: %w", target.Tracked.HostPath, syncHostPathHostSuffix(target.Host), err)
+		return fmt.Errorf(
+			"write reverted symlink %q%s: %w",
+			target.Tracked.HostPath,
+			syncHostPathHostSuffix(target.Host),
+			err,
+		)
 	}
 	if strings.Contains(output, "directory") {
-		return fmt.Errorf("cannot revert host path %q onto existing directory on host %s", target.Tracked.HostPath, target.Host)
+		return fmt.Errorf(
+			"cannot revert host path %q onto existing directory on host %s",
+			target.Tracked.HostPath,
+			target.Host,
+		)
 	}
 	return nil
 }
@@ -2643,7 +3373,11 @@ func prepareSyncRegularDestination(dst, trackedPath string) error {
 	info, err := os.Lstat(dst)
 	if err == nil {
 		if info.IsDir() {
-			return fmt.Errorf("cannot revert host path %q onto existing directory %q", trackedPath, dst)
+			return fmt.Errorf(
+				"cannot revert host path %q onto existing directory %q",
+				trackedPath,
+				dst,
+			)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			if err := os.Remove(dst); err != nil {
@@ -2662,7 +3396,11 @@ func removeSyncExistingPath(dst, trackedPath string) error {
 	info, err := os.Lstat(dst)
 	if err == nil {
 		if info.IsDir() {
-			return fmt.Errorf("cannot revert host path %q onto existing directory %q", trackedPath, dst)
+			return fmt.Errorf(
+				"cannot revert host path %q onto existing directory %q",
+				trackedPath,
+				dst,
+			)
 		}
 		if err := os.Remove(dst); err != nil {
 			return fmt.Errorf("remove existing host path %q: %w", trackedPath, err)
@@ -2733,7 +3471,11 @@ func resolveSyncHostPath(hostRoot, trackedHostPath string) (string, error) {
 		return "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("tracked host path %q escapes host root %q", trackedHostPath, hostRoot)
+		return "", fmt.Errorf(
+			"tracked host path %q escapes host root %q",
+			trackedHostPath,
+			hostRoot,
+		)
 	}
 	return resolved, nil
 }
@@ -2756,7 +3498,11 @@ func sanitizeSyncFilename(value string) string {
 	return value
 }
 
-func persistSyncCommittedState(clusterName string, bundle *hydrate.Bundle, result *distcommit.Result) (*state.AppliedRevision, error) {
+func persistSyncCommittedState(
+	clusterName string,
+	bundle *hydrate.Bundle,
+	result *distcommit.Result,
+) (*state.AppliedRevision, error) {
 	if strings.TrimSpace(clusterName) == "" || bundle == nil || result == nil {
 		return nil, nil
 	}
@@ -2781,15 +3527,28 @@ func persistSyncCommittedState(clusterName string, bundle *hydrate.Bundle, resul
 		return nil, err
 	}
 
-	return state.PersistRenderedState(clusterName, ref, result.DesiredStateDigest, result.LocalRepoRevision, localPatchRevision)
+	return state.PersistRenderedState(
+		clusterName,
+		ref,
+		result.DesiredStateDigest,
+		result.LocalRepoRevision,
+		localPatchRevision,
+	)
 }
 
-func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRepoPath, localPatchRevision string, packageSources []string) (reconcile.Options, error) {
+func newSyncMaterializeOptions(
+	target *syncResolvedTarget,
+	clusterName, localRepoPath, localPatchRevision string,
+	packageSources []string,
+) (reconcile.Options, error) {
 	if target == nil || target.BOM == nil {
 		return reconcile.Options{}, fmt.Errorf("sync target cannot be nil")
 	}
 	doc := target.BOM
-	localRootsByComponent, localPackagesByArtifact, err := resolveSyncPackageSources(doc, packageSources)
+	localRootsByComponent, localPackagesByArtifact, err := resolveSyncPackageSources(
+		doc,
+		packageSources,
+	)
 	if err != nil {
 		return reconcile.Options{}, err
 	}
@@ -2799,7 +3558,11 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 	if localRepoPath != "" {
 		localRepoAbsPath, err = filepath.Abs(localRepoPath)
 		if err != nil {
-			return reconcile.Options{}, fmt.Errorf("resolve local repo path %q: %w", localRepoPath, err)
+			return reconcile.Options{}, fmt.Errorf(
+				"resolve local repo path %q: %w",
+				localRepoPath,
+				err,
+			)
 		}
 		repo, err = localrepo.Load(localRepoAbsPath)
 		if err != nil {
@@ -2816,9 +3579,23 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 		}
 	}
 
-	provenance, err := syncRenderProvenance(target, localRepoAbsPath, repo, localPatchRevision, localRootsByComponent)
+	provenance, err := syncRenderProvenance(
+		target,
+		localRepoAbsPath,
+		repo,
+		localPatchRevision,
+		localRootsByComponent,
+	)
 	if err != nil {
 		return reconcile.Options{}, err
+	}
+	topology, err := loadSyncExecutionTopology(clusterName)
+	if err != nil {
+		return reconcile.Options{}, err
+	}
+	executionTopology := hydrate.NewSingleNodeExecutionTopology()
+	if topology != nil {
+		executionTopology = topology.snapshot()
 	}
 
 	return reconcile.Options{
@@ -2826,6 +3603,7 @@ func newSyncMaterializeOptions(target *syncResolvedTarget, clusterName, localRep
 		Channel:            target.runtimeChannel(),
 		BOMRoot:            syncBOMRoot(target),
 		RenderProvenance:   provenance,
+		ExecutionTopology:  executionTopology,
 		LocalRepo:          repo,
 		LocalPatchRevision: localPatchRevision,
 		PackageLoader: syncPackageLoader{
@@ -2846,37 +3624,62 @@ func syncBOMRoot(target *syncResolvedTarget) string {
 	return filepath.Dir(target.BOMPath)
 }
 
-func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo *localrepo.Repo, localPatchRevision string, packageSources map[string]string) (hydrate.RenderProvenance, error) {
+func syncRenderProvenance(
+	target *syncResolvedTarget,
+	localRepoPath string,
+	repo *localrepo.Repo,
+	localPatchRevision string,
+	packageSources map[string]string,
+) (hydrate.RenderProvenance, error) {
 	provenance := hydrate.RenderProvenance{
 		LocalRepoPath:      strings.TrimSpace(localRepoPath),
 		LocalPatchRevision: strings.TrimSpace(localPatchRevision),
 	}
 	if target != nil && target.ReleaseChannelDocument != nil {
 		provenance.DistributionLine = target.ReleaseChannelDocument.Distribution()
+		provenance.ReleaseChannel = string(target.ReleaseChannelDocument.Spec.Channel)
+	}
+	if target != nil {
+		provenance.ReleaseSource = strings.TrimSpace(target.ReleaseSource)
 	}
 	if target != nil && strings.TrimSpace(target.ReleaseChannelPath) != "" {
 		absChannelPath, err := filepath.Abs(target.ReleaseChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve ReleaseChannel path %q: %w", target.ReleaseChannelPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf(
+				"resolve ReleaseChannel path %q: %w",
+				target.ReleaseChannelPath,
+				err,
+			)
 		}
 		provenance.ReleaseChannelPath = absChannelPath
 		data, err := os.ReadFile(absChannelPath)
 		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read ReleaseChannel path %q: %w", absChannelPath, err)
+			return hydrate.RenderProvenance{}, fmt.Errorf(
+				"read ReleaseChannel path %q: %w",
+				absChannelPath,
+				err,
+			)
 		}
 		provenance.ReleaseChannelDigest = digest.Canonical.FromBytes(data).String()
+	} else if target != nil && strings.TrimSpace(target.ReleaseChannelSource) != "" {
+		provenance.ReleaseChannelPath = strings.TrimSpace(target.ReleaseChannelSource)
 	}
 	if target != nil && strings.TrimSpace(target.BOMPath) != "" {
-		absBOMPath, err := filepath.Abs(target.BOMPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.BOMPath, err)
+		if isSyncRemoteLocation(target.BOMPath) {
+			provenance.BOMPath = strings.TrimSpace(target.BOMPath)
+			provenance.BOMDigest = strings.TrimSpace(target.BOMDigest)
+		} else {
+			absBOMPath, err := filepath.Abs(target.BOMPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("resolve BOM path %q: %w", target.BOMPath, err)
+			}
+			provenance.BOMPath = absBOMPath
+			data, err := os.ReadFile(absBOMPath)
+			if err != nil {
+				return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
+			}
+			provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 		}
-		provenance.BOMPath = absBOMPath
-		data, err := os.ReadFile(absBOMPath)
-		if err != nil {
-			return hydrate.RenderProvenance{}, fmt.Errorf("read BOM path %q: %w", absBOMPath, err)
-		}
-		provenance.BOMDigest = digest.Canonical.FromBytes(data).String()
 	}
 	if repo != nil {
 		provenance.LocalRepoRevision = repo.Revision
@@ -2891,31 +3694,37 @@ func syncRenderProvenance(target *syncResolvedTarget, localRepoPath string, repo
 		for _, name := range names {
 			sourceDigest, err := hydrate.DigestDirectory(packageSources[name])
 			if err != nil {
-				return hydrate.RenderProvenance{}, fmt.Errorf("digest package source %q: %w", packageSources[name], err)
+				return hydrate.RenderProvenance{}, fmt.Errorf(
+					"digest package source %q: %w",
+					packageSources[name],
+					err,
+				)
 			}
-			provenance.PackageSources = append(provenance.PackageSources, hydrate.RenderProvenancePackageSource{
-				Component: name,
-				Path:      packageSources[name],
-				Digest:    sourceDigest.String(),
-			})
+			provenance.PackageSources = append(
+				provenance.PackageSources,
+				hydrate.RenderProvenancePackageSource{
+					Component: name,
+					Path:      packageSources[name],
+					Digest:    sourceDigest.String(),
+				},
+			)
 		}
 	}
 	return provenance, nil
 }
 
-func defaultSyncMountedArtifactResolver() (packageformat.Loader, hydrate.SourceProvider, error) {
-	mounter, err := newSyncPackageImageMounter("sync")
-	if err != nil {
-		return nil, nil, err
-	}
-	return packageformat.MountedImageLoader{Mounter: mounter}, hydrate.NewMountedArtifactSourceProvider(mounter), nil
+func isSyncRemoteLocation(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 type syncCachedArtifactResolver struct {
 	cache *ocipackage.Cache
 }
 
-func defaultSyncCachedArtifactResolver(clusterName string) (packageformat.Loader, hydrate.SourceProvider, error) {
+func defaultSyncCachedArtifactResolver(
+	clusterName string,
+) (packageformat.Loader, hydrate.SourceProvider, error) {
 	clusterName = strings.TrimSpace(clusterName)
 	if clusterName == "" {
 		clusterName = "default"
@@ -2940,21 +3749,34 @@ func (r *syncCachedArtifactResolver) Load(image string) (*packageformat.Componen
 	return r.cache.Load(image)
 }
 
-func (r *syncCachedArtifactResolver) Source(component hydrate.ComponentPlan) (hydrate.Source, error) {
+func (r *syncCachedArtifactResolver) Source(
+	component hydrate.ComponentPlan,
+) (hydrate.Source, error) {
 	if r == nil || r.cache == nil {
 		return hydrate.Source{}, fmt.Errorf("cached artifact resolver cannot be nil")
 	}
 	if strings.TrimSpace(component.Artifact) == "" {
-		return hydrate.Source{}, fmt.Errorf("artifact reference for component %q cannot be empty", component.Name)
+		return hydrate.Source{}, fmt.Errorf(
+			"artifact reference for component %q cannot be empty",
+			component.Name,
+		)
 	}
 	root, _, err := r.cache.Ensure(component.Artifact)
 	if err != nil {
-		return hydrate.Source{}, fmt.Errorf("cache component %q artifact %q: %w", component.Name, component.Artifact, err)
+		return hydrate.Source{}, fmt.Errorf(
+			"cache component %q artifact %q: %w",
+			component.Name,
+			component.Artifact,
+			err,
+		)
 	}
 	return hydrate.Source{Root: root}, nil
 }
 
-func resolveSyncPackageSources(doc *bom.BOM, values []string) (map[string]string, map[string]*packageformat.ComponentPackage, error) {
+func resolveSyncPackageSources(
+	doc *bom.BOM,
+	values []string,
+) (map[string]string, map[string]*packageformat.ComponentPackage, error) {
 	localRootsByComponent := make(map[string]string, len(values))
 	localPackagesByArtifact := make(map[string]*packageformat.ComponentPackage, len(values))
 	if len(values) == 0 {

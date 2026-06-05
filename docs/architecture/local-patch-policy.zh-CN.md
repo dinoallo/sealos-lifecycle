@@ -2,7 +2,7 @@
 
 ## 状态
 
-基于当前单节点 MVP 行为的草案
+已实现的 MVP 契约
 
 ## 摘要
 
@@ -22,6 +22,8 @@ Sealos 在 render 之后应该如何携带它的 provenance。
   package/BOM-scoped policy surface
 - render 结束后，bundle 中携带的 policy artifact 会成为 compare、validation
   和 `sync commit` 共同消费的有效 policy source of truth
+- canonical resolver 是 `hydrate.SelectLocalPatchPolicy`；render 和
+  `sync validate` 使用同一份 source-selection 与 precedence 结果
 
 ## 相关文档
 
@@ -41,6 +43,8 @@ Sealos 在 render 之后应该如何携带它的 provenance。
   [pkg/distribution/hydrate/policy.go](../../pkg/distribution/hydrate/policy.go)
 - 当前 plan 组装路径：
   [pkg/distribution/reconcile/materialize.go](../../pkg/distribution/reconcile/materialize.go)
+- operator preflight 输出：
+  [cmd/sealos/cmd/sync_validate.go](../../cmd/sealos/cmd/sync_validate.go)
 
 ## 为什么需要单独一份设计
 
@@ -159,6 +163,13 @@ cluster-local policy。它们不会引入 package/BOM-scoped policy。
 6. 在 `bundle.yaml` 里记录 source、scope、name、path、digest。
 7. 后续 consumer 一律读 rendered bundle artifact，而不是回头读环境里的
    local repo。
+
+步骤 1-4 的 canonical implementation 是
+`hydrate.SelectLocalPatchPolicy`。`sync render` 会用这个选择结果来 materialize
+bundle，`sync validate` 也会通过 `localPolicySource`、`localPolicy`、
+`localPolicyName`、`localPolicyScope` 和 `localPolicyCandidates` 暴露同一个
+决策。candidates 列表是给 operator 审计用的视图，用来说明有哪些外部 policy
+声明存在，以及最终是哪一个赢得 precedence。
 
 当前 MVP 不做多层 policy merge。如果 package source 会成为生效 source，并且
 多于一个 package 声明了 policy，render 会直接失败，而不是猜测。

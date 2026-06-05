@@ -30,10 +30,13 @@ This directory contains the design, guides, references, examples, and project pr
 | --- | --- |
 | [Day 0 install](./guides/day-0-install.md) | Walks through installing one Sealos cluster from target selection through render, apply, and validation. Chinese: [zh-CN](./guides/day-0-install.zh-CN.md). |
 | [Controller install](./guides/controller-install.md) | Installs or upgrades the `DistributionTarget` CRD, RBAC, and `sealos-agent --controller` deployment. Chinese: [zh-CN](./guides/controller-install.zh-CN.md). |
+| [Controller fleet observability](./guides/controller-fleet-observability.md) | Defines target aggregation, rollout progress, health evidence, promotion gates, and failure archives for controller fleets. Chinese: [zh-CN](./guides/controller-fleet-observability.zh-CN.md). |
 | [BOM and channel](./guides/bom-and-channel.md) | Explains BOM revisions, distribution lines, and `ReleaseChannel` objects. Chinese: [zh-CN](./guides/bom-and-channel.zh-CN.md). |
 | [Local repo and secret](./guides/local-repo-and-secret.md) | Describes a cluster-local repo layout and secret initialization workflow. Chinese: [zh-CN](./guides/local-repo-and-secret.zh-CN.md). |
 | [Local patch policy authoring](./guides/local-patch-policy-authoring.md) | Describes authorship, review rules, and validation for local patch policy. Chinese: [zh-CN](./guides/local-patch-policy-authoring.zh-CN.md). |
 | [Sync drift](./guides/sync-drift.md) | Walks through the current `sync diff`, `sync status`, `sync commit`, and `sync revert` loop. Chinese: [zh-CN](./guides/sync-drift.zh-CN.md). |
+| [Sync operations runbook](./guides/sync-operations-runbook.md) | Turns `sync diff`, `sync status`, and `operatorAction` into alert, dashboard, ticket, and repair-entry fields. Chinese: [zh-CN](./guides/sync-operations-runbook.zh-CN.md). |
+| [Data plane protection](./guides/data-plane-protection-runbook.md) | Defines Secret, PVC, database, rollback, upgrade, and derived-line protection gates. Chinese: [zh-CN](./guides/data-plane-protection-runbook.zh-CN.md). |
 | [Cilium packaging](./guides/cilium-packaging.md) | Shows the current Cilium package flow from package directory to OCI image, BOM, and render output. Chinese: [zh-CN](./guides/cilium-packaging.zh-CN.md). |
 | [Grafana with KubeBlocks](./guides/grafana-kubeblocks-example.md) | Shows a stateful application packaging example with a database and Secret boundary. Chinese: [zh-CN](./guides/grafana-kubeblocks-example.zh-CN.md). |
 | [Derived distribution](./guides/derived-distribution.md) | Explains how a cluster can diverge from a shared baseline with a derived BOM and forked package revisions. Chinese: [zh-CN](./guides/derived-distribution.zh-CN.md). |
@@ -73,9 +76,11 @@ This directory contains the design, guides, references, examples, and project pr
 2. Check [Capability matrix](./reference/capability-matrix.md) for current implementation status.
 3. Read [Distribution and config sync](./architecture/distribution-and-config-sync.md) for the top-level model.
 4. Read [Reconcile and ownership](./architecture/reconcile-and-ownership.md), [Materialization and drift](./architecture/materialization-and-drift.md), and [Release and promotion](./architecture/release-and-promotion.md) for the focused sub-designs.
-5. Use [Day 0 install](./guides/day-0-install.md), [Controller install](./guides/controller-install.md), [BOM and channel](./guides/bom-and-channel.md), [Local repo and secret](./guides/local-repo-and-secret.md), and [Sync drift](./guides/sync-drift.md) for operational workflows.
-6. Use [Sync drift minimal example](./examples/sync-drift-minimal/README.md) when following the drift walkthroughs.
-7. Use [Distribution implementation plan](./plans/distribution-implementation-plan.md) for repo-scoped execution sequencing.
+5. Use [Day 0 install](./guides/day-0-install.md), [Controller install](./guides/controller-install.md), [Controller fleet observability](./guides/controller-fleet-observability.md), [BOM and channel](./guides/bom-and-channel.md), [Local repo and secret](./guides/local-repo-and-secret.md), and [Sync drift](./guides/sync-drift.md) for operational workflows.
+6. Use [Sync operations runbook](./guides/sync-operations-runbook.md) when converting drift output into alerts, dashboards, tickets, and repair paths.
+7. Use [Data plane protection](./guides/data-plane-protection-runbook.md) before mutating Secrets, PVCs, databases, rollback targets, or derived-line stateful components.
+8. Use [Sync drift minimal example](./examples/sync-drift-minimal/README.md) when following the drift walkthroughs.
+9. Use [Distribution implementation plan](./plans/distribution-implementation-plan.md) for repo-scoped execution sequencing.
 
 ## Notes
 

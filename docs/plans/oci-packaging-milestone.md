@@ -52,6 +52,10 @@ What already exists:
   component is not supplied by `--package-source`
 - `cmd/sealos/cmd/sync_package.go` now provides first-class
   `sealos sync package build` and `sealos sync package push` commands
+- `sealos sync package push` now validates the returned OCI digest, emits
+  digest provenance, can write a provenance YAML file, forwards registry auth
+  inputs, and keeps credential values out of command output and failure
+  diagnostics
 - `cmd/sealos/cmd/sync_test.go` now covers render from BOM-only OCI artifact
   references without real registry access
 - `pkg/distribution/hydrate/render_test.go` now covers render through the
@@ -93,10 +97,11 @@ What this milestone now proves:
 
 - generic multi-node apply behavior
 - upgrade, rollback, or drift workflows
-- signing, provenance, or signature verification
+- signature generation or signature verification
 - release-channel promotion flows
 - a full cache manager beyond the current pull-if-missing behavior
-- broad registry auth UX beyond existing containers/buildah auth behavior
+- a standalone registry credential manager beyond existing containers/buildah
+  auth inputs
 - replacing OCI images with a new non-image artifact transport in this
   milestone
 
@@ -134,6 +139,17 @@ compatibility wrappers for repo scripts.
 Do not remove `--package-source`. It is still useful for local iteration and
 tests. The contract should change from "required PoC path" to "developer
 override path."
+
+### 5. Publish Provenance Without Owning Signature Policy
+
+`sealos sync package push` validates the pushed digest as an OCI digest and
+reports the transport, digest algorithm, encoded digest, final reference, and
+which registry auth inputs were configured. `--provenance-file` can archive the
+same data as YAML for release evidence.
+
+The command deliberately does not generate signatures or mutate BOMs. Signature
+verification remains delegated to registry/image policy for this milestone, and
+the BOM continues to pin package selection by image plus digest.
 
 ## Acceptance Criteria
 
@@ -205,8 +221,8 @@ Tasks:
 
 - add a helper that validates a package directory before image build
 - add a first-class CLI command that builds an OCI image from that directory
-- add a first-class CLI command that pushes the image and prints the resulting
-  digest
+- add a first-class CLI command that pushes the image, validates the resulting
+  digest, and prints digest provenance
 - keep thin shell wrappers for repo orchestration scripts
 - use the CLI path to package the three minimal single-node PoC components
 
@@ -294,7 +310,8 @@ Guardrail:
 
 Guardrail:
 
-- reuse existing buildah/container auth behavior
+- reuse existing buildah/container auth behavior and expose only redacted auth
+  diagnostics from `sync package push`
 - keep cache behavior at pull-if-missing for this milestone
 
 ### Risk: Confusing OCI Images With A Different Artifact Runtime
@@ -315,9 +332,8 @@ Guardrail:
 
 These should not block the milestone:
 
-- productized `sealos sync package` or `sealos sync push` commands
-- digest/signature verification policy
-- mirror and offline cache management
+- signature verification policy
+- mirror retention, registry outage, and offline cache operations
 - promotion workflows and release channels
 - non-image OCI artifact media types
 - multi-node OCI-backed apply

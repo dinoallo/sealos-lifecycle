@@ -16,13 +16,16 @@ package distributioncontroller_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
+	distributioncontroller "github.com/labring/sealos/pkg/distribution/controller"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -31,8 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
-
-	distributioncontroller "github.com/labring/sealos/pkg/distribution/controller"
 )
 
 func TestDistributionControllerManifestsDecode(t *testing.T) {
@@ -46,6 +47,7 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 		filepath.Join("examples", "distribution-rollout-policy.yaml"),
 		filepath.Join("examples", "distribution-target-bom.yaml"),
 		filepath.Join("examples", "distribution-target-channel.yaml"),
+		filepath.Join("examples", "distribution-target-lookup.yaml"),
 	)
 
 	want := []schema.GroupVersionKind{
@@ -57,6 +59,7 @@ func TestDistributionControllerManifestsDecode(t *testing.T) {
 		{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
 		{Group: "apps", Version: "v1", Kind: "Deployment"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionRolloutPolicy"},
+		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 		{Group: "distribution.sealos.io", Version: "v1alpha1", Kind: "DistributionTarget"},
 	}
@@ -118,6 +121,9 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 		"clusterName",
 		"bomPath",
 		"releaseChannelPath",
+		"releaseSource",
+		"releaseLine",
+		"channel",
 		"localRepoPath",
 		"localPatchRevision",
 		"packageSources",
@@ -127,19 +133,25 @@ func TestDistributionTargetCRDMatchesControllerContract(t *testing.T) {
 		"rolloutPolicyRef",
 		"rolloutBatchSize",
 		"requeueAfter",
+		"retryBackoff",
 	} {
 		if _, ok := spec.Properties[field]; !ok {
 			t.Fatalf("CRD spec schema missing field %q", field)
 		}
 	}
-	if len(spec.OneOf) != 2 {
-		t.Fatalf("CRD spec oneOf target validation count = %d, want 2", len(spec.OneOf))
+	if len(spec.OneOf) != 3 {
+		t.Fatalf("CRD spec oneOf target validation count = %d, want 3", len(spec.OneOf))
 	}
 	status := version.Schema.OpenAPIV3Schema.Properties["status"]
 	for _, field := range []string{
 		"observedGeneration",
+		"phase",
 		"lastReconcileTime",
 		"lastResult",
+		"retryCount",
+		"nextRetryTime",
+		"holdReason",
+		"lastDiagnostic",
 		"conditions",
 	} {
 		if _, ok := status.Properties[field]; !ok {
@@ -197,10 +209,28 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 	if got, want := deployment.Spec.Template.Spec.ServiceAccountName, "sealos-distribution-controller"; got != want {
 		t.Fatalf("service account = %q, want %q", got, want)
 	}
-	assertRequiredNodeAffinity(t, deployment.Spec.Template.Spec.Affinity, "node-role.kubernetes.io/control-plane")
-	assertRequiredNodeAffinity(t, deployment.Spec.Template.Spec.Affinity, "node-role.kubernetes.io/master")
-	assertToleration(t, deployment.Spec.Template.Spec.Tolerations, "node-role.kubernetes.io/control-plane", corev1.TaintEffectNoSchedule)
-	assertToleration(t, deployment.Spec.Template.Spec.Tolerations, "node-role.kubernetes.io/master", corev1.TaintEffectNoSchedule)
+	assertRequiredNodeAffinity(
+		t,
+		deployment.Spec.Template.Spec.Affinity,
+		"node-role.kubernetes.io/control-plane",
+	)
+	assertRequiredNodeAffinity(
+		t,
+		deployment.Spec.Template.Spec.Affinity,
+		"node-role.kubernetes.io/master",
+	)
+	assertToleration(
+		t,
+		deployment.Spec.Template.Spec.Tolerations,
+		"node-role.kubernetes.io/control-plane",
+		corev1.TaintEffectNoSchedule,
+	)
+	assertToleration(
+		t,
+		deployment.Spec.Template.Spec.Tolerations,
+		"node-role.kubernetes.io/master",
+		corev1.TaintEffectNoSchedule,
+	)
 	if len(deployment.Spec.Template.Spec.Containers) != 1 {
 		t.Fatalf("container count = %d, want 1", len(deployment.Spec.Template.Spec.Containers))
 	}
@@ -219,7 +249,8 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 			t.Fatalf("container args missing %q: %v", arg, container.Args)
 		}
 	}
-	if container.SecurityContext == nil || container.SecurityContext.Privileged == nil || !*container.SecurityContext.Privileged {
+	if container.SecurityContext == nil || container.SecurityContext.Privileged == nil ||
+		!*container.SecurityContext.Privileged {
 		t.Fatal("controller container must be privileged for host apply steps")
 	}
 	volumeMounts := map[string]string{}
@@ -234,6 +265,107 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 	}
 	if !pathEnvIncludesHostBins(container.Env) {
 		t.Fatalf("PATH env does not include host bin paths: %v", container.Env)
+	}
+}
+
+func TestDistributionControllerProductionHostAgentOverlay(t *testing.T) {
+	t.Parallel()
+
+	objects := kustomizeObjects(t, filepath.Join("overlays", "production-host-agent"))
+	var deployment *appsv1.Deployment
+	var role *rbacv1.Role
+	for _, object := range objects {
+		switch typed := object.(type) {
+		case *appsv1.Deployment:
+			if typed.Name == "sealos-distribution-controller" {
+				deployment = typed
+			}
+		case *rbacv1.Role:
+			if typed.Name == "sealos-distribution-controller" {
+				role = typed
+			}
+		}
+	}
+	if deployment == nil {
+		t.Fatal("production-host-agent overlay did not render controller Deployment")
+	}
+	if role == nil {
+		t.Fatal("production-host-agent overlay did not render controller Role")
+	}
+	if got, want := deployment.Labels["distribution.sealos.io/install-profile"], "production-host-agent"; got != want {
+		t.Fatalf("deployment install-profile label = %q, want %q", got, want)
+	}
+	if got, want := deployment.Annotations["distribution.sealos.io/host-tool-contract"], "kubectl,systemctl,tar,sh"; got != want {
+		t.Fatalf("deployment host-tool-contract = %q, want %q", got, want)
+	}
+	if got, want := deployment.Spec.Template.Labels["distribution.sealos.io/install-profile"], "production-host-agent"; got != want {
+		t.Fatalf("pod install-profile label = %q, want %q", got, want)
+	}
+	if got, want := deployment.Spec.Template.Spec.NodeSelector["sealos.io/distribution-controller"], "true"; got != want {
+		t.Fatalf("node selector = %q, want %q", got, want)
+	}
+	if got, want := deployment.Spec.Template.Spec.PriorityClassName, "system-cluster-critical"; got != want {
+		t.Fatalf("priorityClassName = %q, want %q", got, want)
+	}
+	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf(
+			"init container count = %d, want 1",
+			len(deployment.Spec.Template.Spec.InitContainers),
+		)
+	}
+	initContainer := deployment.Spec.Template.Spec.InitContainers[0]
+	if got, want := initContainer.Name, "host-tool-preflight"; got != want {
+		t.Fatalf("init container name = %q, want %q", got, want)
+	}
+	preflightScript := strings.Join(initContainer.Args, "\n")
+	for _, want := range []string{
+		"kubectl systemctl tar sh",
+		"/host/etc/kubernetes/admin.conf",
+		"/var/lib/sealos",
+	} {
+		if !strings.Contains(preflightScript, want) {
+			t.Fatalf("host-tool-preflight missing %q: %s", want, preflightScript)
+		}
+	}
+	if initContainer.SecurityContext == nil ||
+		initContainer.SecurityContext.AllowPrivilegeEscalation == nil ||
+		*initContainer.SecurityContext.AllowPrivilegeEscalation {
+		t.Fatal("host-tool-preflight must disable privilege escalation")
+	}
+	container := deployment.Spec.Template.Spec.Containers[0]
+	if got, want := container.ImagePullPolicy, corev1.PullAlways; got != want {
+		t.Fatalf("controller imagePullPolicy = %q, want %q", got, want)
+	}
+	if !envVarEquals(
+		container.Env,
+		"SEALOS_DISTRIBUTION_CONTROLLER_PROFILE",
+		"production-host-agent",
+	) {
+		t.Fatalf("controller profile env missing: %v", container.Env)
+	}
+	if container.Resources.Requests.Cpu().IsZero() ||
+		container.Resources.Requests.Memory().IsZero() {
+		t.Fatalf("controller resource requests must be set: %#v", container.Resources)
+	}
+	if container.Resources.Limits.Cpu().IsZero() || container.Resources.Limits.Memory().IsZero() {
+		t.Fatalf("controller resource limits must be set: %#v", container.Resources)
+	}
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets", "distributionrolloutpolicies"},
+		[]string{"get", "list", "watch"},
+	)
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets/status"},
+		[]string{"get", "patch", "update"},
+	)
+	if grantsClusterWideWrites(role.Rules) {
+		t.Fatalf("production overlay RBAC grants unexpected broad writes: %#v", role.Rules)
 	}
 }
 
@@ -357,6 +489,9 @@ func TestDistributionControllerReleaseAndE2EEntrypoints(t *testing.T) {
 		},
 		filepath.Join("..", "..", "scripts", "distribution-controller", "render-release-bundle.sh"): {
 			"kubectl kustomize",
+			"production-host-agent",
+			"--profile",
+			"--manifest-dir",
 			"docker build",
 			"install.yaml",
 			"labring/sealos-agent:dev",
@@ -420,9 +555,27 @@ func TestDistributionControllerRBACContract(t *testing.T) {
 		t.Fatal("Role not found")
 	}
 
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets", "distributionrolloutpolicies"}, []string{"get", "list", "watch"})
-	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets/status"}, []string{"get", "patch", "update"})
-	assertRule(t, role.Rules, []string{"coordination.k8s.io"}, []string{"leases"}, []string{"create", "get", "list", "update", "watch"})
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets", "distributionrolloutpolicies"},
+		[]string{"get", "list", "watch"},
+	)
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"distribution.sealos.io"},
+		[]string{"distributiontargets/status"},
+		[]string{"get", "patch", "update"},
+	)
+	assertRule(
+		t,
+		role.Rules,
+		[]string{"coordination.k8s.io"},
+		[]string{"leases"},
+		[]string{"create", "get", "list", "update", "watch"},
+	)
 	assertRule(t, role.Rules, []string{""}, []string{"events"}, []string{"create", "patch"})
 }
 
@@ -460,7 +613,10 @@ func loadManifestObjects(t *testing.T, paths ...string) []runtime.Object {
 	decoder := newManifestDecoder(t)
 	objects := make([]runtime.Object, 0)
 	for _, relPath := range paths {
-		yamlDecoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(readManifest(t, relPath)), 4096)
+		yamlDecoder := utilyaml.NewYAMLOrJSONDecoder(
+			bytes.NewReader(readManifest(t, relPath)),
+			4096,
+		)
 		for {
 			var raw runtime.RawExtension
 			err := yamlDecoder.Decode(&raw)
@@ -483,6 +639,13 @@ func loadManifestObjects(t *testing.T, paths ...string) []runtime.Object {
 	return objects
 }
 
+func kustomizeObjects(t *testing.T, relPath string) []runtime.Object {
+	t.Helper()
+
+	data := runCommandOutput(t, "kubectl", "kustomize", relPath)
+	return decodeManifestObjects(t, relPath, data)
+}
+
 func readManifest(t *testing.T, relPath string) []byte {
 	t.Helper()
 
@@ -491,6 +654,44 @@ func readManifest(t *testing.T, relPath string) []byte {
 		t.Fatalf("read %s: %v", relPath, err)
 	}
 	return data
+}
+
+func decodeManifestObjects(t *testing.T, label string, data []byte) []runtime.Object {
+	t.Helper()
+
+	decoder := newManifestDecoder(t)
+	objects := make([]runtime.Object, 0)
+	yamlDecoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+	for {
+		var raw runtime.RawExtension
+		err := yamlDecoder.Decode(&raw)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("split %s: %v", label, err)
+		}
+		if len(bytes.TrimSpace(raw.Raw)) == 0 {
+			continue
+		}
+		object, _, err := decoder.Decode(raw.Raw, nil, nil)
+		if err != nil {
+			t.Fatalf("decode %s: %v", label, err)
+		}
+		objects = append(objects, object)
+	}
+	return objects
+}
+
+func runCommandOutput(t *testing.T, name string, args ...string) []byte {
+	t.Helper()
+
+	command := exec.Command(name, args...)
+	out, err := command.Output()
+	if err != nil {
+		t.Fatalf("%s %v failed: %v", name, args, err)
+	}
+	return out
 }
 
 func newManifestDecoder(t *testing.T) runtime.Decoder {
@@ -511,7 +712,11 @@ func newManifestDecoder(t *testing.T) runtime.Decoder {
 	return serializer.NewCodecFactory(scheme).UniversalDeserializer()
 }
 
-func crdVersion(t *testing.T, crd apiextensionsv1.CustomResourceDefinition, name string) apiextensionsv1.CustomResourceDefinitionVersion {
+func crdVersion(
+	t *testing.T,
+	crd apiextensionsv1.CustomResourceDefinition,
+	name string,
+) apiextensionsv1.CustomResourceDefinitionVersion {
 	t.Helper()
 
 	for _, version := range crd.Spec.Versions {
@@ -569,6 +774,30 @@ func pathEnvIncludesHostBins(env []corev1.EnvVar) bool {
 	return false
 }
 
+func envVarEquals(env []corev1.EnvVar, name, value string) bool {
+	for _, item := range env {
+		if item.Name == name && item.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func grantsClusterWideWrites(rules []rbacv1.PolicyRule) bool {
+	for _, rule := range rules {
+		if len(rule.APIGroups) == 1 && rule.APIGroups[0] == "distribution.sealos.io" &&
+			len(rule.Resources) == 1 && rule.Resources[0] == "*" {
+			return true
+		}
+		for _, verb := range rule.Verbs {
+			if verb == "*" || verb == "delete" || verb == "deletecollection" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func assertRule(t *testing.T, rules []rbacv1.PolicyRule, apiGroups, resources, verbs []string) {
 	t.Helper()
 
@@ -579,14 +808,25 @@ func assertRule(t *testing.T, rules []rbacv1.PolicyRule, apiGroups, resources, v
 			return
 		}
 	}
-	t.Fatalf("RBAC rule not found for apiGroups=%v resources=%v verbs=%v", apiGroups, resources, verbs)
+	t.Fatalf(
+		"RBAC rule not found for apiGroups=%v resources=%v verbs=%v",
+		apiGroups,
+		resources,
+		verbs,
+	)
 }
 
-func assertToleration(t *testing.T, tolerations []corev1.Toleration, key string, effect corev1.TaintEffect) {
+func assertToleration(
+	t *testing.T,
+	tolerations []corev1.Toleration,
+	key string,
+	effect corev1.TaintEffect,
+) {
 	t.Helper()
 
 	for _, toleration := range tolerations {
-		if toleration.Key == key && toleration.Operator == corev1.TolerationOpExists && toleration.Effect == effect {
+		if toleration.Key == key && toleration.Operator == corev1.TolerationOpExists &&
+			toleration.Effect == effect {
 			return
 		}
 	}

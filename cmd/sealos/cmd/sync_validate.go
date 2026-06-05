@@ -22,14 +22,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
-	"sigs.k8s.io/yaml"
-
 	"github.com/labring/sealos/pkg/distribution/bom"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
-	"github.com/labring/sealos/pkg/distribution/ownership"
 	"github.com/labring/sealos/pkg/distribution/packageformat"
+	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 type syncValidateSeverity string
@@ -40,47 +38,53 @@ const (
 )
 
 type syncValidateIssue struct {
-	Severity  syncValidateSeverity `json:"severity" yaml:"severity"`
-	Code      string               `json:"code" yaml:"code"`
+	Severity  syncValidateSeverity `json:"severity"            yaml:"severity"`
+	Code      string               `json:"code"                yaml:"code"`
 	Component string               `json:"component,omitempty" yaml:"component,omitempty"`
-	Path      string               `json:"path,omitempty" yaml:"path,omitempty"`
-	Message   string               `json:"message" yaml:"message"`
+	Path      string               `json:"path,omitempty"      yaml:"path,omitempty"`
+	Message   string               `json:"message"             yaml:"message"`
 }
 
 type syncValidateSummary struct {
-	Components       int `json:"components" yaml:"components"`
+	Components       int `json:"components"       yaml:"components"`
 	PackagesResolved int `json:"packagesResolved" yaml:"packagesResolved"`
-	RequiredInputs   int `json:"requiredInputs" yaml:"requiredInputs"`
-	BoundInputs      int `json:"boundInputs" yaml:"boundInputs"`
-	HostInputs       int `json:"hostInputs" yaml:"hostInputs"`
-	Hosts            int `json:"hosts" yaml:"hosts"`
-	LocalResources   int `json:"localResources" yaml:"localResources"`
-	LocalPatches     int `json:"localPatches" yaml:"localPatches"`
-	Errors           int `json:"errors" yaml:"errors"`
-	Warnings         int `json:"warnings" yaml:"warnings"`
+	RequiredInputs   int `json:"requiredInputs"   yaml:"requiredInputs"`
+	BoundInputs      int `json:"boundInputs"      yaml:"boundInputs"`
+	HostInputs       int `json:"hostInputs"       yaml:"hostInputs"`
+	Hosts            int `json:"hosts"            yaml:"hosts"`
+	LocalResources   int `json:"localResources"   yaml:"localResources"`
+	LocalPatches     int `json:"localPatches"     yaml:"localPatches"`
+	Errors           int `json:"errors"           yaml:"errors"`
+	Warnings         int `json:"warnings"         yaml:"warnings"`
 }
 
 type syncValidatePackageOutput struct {
-	Component   string `json:"component" yaml:"component"`
-	PackageName string `json:"packageName" yaml:"packageName"`
-	Version     string `json:"version" yaml:"version"`
-	Class       string `json:"class" yaml:"class"`
+	Component   string `json:"component"        yaml:"component"`
+	PackageName string `json:"packageName"      yaml:"packageName"`
+	Version     string `json:"version"          yaml:"version"`
+	Class       string `json:"class"            yaml:"class"`
 	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
 }
 
 type syncValidateOutput struct {
-	Passed             bool                        `json:"passed" yaml:"passed"`
-	ClusterName        string                      `json:"clusterName" yaml:"clusterName"`
-	BOMPath            string                      `json:"bomPath" yaml:"bomPath"`
-	ReleaseChannelPath string                      `json:"releaseChannelPath,omitempty" yaml:"releaseChannelPath,omitempty"`
-	LocalRepo          string                      `json:"localRepo,omitempty" yaml:"localRepo,omitempty"`
-	ExecutionTopology  hydrate.ExecutionTopology   `json:"executionTopology,omitempty" yaml:"executionTopology,omitempty"`
-	Summary            syncValidateSummary         `json:"summary" yaml:"summary"`
-	Packages           []syncValidatePackageOutput `json:"packages,omitempty" yaml:"packages,omitempty"`
-	Issues             []syncValidateIssue         `json:"issues,omitempty" yaml:"issues,omitempty"`
-	LocalPolicy        string                      `json:"localPolicy,omitempty" yaml:"localPolicy,omitempty"`
-	LocalPolicySource  string                      `json:"localPolicySource,omitempty" yaml:"localPolicySource,omitempty"`
-	LocalRepoRev       string                      `json:"localRepoRevision,omitempty" yaml:"localRepoRevision,omitempty"`
+	Passed                bool                                `json:"passed"                          yaml:"passed"`
+	ClusterName           string                              `json:"clusterName"                     yaml:"clusterName"`
+	BOMPath               string                              `json:"bomPath"                         yaml:"bomPath"`
+	ReleaseChannelPath    string                              `json:"releaseChannelPath,omitempty"    yaml:"releaseChannelPath,omitempty"`
+	ReleaseSource         string                              `json:"releaseSource,omitempty"         yaml:"releaseSource,omitempty"`
+	ReleaseLine           string                              `json:"releaseLine,omitempty"           yaml:"releaseLine,omitempty"`
+	Channel               string                              `json:"channel,omitempty"               yaml:"channel,omitempty"`
+	LocalRepo             string                              `json:"localRepo,omitempty"             yaml:"localRepo,omitempty"`
+	ExecutionTopology     hydrate.ExecutionTopology           `json:"executionTopology,omitempty"     yaml:"executionTopology,omitempty"`
+	Summary               syncValidateSummary                 `json:"summary"                         yaml:"summary"`
+	Packages              []syncValidatePackageOutput         `json:"packages,omitempty"              yaml:"packages,omitempty"`
+	Issues                []syncValidateIssue                 `json:"issues,omitempty"                yaml:"issues,omitempty"`
+	LocalPolicy           string                              `json:"localPolicy,omitempty"           yaml:"localPolicy,omitempty"`
+	LocalPolicySource     string                              `json:"localPolicySource,omitempty"     yaml:"localPolicySource,omitempty"`
+	LocalPolicyName       string                              `json:"localPolicyName,omitempty"       yaml:"localPolicyName,omitempty"`
+	LocalPolicyScope      string                              `json:"localPolicyScope,omitempty"      yaml:"localPolicyScope,omitempty"`
+	LocalPolicyCandidates []hydrate.LocalPatchPolicyCandidate `json:"localPolicyCandidates,omitempty" yaml:"localPolicyCandidates,omitempty"`
+	LocalRepoRev          string                              `json:"localRepoRevision,omitempty"     yaml:"localRepoRevision,omitempty"`
 }
 
 type syncValidateAccumulator struct {
@@ -88,7 +92,10 @@ type syncValidateAccumulator struct {
 	localPolicyBOMRoot string
 }
 
-func (a *syncValidateAccumulator) issue(severity syncValidateSeverity, code, component, path, message string) {
+func (a *syncValidateAccumulator) issue(
+	severity syncValidateSeverity,
+	code, component, path, message string,
+) {
 	a.out.Issues = append(a.out.Issues, syncValidateIssue{
 		Severity:  severity,
 		Code:      code,
@@ -137,6 +144,9 @@ func newSyncValidateCmd() *cobra.Command {
 		clusterName        string
 		bomFile            string
 		releaseChannelFile string
+		releaseSource      string
+		releaseLine        string
+		channel            string
 		localRepo          string
 		packageSources     []string
 		output             string
@@ -152,6 +162,9 @@ func newSyncValidateCmd() *cobra.Command {
 				ClusterName:        flags.clusterName,
 				BOMPath:            flags.bomFile,
 				ReleaseChannelPath: flags.releaseChannelFile,
+				ReleaseSource:      flags.releaseSource,
+				ReleaseLine:        flags.releaseLine,
+				Channel:            flags.channel,
 				LocalRepoPath:      flags.localRepo,
 				PackageSources:     flags.packageSources,
 			})
@@ -164,10 +177,21 @@ func newSyncValidateCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose inventory should be used for topology validation")
-	addSyncTargetFlags(cmd, &flags.bomFile, &flags.releaseChannelFile, "path to the BOM file to validate")
-	cmd.Flags().StringVar(&flags.localRepo, "local-repo", "", "optional cluster-local repo root to validate against package inputs and local patch policy")
-	cmd.Flags().StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local validation")
+	cmd.Flags().
+		StringVarP(&flags.clusterName, "cluster", "c", "default", "name of cluster whose inventory should be used for topology validation")
+	addSyncTargetFlags(
+		cmd,
+		&flags.bomFile,
+		&flags.releaseChannelFile,
+		&flags.releaseSource,
+		&flags.releaseLine,
+		&flags.channel,
+		"path to the BOM file to validate",
+	)
+	cmd.Flags().
+		StringVar(&flags.localRepo, "local-repo", "", "optional cluster-local repo root to validate against package inputs and local patch policy")
+	cmd.Flags().
+		StringSliceVar(&flags.packageSources, "package-source", nil, "override a BOM component package source as component=dir for local validation")
 	addSyncOutputFlag(cmd, &flags.output)
 	return cmd
 }
@@ -176,6 +200,9 @@ type syncValidateOptions struct {
 	ClusterName        string
 	BOMPath            string
 	ReleaseChannelPath string
+	ReleaseSource      string
+	ReleaseLine        string
+	Channel            string
 	LocalRepoPath      string
 	PackageSources     []string
 }
@@ -188,6 +215,9 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 	acc.out.BOMPath = strings.TrimSpace(opts.BOMPath)
 	acc.out.ReleaseChannelPath = strings.TrimSpace(opts.ReleaseChannelPath)
+	acc.out.ReleaseSource = strings.TrimSpace(opts.ReleaseSource)
+	acc.out.ReleaseLine = strings.TrimSpace(opts.ReleaseLine)
+	acc.out.Channel = strings.TrimSpace(opts.Channel)
 	acc.out.LocalRepo = strings.TrimSpace(opts.LocalRepoPath)
 
 	topology, err := loadSyncExecutionTopology(acc.out.ClusterName)
@@ -201,6 +231,9 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	target, err := resolveSyncTarget(syncTargetOptions{
 		BOMPath:            opts.BOMPath,
 		ReleaseChannelPath: opts.ReleaseChannelPath,
+		ReleaseSource:      opts.ReleaseSource,
+		ReleaseLine:        opts.ReleaseLine,
+		Channel:            opts.Channel,
 	})
 	if err != nil {
 		acc.error("bomInvalid", "", strings.TrimSpace(opts.BOMPath), err.Error())
@@ -213,6 +246,15 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	}
 	if strings.TrimSpace(target.ReleaseChannelPath) != "" {
 		acc.out.ReleaseChannelPath = strings.TrimSpace(target.ReleaseChannelPath)
+	}
+	if strings.TrimSpace(target.ReleaseSource) != "" {
+		acc.out.ReleaseSource = strings.TrimSpace(target.ReleaseSource)
+	}
+	if strings.TrimSpace(target.ReleaseLine) != "" {
+		acc.out.ReleaseLine = strings.TrimSpace(target.ReleaseLine)
+	}
+	if target.Channel != "" {
+		acc.out.Channel = string(target.Channel)
 	}
 	acc.out.Summary.Components = doc.PackageCount()
 
@@ -267,7 +309,11 @@ func runSyncValidate(opts syncValidateOptions) syncValidateOutput {
 	return acc.finalize()
 }
 
-func (a *syncValidateAccumulator) addPackageOutputs(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, localRoots map[string]string) {
+func (a *syncValidateAccumulator) addPackageOutputs(
+	doc *bom.BOM,
+	resolved map[string]*packageformat.ComponentPackage,
+	localRoots map[string]string,
+) {
 	for _, component := range doc.Packages() {
 		pkg, ok := resolved[component.Name]
 		if !ok {
@@ -283,7 +329,13 @@ func (a *syncValidateAccumulator) addPackageOutputs(doc *bom.BOM, resolved map[s
 	}
 }
 
-func (a *syncValidateAccumulator) validatePackages(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, localRoots map[string]string, repo *localrepo.Repo, topology *syncExecutionTopology) {
+func (a *syncValidateAccumulator) validatePackages(
+	doc *bom.BOM,
+	resolved map[string]*packageformat.ComponentPackage,
+	localRoots map[string]string,
+	repo *localrepo.Repo,
+	topology *syncExecutionTopology,
+) {
 	for _, component := range doc.Packages() {
 		pkg, ok := resolved[component.Name]
 		if !ok {
@@ -296,7 +348,10 @@ func (a *syncValidateAccumulator) validatePackages(doc *bom.BOM, resolved map[st
 	}
 }
 
-func (a *syncValidateAccumulator) validatePackageHooks(componentName, root string, pkg *packageformat.ComponentPackage) {
+func (a *syncValidateAccumulator) validatePackageHooks(
+	componentName, root string,
+	pkg *packageformat.ComponentPackage,
+) {
 	if pkg == nil {
 		return
 	}
@@ -307,20 +362,40 @@ func (a *syncValidateAccumulator) validatePackageHooks(componentName, root strin
 		hookPath := filepath.Join(root, filepath.FromSlash(hook.Path))
 		info, err := os.Stat(hookPath)
 		if err != nil {
-			a.error("hookInvalid", componentName, hook.Path, fmt.Sprintf("stat hook %q: %v", hook.Path, err))
+			a.error(
+				"hookInvalid",
+				componentName,
+				hook.Path,
+				fmt.Sprintf("stat hook %q: %v", hook.Path, err),
+			)
 			continue
 		}
 		if info.IsDir() {
-			a.error("hookInvalid", componentName, hook.Path, fmt.Sprintf("hook %q must reference a file, got directory", hook.Path))
+			a.error(
+				"hookInvalid",
+				componentName,
+				hook.Path,
+				fmt.Sprintf("hook %q must reference a file, got directory", hook.Path),
+			)
 			continue
 		}
 		if info.Mode()&0o111 == 0 {
-			a.error("hookNotExecutable", componentName, hook.Path, fmt.Sprintf("hook %q should be executable before packaging", hook.Path))
+			a.error(
+				"hookNotExecutable",
+				componentName,
+				hook.Path,
+				fmt.Sprintf("hook %q should be executable before packaging", hook.Path),
+			)
 		}
 	}
 }
 
-func (a *syncValidateAccumulator) validatePackageInputs(componentName string, pkg *packageformat.ComponentPackage, repo *localrepo.Repo, topology *syncExecutionTopology) {
+func (a *syncValidateAccumulator) validatePackageInputs(
+	componentName string,
+	pkg *packageformat.ComponentPackage,
+	repo *localrepo.Repo,
+	topology *syncExecutionTopology,
+) {
 	if pkg == nil {
 		return
 	}
@@ -330,7 +405,12 @@ func (a *syncValidateAccumulator) validatePackageInputs(componentName string, pk
 		}
 		if repo == nil {
 			if input.Required {
-				a.error("requiredInputMissing", componentName, input.Name, fmt.Sprintf("required input %q is not bound in local repo", input.Name))
+				a.error(
+					"requiredInputMissing",
+					componentName,
+					input.Name,
+					fmt.Sprintf("required input %q is not bound in local repo", input.Name),
+				)
 			}
 			continue
 		}
@@ -355,13 +435,35 @@ func (a *syncValidateAccumulator) validatePackageInputs(componentName string, pk
 			hostBinding := hostBindings[host]
 			a.out.Summary.HostInputs++
 			if strings.TrimSpace(host) == "" {
-				a.error("hostInputInvalid", componentName, input.Name, "host-scoped input uses an empty host directory")
+				a.error(
+					"hostInputInvalid",
+					componentName,
+					input.Name,
+					"host-scoped input uses an empty host directory",
+				)
 			}
 			if !bound && input.Required {
-				a.warning("hostInputWithoutDefault", componentName, input.Name, fmt.Sprintf("host-scoped input for host %q exists, but required default input %q is missing", host, input.Name))
+				a.warning(
+					"hostInputWithoutDefault",
+					componentName,
+					input.Name,
+					fmt.Sprintf(
+						"host-scoped input for host %q exists, but required default input %q is missing",
+						host,
+						input.Name,
+					),
+				)
 			}
 			if topology != nil && !syncValidateTopologyHasHost(topology, host) {
-				a.error("hostInputUnknownHost", componentName, input.Name, fmt.Sprintf("host-scoped input for host %q is not present in cluster inventory", host))
+				a.error(
+					"hostInputUnknownHost",
+					componentName,
+					input.Name,
+					fmt.Sprintf(
+						"host-scoped input for host %q is not present in cluster inventory",
+						host,
+					),
+				)
 			}
 			a.validateLocalInputFile(componentName, input.Name, hostBinding)
 		}
@@ -371,33 +473,67 @@ func (a *syncValidateAccumulator) validatePackageInputs(componentName string, pk
 func (a *syncValidateAccumulator) validateLocalInputFile(componentName, inputName, path string) {
 	info, err := os.Stat(path)
 	if err != nil {
-		a.error("inputInvalid", componentName, inputName, fmt.Sprintf("stat input binding %q: %v", path, err))
+		a.error(
+			"inputInvalid",
+			componentName,
+			inputName,
+			fmt.Sprintf("stat input binding %q: %v", path, err),
+		)
 		return
 	}
 	if info.IsDir() {
-		a.warning("inputIsDirectory", componentName, inputName, fmt.Sprintf("input binding %q is a directory; verify the package expects a directory payload", path))
+		a.warning(
+			"inputIsDirectory",
+			componentName,
+			inputName,
+			fmt.Sprintf(
+				"input binding %q is a directory; verify the package expects a directory payload",
+				path,
+			),
+		)
 	}
 	if syncValidatePathLooksSecret(inputName) || syncValidatePathLooksSecret(filepath.Base(path)) {
 		a.validateSecretBearingFile(componentName, path)
 	}
 }
 
-func (a *syncValidateAccumulator) validatePackageTargets(componentName string, pkg *packageformat.ComponentPackage, topology *syncExecutionTopology) {
+func (a *syncValidateAccumulator) validatePackageTargets(
+	componentName string,
+	pkg *packageformat.ComponentPackage,
+	topology *syncExecutionTopology,
+) {
 	if pkg == nil {
 		return
 	}
 	for _, hook := range pkg.Spec.Hooks {
 		switch hook.Target {
-		case packageformat.TargetAllNodes, packageformat.TargetFirstMaster, packageformat.TargetCluster:
+		case packageformat.TargetAllNodes,
+			packageformat.TargetFirstMaster,
+			packageformat.TargetCluster:
 		default:
-			a.error("targetInvalid", componentName, hook.Path, fmt.Sprintf("hook %q uses unsupported target %q", hook.Name, hook.Target))
+			a.error(
+				"targetInvalid",
+				componentName,
+				hook.Path,
+				fmt.Sprintf("hook %q uses unsupported target %q", hook.Name, hook.Target),
+			)
 			continue
 		}
 		if topology == nil {
 			continue
 		}
 		if err := syncValidateTargetResolves(topology, hook.Target); err != nil {
-			a.error("targetUnresolved", componentName, hook.Path, fmt.Sprintf("hook %q target %q cannot be resolved: %v", hook.Name, hook.Target, err))
+			a.error(
+				"targetUnresolved",
+				componentName,
+				hook.Path,
+				fmt.Sprintf(
+					"hook %q target %q cannot be resolved: %v",
+					hook.Name,
+					hook.Target,
+					err,
+				),
+			)
 		}
 	}
 }
@@ -416,33 +552,66 @@ func (a *syncValidateAccumulator) validateLocalRepoResources(repo *localrepo.Rep
 func (a *syncValidateAccumulator) validateSecretBearingFile(componentName, path string) {
 	info, err := os.Stat(path)
 	if err != nil {
-		a.error("secretFileInvalid", componentName, path, fmt.Sprintf("stat secret-bearing file %q: %v", path, err))
+		a.error(
+			"secretFileInvalid",
+			componentName,
+			path,
+			fmt.Sprintf("stat secret-bearing file %q: %v", path, err),
+		)
 		return
 	}
 	if info.IsDir() {
 		return
 	}
 	if syncValidateManifestKind(path) == "Secret" && info.Mode().Perm()&0o077 != 0 {
-		a.error("secretManifestModeTooOpen", componentName, path, fmt.Sprintf("Secret manifest %q should use a private file mode such as 0600", path))
+		a.error(
+			"secretManifestModeTooOpen",
+			componentName,
+			path,
+			fmt.Sprintf("Secret manifest %q should use a private file mode such as 0600", path),
+		)
 		return
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		a.warning("secretFileModeTooOpen", componentName, path, fmt.Sprintf("secret-bearing file %q should not be readable by group or other users; current mode is %s", path, info.Mode().Perm()))
+		a.warning(
+			"secretFileModeTooOpen",
+			componentName,
+			path,
+			fmt.Sprintf(
+				"secret-bearing file %q should not be readable by group or other users; current mode is %s",
+				path,
+				info.Mode().Perm(),
+			),
+		)
 	}
 }
 
-func (a *syncValidateAccumulator) validateLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, sources hydrate.SourceProvider, repo *localrepo.Repo) {
-	policyDoc, source, policyPath, err := syncEffectiveLocalPatchPolicy(doc, resolved, a.localPolicyBOMRoot, sources, repo)
+func (a *syncValidateAccumulator) validateLocalPatchPolicy(
+	doc *bom.BOM,
+	resolved map[string]*packageformat.ComponentPackage,
+	sources hydrate.SourceProvider,
+	repo *localrepo.Repo,
+) {
+	selection, err := syncEffectiveLocalPatchPolicy(
+		doc,
+		resolved,
+		a.localPolicyBOMRoot,
+		sources,
+		repo,
+	)
 	if err != nil {
 		a.error("localPatchPolicyInvalid", "", "", err.Error())
 		return
 	}
-	a.out.LocalPolicySource = string(source)
-	a.out.LocalPolicy = policyPath
+	a.out.LocalPolicySource = string(selection.Source)
+	a.out.LocalPolicy = selection.Path
+	a.out.LocalPolicyName = selection.Name
+	a.out.LocalPolicyScope = string(selection.Scope)
+	a.out.LocalPolicyCandidates = selection.Candidates
 	if repo == nil {
 		return
 	}
-	compatibility, err := localrepo.EvaluatePatchCompatibility(repo, policyDoc.Spec)
+	compatibility, err := localrepo.EvaluatePatchCompatibility(repo, selection.Document.Spec)
 	if err != nil {
 		a.error("localPatchPolicyInvalid", "", repo.LocalPatchPolicyRelativePath(), err.Error())
 		return
@@ -452,44 +621,22 @@ func (a *syncValidateAccumulator) validateLocalPatchPolicy(doc *bom.BOM, resolve
 	}
 }
 
-func syncEffectiveLocalPatchPolicy(doc *bom.BOM, resolved map[string]*packageformat.ComponentPackage, bomRoot string, sources hydrate.SourceProvider, repo *localrepo.Repo) (*ownership.LocalPatchPolicyDocument, ownership.LocalPatchPolicySource, string, error) {
-	policyDoc := ownership.DefaultLocalPatchPolicyDocument().Clone()
-	source := ownership.LocalPatchPolicySourceBuiltInDefault
-	policyPath := string(source)
-
-	if repo != nil {
-		if localPolicy := repo.LocalPatchPolicy(); localPolicy != nil {
-			return localPolicy, ownership.LocalPatchPolicySourceLocalRepo, repo.LocalPatchPolicyRelativePath(), nil
-		}
-	}
-
+func syncEffectiveLocalPatchPolicy(
+	doc *bom.BOM,
+	resolved map[string]*packageformat.ComponentPackage,
+	bomRoot string,
+	sources hydrate.SourceProvider,
+	repo *localrepo.Repo,
+) (*hydrate.LocalPatchPolicySelection, error) {
+	var plan *hydrate.Plan
 	if doc != nil && len(resolved) > 0 {
-		plan, err := hydrate.BuildPlanFromResolved(doc, resolved)
+		var err error
+		plan, err = hydrate.BuildPlanFromResolved(doc, resolved)
 		if err != nil {
-			return nil, "", "", err
-		}
-		bomPolicy, err := hydrate.LoadBOMLocalPatchPolicy(plan, bomRoot)
-		if err != nil {
-			return nil, "", "", err
-		}
-		if bomPolicy != nil {
-			policyDoc = bomPolicy
-			source = ownership.LocalPatchPolicySourceBOM
-			policyPath = string(source)
-		} else {
-			packagePolicy, err := hydrate.LoadPackageLocalPatchPolicy(plan, sources)
-			if err != nil {
-				return nil, "", "", err
-			}
-			if packagePolicy != nil {
-				policyDoc = packagePolicy
-				source = ownership.LocalPatchPolicySourcePackage
-				policyPath = string(source)
-			}
+			return nil, err
 		}
 	}
-
-	return policyDoc, source, policyPath, nil
+	return hydrate.SelectLocalPatchPolicy(plan, bomRoot, sources, repo)
 }
 
 func syncValidatePatchCount(repo *localrepo.Repo, doc *bom.BOM) int {
@@ -519,7 +666,10 @@ func syncValidateTopologyHasHost(topology *syncExecutionTopology, host string) b
 	return false
 }
 
-func syncValidateTargetResolves(topology *syncExecutionTopology, target packageformat.ExecutionTarget) error {
+func syncValidateTargetResolves(
+	topology *syncExecutionTopology,
+	target packageformat.ExecutionTarget,
+) error {
 	switch target {
 	case packageformat.TargetCluster:
 		return nil

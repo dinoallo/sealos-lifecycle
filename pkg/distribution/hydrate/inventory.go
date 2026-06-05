@@ -25,11 +25,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
-
-	"github.com/labring/sealos/pkg/distribution/packageformat"
 )
 
 type InventoryOwnership string
@@ -50,14 +49,14 @@ const (
 )
 
 type TrackedK8sObject struct {
-	APIVersion string             `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string             `json:"kind" yaml:"kind"`
+	APIVersion string             `json:"apiVersion"          yaml:"apiVersion"`
+	Kind       string             `json:"kind"                yaml:"kind"`
 	Namespace  string             `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Name       string             `json:"name" yaml:"name"`
-	Path       string             `json:"path" yaml:"path"`
+	Name       string             `json:"name"                yaml:"name"`
+	Path       string             `json:"path"                yaml:"path"`
 	Component  string             `json:"component,omitempty" yaml:"component,omitempty"`
-	Source     InventorySource    `json:"source" yaml:"source"`
-	Ownership  InventoryOwnership `json:"ownership" yaml:"ownership"`
+	Source     InventorySource    `json:"source"              yaml:"source"`
+	Ownership  InventoryOwnership `json:"ownership"           yaml:"ownership"`
 }
 
 type HostPathType string
@@ -82,31 +81,31 @@ const (
 )
 
 type GeneratedHostPathSemantics struct {
-	Tool                 string            `json:"tool,omitempty" yaml:"tool,omitempty"`
-	Hook                 string            `json:"hook,omitempty" yaml:"hook,omitempty"`
-	APIVersion           string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
-	Kind                 string            `json:"kind,omitempty" yaml:"kind,omitempty"`
-	Namespace            string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Name                 string            `json:"name,omitempty" yaml:"name,omitempty"`
-	ContainerName        string            `json:"containerName,omitempty" yaml:"containerName,omitempty"`
-	ExpectedImage        string            `json:"expectedImage,omitempty" yaml:"expectedImage,omitempty"`
-	ExpectedCommand      string            `json:"expectedCommand,omitempty" yaml:"expectedCommand,omitempty"`
-	ExpectedArgs         map[string]string `json:"expectedArgs,omitempty" yaml:"expectedArgs,omitempty"`
+	Tool                 string            `json:"tool,omitempty"                 yaml:"tool,omitempty"`
+	Hook                 string            `json:"hook,omitempty"                 yaml:"hook,omitempty"`
+	APIVersion           string            `json:"apiVersion,omitempty"           yaml:"apiVersion,omitempty"`
+	Kind                 string            `json:"kind,omitempty"                 yaml:"kind,omitempty"`
+	Namespace            string            `json:"namespace,omitempty"            yaml:"namespace,omitempty"`
+	Name                 string            `json:"name,omitempty"                 yaml:"name,omitempty"`
+	ContainerName        string            `json:"containerName,omitempty"        yaml:"containerName,omitempty"`
+	ExpectedImage        string            `json:"expectedImage,omitempty"        yaml:"expectedImage,omitempty"`
+	ExpectedCommand      string            `json:"expectedCommand,omitempty"      yaml:"expectedCommand,omitempty"`
+	ExpectedArgs         map[string]string `json:"expectedArgs,omitempty"         yaml:"expectedArgs,omitempty"`
 	ExpectedVolumeMounts []string          `json:"expectedVolumeMounts,omitempty" yaml:"expectedVolumeMounts,omitempty"`
 }
 
 type TrackedHostPath struct {
-	HostPath          string                      `json:"hostPath" yaml:"hostPath"`
-	BundlePath        string                      `json:"bundlePath" yaml:"bundlePath"`
-	Component         string                      `json:"component,omitempty" yaml:"component,omitempty"`
-	Source            InventorySource             `json:"source" yaml:"source"`
-	Ownership         InventoryOwnership          `json:"ownership" yaml:"ownership"`
-	Type              HostPathType                `json:"type" yaml:"type"`
-	ProjectionClass   HostPathProjectionClass     `json:"projectionClass,omitempty" yaml:"projectionClass,omitempty"`
-	CompareStrategy   HostPathCompareStrategy     `json:"compareStrategy,omitempty" yaml:"compareStrategy,omitempty"`
-	InputName         string                      `json:"inputName,omitempty" yaml:"inputName,omitempty"`
+	HostPath          string                      `json:"hostPath"                    yaml:"hostPath"`
+	BundlePath        string                      `json:"bundlePath"                  yaml:"bundlePath"`
+	Component         string                      `json:"component,omitempty"         yaml:"component,omitempty"`
+	Source            InventorySource             `json:"source"                      yaml:"source"`
+	Ownership         InventoryOwnership          `json:"ownership"                   yaml:"ownership"`
+	Type              HostPathType                `json:"type"                        yaml:"type"`
+	ProjectionClass   HostPathProjectionClass     `json:"projectionClass,omitempty"   yaml:"projectionClass,omitempty"`
+	CompareStrategy   HostPathCompareStrategy     `json:"compareStrategy,omitempty"   yaml:"compareStrategy,omitempty"`
+	InputName         string                      `json:"inputName,omitempty"         yaml:"inputName,omitempty"`
 	HostInputBindings map[string]string           `json:"hostInputBindings,omitempty" yaml:"hostInputBindings,omitempty"`
-	Generated         *GeneratedHostPathSemantics `json:"generated,omitempty" yaml:"generated,omitempty"`
+	Generated         *GeneratedHostPathSemantics `json:"generated,omitempty"         yaml:"generated,omitempty"`
 }
 
 func collectTrackedK8sObjects(bundle *Bundle, outputDir string) ([]TrackedK8sObject, error) {
@@ -124,7 +123,13 @@ func collectTrackedK8sObjects(bundle *Bundle, outputDir string) ([]TrackedK8sObj
 			if err != nil {
 				return nil, err
 			}
-			discovered, err := discoverTrackedObjects(resolved, step.BundlePath, component.Name, InventorySourcePackageManifest, InventoryOwnershipGlobal)
+			discovered, err := discoverTrackedObjects(
+				resolved,
+				step.BundlePath,
+				component.Name,
+				InventorySourcePackageManifest,
+				InventoryOwnershipGlobal,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -135,7 +140,13 @@ func collectTrackedK8sObjects(bundle *Bundle, outputDir string) ([]TrackedK8sObj
 			if err != nil {
 				return nil, err
 			}
-			discovered, err := discoverTrackedObjects(resolved, patchPath, component.Name, InventorySourceLocalPatch, InventoryOwnershipLocal)
+			discovered, err := discoverTrackedObjects(
+				resolved,
+				patchPath,
+				component.Name,
+				InventorySourceLocalPatch,
+				InventoryOwnershipLocal,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -148,7 +159,13 @@ func collectTrackedK8sObjects(bundle *Bundle, outputDir string) ([]TrackedK8sObj
 		if err != nil {
 			return nil, err
 		}
-		discovered, err := discoverTrackedObjects(resolved, resourcePath, "", InventorySourceLocalResource, InventoryOwnershipLocal)
+		discovered, err := discoverTrackedObjects(
+			resolved,
+			resourcePath,
+			"",
+			InventorySourceLocalResource,
+			InventoryOwnershipLocal,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -186,13 +203,24 @@ func collectTrackedHostPaths(bundle *Bundle, outputDir string) ([]TrackedHostPat
 			case "rootfs":
 				hostRel, ok := trimStepPrefix(step.SourcePath, "rootfs/")
 				if !ok {
-					return nil, fmt.Errorf("rootfs step %q path %q must stay under rootfs/", step.Name, step.SourcePath)
+					return nil, fmt.Errorf(
+						"rootfs step %q path %q must stay under rootfs/",
+						step.Name,
+						step.SourcePath,
+					)
 				}
 				resolved, err := resolveInventoryBundlePath(outputDir, step.BundlePath)
 				if err != nil {
 					return nil, err
 				}
-				discovered, err := discoverTrackedRootfsHostPaths(resolved, step.BundlePath, hostRel, component.Name, InventorySourcePackageManifest, InventoryOwnershipGlobal)
+				discovered, err := discoverTrackedRootfsHostPaths(
+					resolved,
+					step.BundlePath,
+					hostRel,
+					component.Name,
+					InventorySourcePackageManifest,
+					InventoryOwnershipGlobal,
+				)
 				if err != nil {
 					return nil, err
 				}
@@ -200,7 +228,11 @@ func collectTrackedHostPaths(bundle *Bundle, outputDir string) ([]TrackedHostPat
 			case "file":
 				hostRel, ok := trimStepPrefix(step.SourcePath, "files/")
 				if !ok {
-					return nil, fmt.Errorf("file step %q path %q must stay under files/", step.Name, step.SourcePath)
+					return nil, fmt.Errorf(
+						"file step %q path %q must stay under files/",
+						step.Name,
+						step.SourcePath,
+					)
 				}
 				resolved, err := resolveInventoryBundlePath(outputDir, step.BundlePath)
 				if err != nil {
@@ -214,7 +246,14 @@ func collectTrackedHostPaths(bundle *Bundle, outputDir string) ([]TrackedHostPat
 					ownership = InventoryOwnershipLocal
 					inputName = localInput
 				}
-				discovered, err := discoverTrackedFileHostPaths(resolved, step.BundlePath, hostRel, component.Name, InventorySourcePackageManifest, InventoryOwnershipGlobal)
+				discovered, err := discoverTrackedFileHostPaths(
+					resolved,
+					step.BundlePath,
+					hostRel,
+					component.Name,
+					InventorySourcePackageManifest,
+					InventoryOwnershipGlobal,
+				)
 				if err != nil {
 					return nil, err
 				}
@@ -223,7 +262,9 @@ func collectTrackedHostPaths(bundle *Bundle, outputDir string) ([]TrackedHostPat
 					discovered[i].Ownership = ownership
 					discovered[i].InputName = inputName
 					if inputName != "" && len(component.HostInputBindings[inputName]) > 0 {
-						discovered[i].HostInputBindings = cloneStringMap(component.HostInputBindings[inputName])
+						discovered[i].HostInputBindings = cloneStringMap(
+							component.HostInputBindings[inputName],
+						)
 					}
 				}
 				paths = append(paths, discovered...)
@@ -241,30 +282,69 @@ func collectTrackedHostPaths(bundle *Bundle, outputDir string) ([]TrackedHostPat
 	return paths, nil
 }
 
-func discoverTrackedRootfsHostPaths(resolvedPath, bundlePath, hostRel, component string, source InventorySource, ownership InventoryOwnership) ([]TrackedHostPath, error) {
-	cleanHostRel := filepath.ToSlash(strings.TrimPrefix(filepath.Clean(filepath.FromSlash(hostRel)), string(os.PathSeparator)))
-	return discoverTrackedHostPathEntries(resolvedPath, bundlePath, component, source, ownership, func(rel string) string {
-		if cleanHostRel == "" {
-			return filepath.Join(string(os.PathSeparator), filepath.FromSlash(rel))
-		}
-		if rel == "" {
-			return filepath.Join(string(os.PathSeparator), filepath.FromSlash(cleanHostRel))
-		}
-		return filepath.Join(string(os.PathSeparator), filepath.FromSlash(cleanHostRel), filepath.FromSlash(rel))
-	})
+func discoverTrackedRootfsHostPaths(
+	resolvedPath, bundlePath, hostRel, component string,
+	source InventorySource,
+	ownership InventoryOwnership,
+) ([]TrackedHostPath, error) {
+	cleanHostRel := filepath.ToSlash(
+		strings.TrimPrefix(filepath.Clean(filepath.FromSlash(hostRel)), string(os.PathSeparator)),
+	)
+	return discoverTrackedHostPathEntries(
+		resolvedPath,
+		bundlePath,
+		component,
+		source,
+		ownership,
+		func(rel string) string {
+			if cleanHostRel == "" {
+				return filepath.Join(string(os.PathSeparator), filepath.FromSlash(rel))
+			}
+			if rel == "" {
+				return filepath.Join(string(os.PathSeparator), filepath.FromSlash(cleanHostRel))
+			}
+			return filepath.Join(
+				string(os.PathSeparator),
+				filepath.FromSlash(cleanHostRel),
+				filepath.FromSlash(rel),
+			)
+		},
+	)
 }
 
-func discoverTrackedFileHostPaths(resolvedPath, bundlePath, hostRel, component string, source InventorySource, ownership InventoryOwnership) ([]TrackedHostPath, error) {
-	cleanHostRel := filepath.ToSlash(strings.TrimPrefix(filepath.Clean(filepath.FromSlash(hostRel)), string(os.PathSeparator)))
-	return discoverTrackedHostPathEntries(resolvedPath, bundlePath, component, source, ownership, func(rel string) string {
-		if rel == "" {
-			return filepath.Join(string(os.PathSeparator), filepath.FromSlash(cleanHostRel))
-		}
-		return filepath.Join(string(os.PathSeparator), filepath.FromSlash(cleanHostRel), filepath.FromSlash(rel))
-	})
+func discoverTrackedFileHostPaths(
+	resolvedPath, bundlePath, hostRel, component string,
+	source InventorySource,
+	ownership InventoryOwnership,
+) ([]TrackedHostPath, error) {
+	cleanHostRel := filepath.ToSlash(
+		strings.TrimPrefix(filepath.Clean(filepath.FromSlash(hostRel)), string(os.PathSeparator)),
+	)
+	return discoverTrackedHostPathEntries(
+		resolvedPath,
+		bundlePath,
+		component,
+		source,
+		ownership,
+		func(rel string) string {
+			if rel == "" {
+				return filepath.Join(string(os.PathSeparator), filepath.FromSlash(cleanHostRel))
+			}
+			return filepath.Join(
+				string(os.PathSeparator),
+				filepath.FromSlash(cleanHostRel),
+				filepath.FromSlash(rel),
+			)
+		},
+	)
 }
 
-func discoverTrackedHostPathEntries(resolvedPath, bundlePath, component string, source InventorySource, ownership InventoryOwnership, hostPath func(rel string) string) ([]TrackedHostPath, error) {
+func discoverTrackedHostPathEntries(
+	resolvedPath, bundlePath, component string,
+	source InventorySource,
+	ownership InventoryOwnership,
+	hostPath func(rel string) string,
+) ([]TrackedHostPath, error) {
 	info, err := os.Lstat(resolvedPath)
 	if err != nil {
 		return nil, err
@@ -331,16 +411,66 @@ func collectKnownGeneratedHostPaths(bundle *Bundle, outputDir string) []TrackedH
 
 	paths := make([]TrackedHostPath, 0, len(bundle.Spec.Components))
 	for _, component := range bundle.Spec.Components {
-		discovered := generatedKubeadmStaticPodManifests(component, outputDir)
-		if len(discovered) == 0 {
-			continue
+		declared := declaredGeneratedHostPaths(component)
+		paths = append(paths, declared...)
+		seen := make(map[string]struct{}, len(declared))
+		for _, path := range declared {
+			seen[path.HostPath] = struct{}{}
 		}
-		paths = append(paths, discovered...)
+		discovered := generatedKubeadmStaticPodManifests(component, outputDir)
+		for _, path := range discovered {
+			if _, ok := seen[path.HostPath]; ok {
+				continue
+			}
+			paths = append(paths, path)
+		}
 	}
 	return paths
 }
 
-func generatedKubeadmStaticPodManifests(component RenderedComponent, outputDir string) []TrackedHostPath {
+func declaredGeneratedHostPaths(component RenderedComponent) []TrackedHostPath {
+	if len(component.GeneratedOutputs.HostPaths) == 0 {
+		return nil
+	}
+	paths := make([]TrackedHostPath, 0, len(component.GeneratedOutputs.HostPaths))
+	for _, output := range component.GeneratedOutputs.HostPaths {
+		semantics := generatedHostPathSemanticsFromPackageOutput(output)
+		paths = append(paths, TrackedHostPath{
+			HostPath:        filepath.ToSlash(output.HostPath),
+			Component:       component.Name,
+			Source:          InventorySourceGeneratedHook,
+			Ownership:       InventoryOwnershipGlobal,
+			Type:            HostPathRegularFile,
+			ProjectionClass: HostPathProjectionClassGenerated,
+			CompareStrategy: HostPathCompareStrategySemanticGenerated,
+			Generated:       &semantics,
+		})
+	}
+	return paths
+}
+
+func generatedHostPathSemanticsFromPackageOutput(
+	output packageformat.GeneratedHostPathOutput,
+) GeneratedHostPathSemantics {
+	return GeneratedHostPathSemantics{
+		Tool:                 strings.TrimSpace(output.Tool),
+		Hook:                 strings.TrimSpace(output.Hook),
+		APIVersion:           strings.TrimSpace(output.APIVersion),
+		Kind:                 strings.TrimSpace(output.Kind),
+		Namespace:            strings.TrimSpace(output.Namespace),
+		Name:                 strings.TrimSpace(output.ObjectName),
+		ContainerName:        strings.TrimSpace(output.ContainerName),
+		ExpectedImage:        strings.TrimSpace(output.ExpectedImage),
+		ExpectedCommand:      strings.TrimSpace(output.ExpectedCommand),
+		ExpectedArgs:         cloneStringMap(output.ExpectedArgs),
+		ExpectedVolumeMounts: append([]string(nil), output.ExpectedVolumeMounts...),
+	}
+}
+
+func generatedKubeadmStaticPodManifests(
+	component RenderedComponent,
+	outputDir string,
+) []TrackedHostPath {
 	hasBootstrapHook := false
 	kubeadmConfigPath := ""
 	for _, step := range component.Steps {
@@ -367,7 +497,11 @@ func generatedKubeadmStaticPodManifests(component RenderedComponent, outputDir s
 		return nil
 	}
 
-	expectations, ok := expectedKubeadmStaticPodSemantics(outputDir, kubeadmConfigPath, component.Version)
+	expectations, ok := expectedKubeadmStaticPodSemantics(
+		outputDir,
+		kubeadmConfigPath,
+		component.Version,
+	)
 	if !ok || len(expectations) == 0 {
 		return nil
 	}
@@ -416,11 +550,13 @@ type generatedStaticPodExpectation struct {
 }
 
 type kubeadmControlPlaneComponent struct {
-	ExtraArgs    interface{} `yaml:"extraArgs"`
-	ExtraVolumes interface{} `yaml:"extraVolumes"`
+	ExtraArgs    any `yaml:"extraArgs"`
+	ExtraVolumes any `yaml:"extraVolumes"`
 }
 
-func expectedKubeadmStaticPodSemantics(outputDir, bundlePath, componentVersion string) ([]generatedStaticPodExpectation, bool) {
+func expectedKubeadmStaticPodSemantics(
+	outputDir, bundlePath, componentVersion string,
+) ([]generatedStaticPodExpectation, bool) {
 	resolved, err := resolveInventoryBundlePath(outputDir, bundlePath)
 	if err != nil {
 		return nil, false
@@ -459,17 +595,21 @@ func expectedKubeadmStaticPodSemantics(outputDir, bundlePath, componentVersion s
 	expectations = append(expectations, generatedStaticPodExpectation{
 		HostPath: "/etc/kubernetes/manifests/kube-apiserver.yaml",
 		Semantics: &GeneratedHostPathSemantics{
-			Tool:                 "kubeadm",
-			Hook:                 "bootstrap",
-			APIVersion:           "v1",
-			Kind:                 "Pod",
-			Namespace:            "kube-system",
-			Name:                 "kube-apiserver",
-			ContainerName:        "kube-apiserver",
-			ExpectedImage:        fmt.Sprintf("%s/kube-apiserver:%s", repository, version),
-			ExpectedCommand:      "kube-apiserver",
-			ExpectedArgs:         apiserverArgs,
-			ExpectedVolumeMounts: expectedMounts([]string{"/etc/kubernetes/pki"}, apiserverArgs, config.APIServer.ExtraVolumes),
+			Tool:            "kubeadm",
+			Hook:            "bootstrap",
+			APIVersion:      "v1",
+			Kind:            "Pod",
+			Namespace:       "kube-system",
+			Name:            "kube-apiserver",
+			ContainerName:   "kube-apiserver",
+			ExpectedImage:   fmt.Sprintf("%s/kube-apiserver:%s", repository, version),
+			ExpectedCommand: "kube-apiserver",
+			ExpectedArgs:    apiserverArgs,
+			ExpectedVolumeMounts: expectedMounts(
+				[]string{"/etc/kubernetes/pki"},
+				apiserverArgs,
+				config.APIServer.ExtraVolumes,
+			),
 		},
 	})
 
@@ -483,17 +623,21 @@ func expectedKubeadmStaticPodSemantics(outputDir, bundlePath, componentVersion s
 	expectations = append(expectations, generatedStaticPodExpectation{
 		HostPath: "/etc/kubernetes/manifests/kube-controller-manager.yaml",
 		Semantics: &GeneratedHostPathSemantics{
-			Tool:                 "kubeadm",
-			Hook:                 "bootstrap",
-			APIVersion:           "v1",
-			Kind:                 "Pod",
-			Namespace:            "kube-system",
-			Name:                 "kube-controller-manager",
-			ContainerName:        "kube-controller-manager",
-			ExpectedImage:        fmt.Sprintf("%s/kube-controller-manager:%s", repository, version),
-			ExpectedCommand:      "kube-controller-manager",
-			ExpectedArgs:         controllerManagerArgs,
-			ExpectedVolumeMounts: expectedMounts([]string{"/etc/kubernetes/pki"}, controllerManagerArgs, config.ControllerManager.ExtraVolumes),
+			Tool:            "kubeadm",
+			Hook:            "bootstrap",
+			APIVersion:      "v1",
+			Kind:            "Pod",
+			Namespace:       "kube-system",
+			Name:            "kube-controller-manager",
+			ContainerName:   "kube-controller-manager",
+			ExpectedImage:   fmt.Sprintf("%s/kube-controller-manager:%s", repository, version),
+			ExpectedCommand: "kube-controller-manager",
+			ExpectedArgs:    controllerManagerArgs,
+			ExpectedVolumeMounts: expectedMounts(
+				[]string{"/etc/kubernetes/pki"},
+				controllerManagerArgs,
+				config.ControllerManager.ExtraVolumes,
+			),
 		},
 	})
 
@@ -518,13 +662,13 @@ func expectedKubeadmStaticPodSemantics(outputDir, bundlePath, componentVersion s
 	return expectations, true
 }
 
-func cleanExpectedArgs(raw interface{}) map[string]string {
+func cleanExpectedArgs(raw any) map[string]string {
 	if raw == nil {
 		return nil
 	}
 	clean := make(map[string]string)
 	switch typed := raw.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		for key, value := range typed {
 			cleanKey := strings.TrimSpace(key)
 			if cleanKey == "" {
@@ -532,9 +676,9 @@ func cleanExpectedArgs(raw interface{}) map[string]string {
 			}
 			clean[cleanKey] = strings.TrimSpace(fmt.Sprint(value))
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range typed {
-			arg, ok := item.(map[string]interface{})
+			arg, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -554,14 +698,14 @@ func cleanExpectedArgs(raw interface{}) map[string]string {
 	return clean
 }
 
-func extraVolumeMounts(raw interface{}) []string {
-	items, ok := raw.([]interface{})
+func extraVolumeMounts(raw any) []string {
+	items, ok := raw.([]any)
 	if !ok {
 		return nil
 	}
 	mounts := make([]string, 0, len(items))
 	for _, item := range items {
-		volume, ok := item.(map[string]interface{})
+		volume, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -578,7 +722,11 @@ func extraVolumeMounts(raw interface{}) []string {
 	return mounts
 }
 
-func expectedMounts(defaults []string, expectedArgs map[string]string, rawExtraVolumes interface{}) []string {
+func expectedMounts(
+	defaults []string,
+	expectedArgs map[string]string,
+	rawExtraVolumes any,
+) []string {
 	mounts := make(map[string]struct{}, len(defaults))
 	for _, mountPath := range defaults {
 		clean := strings.TrimSpace(mountPath)
@@ -657,7 +805,11 @@ func localInputOwners(component RenderedComponent) map[string]string {
 	return owners
 }
 
-func discoverTrackedObjects(resolvedPath, bundlePath, component string, source InventorySource, ownership InventoryOwnership) ([]TrackedK8sObject, error) {
+func discoverTrackedObjects(
+	resolvedPath, bundlePath, component string,
+	source InventorySource,
+	ownership InventoryOwnership,
+) ([]TrackedK8sObject, error) {
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		return nil, err
@@ -721,7 +873,11 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func parseTrackedObjectsFile(resolvedPath, bundlePath, component string, source InventorySource, ownership InventoryOwnership) ([]TrackedK8sObject, error) {
+func parseTrackedObjectsFile(
+	resolvedPath, bundlePath, component string,
+	source InventorySource,
+	ownership InventoryOwnership,
+) ([]TrackedK8sObject, error) {
 	data, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		return nil, fmt.Errorf("read Kubernetes object manifest %q: %w", resolvedPath, err)
@@ -750,7 +906,11 @@ func parseTrackedObjectsFile(resolvedPath, bundlePath, component string, source 
 			} `json:"metadata" yaml:"metadata"`
 		}
 		if err := utilyaml.Unmarshal(raw.Raw, &meta); err != nil {
-			return nil, fmt.Errorf("unmarshal Kubernetes object metadata from %q: %w", resolvedPath, err)
+			return nil, fmt.Errorf(
+				"unmarshal Kubernetes object metadata from %q: %w",
+				resolvedPath,
+				err,
+			)
 		}
 		if meta.Kind == "" || meta.Metadata.Name == "" {
 			continue

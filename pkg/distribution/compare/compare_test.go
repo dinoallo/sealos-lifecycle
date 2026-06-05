@@ -42,7 +42,14 @@ func TestCompareBundle(t *testing.T) {
 		t.Fatalf("WriteFile(missing secret) error = %v", err)
 	}
 
-	manifestPath := filepath.Join(bundleRoot, "components", "cilium", "files", "manifests", "cilium.yaml")
+	manifestPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -85,16 +92,24 @@ func TestCompareBundle(t *testing.T) {
 		},
 	}
 
-	result, err := CompareBundle(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		switch name {
-		case "grafana-admin-credentials":
-			return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1","uid":"abc","managedFields":[{}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"}},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="},"type":"Opaque"}`), nil
-		case "cilium":
-			return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`), nil
-		default:
-			return nil, NewNotFoundError(apiVersion, kind, namespace, name)
-		}
-	}))
+	result, err := CompareBundle(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			switch name {
+			case "grafana-admin-credentials":
+				return []byte(
+					`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1","uid":"abc","managedFields":[{}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"}},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="},"type":"Opaque"}`,
+				), nil
+			case "cilium":
+				return []byte(
+					`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system","resourceVersion":"2"},"spec":{"template":{"spec":{"containers":[{"name":"cilium-agent","image":"quay.io/cilium/cilium:v1.15.1"}]}}}}`,
+				), nil
+			default:
+				return nil, NewNotFoundError(apiVersion, kind, namespace, name)
+			}
+		}),
+	)
 	if err != nil {
 		t.Fatalf("CompareBundle() error = %v", err)
 	}
@@ -191,7 +206,14 @@ func TestCompareBundleMarksPolicyEligibleOrphanObjectRemediation(t *testing.T) {
 	t.Parallel()
 
 	bundleRoot := t.TempDir()
-	manifestPath := filepath.Join(bundleRoot, "components", "cilium", "files", "manifests", "cilium-config.yaml")
+	manifestPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium-config.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -216,9 +238,15 @@ func TestCompareBundleMarksPolicyEligibleOrphanObjectRemediation(t *testing.T) {
 		},
 	}
 
-	result, err := CompareBundle(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cilium-config","namespace":"kube-system","resourceVersion":"7"},"data":{"enable-hubble":"true"}}`), nil
-	}))
+	result, err := CompareBundle(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return []byte(
+				`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cilium-config","namespace":"kube-system","resourceVersion":"7"},"data":{"enable-hubble":"true"}}`,
+			), nil
+		}),
+	)
 	if err != nil {
 		t.Fatalf("CompareBundle() error = %v", err)
 	}
@@ -259,7 +287,14 @@ func TestCompareBundleUsesRenderedLocalPatchPolicy(t *testing.T) {
 	t.Parallel()
 
 	bundleRoot := t.TempDir()
-	manifestPath := filepath.Join(bundleRoot, "components", "grafana", "files", "manifests", "grafana-settings.yaml")
+	manifestPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"grafana",
+		"files",
+		"manifests",
+		"grafana-settings.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(manifestPath), err)
 	}
@@ -294,9 +329,15 @@ func TestCompareBundleUsesRenderedLocalPatchPolicy(t *testing.T) {
 		},
 	}
 
-	result, err := CompareBundle(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"grafana-settings","namespace":"default","annotations":{"localFeature":"enabled"}},"data":{"adminUser":"admin"}}`), nil
-	}))
+	result, err := CompareBundle(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return []byte(
+				`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"grafana-settings","namespace":"default","annotations":{"localFeature":"enabled"}},"data":{"adminUser":"admin"}}`,
+			), nil
+		}),
+	)
 	if err != nil {
 		t.Fatalf("CompareBundle() error = %v", err)
 	}
@@ -333,9 +374,36 @@ func TestCompareBundleWithHostPaths(t *testing.T) {
 	bundleRoot := t.TempDir()
 	hostRoot := t.TempDir()
 
-	desiredKubeletPath := filepath.Join(bundleRoot, "components", "kubernetes", "files", "rootfs", "usr", "bin", "kubelet")
-	desiredKubeadmPath := filepath.Join(bundleRoot, "components", "kubernetes", "files", "files", "etc", "kubernetes", "kubeadm.yaml")
-	desiredCtrPath := filepath.Join(bundleRoot, "components", "containerd", "files", "rootfs", "usr", "bin", "ctr")
+	desiredKubeletPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"kubernetes",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"kubelet",
+	)
+	desiredKubeadmPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
+	desiredCtrPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"containerd",
+		"files",
+		"rootfs",
+		"usr",
+		"bin",
+		"ctr",
+	)
 	for _, path := range []string{desiredKubeletPath, desiredKubeadmPath, desiredCtrPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -396,9 +464,14 @@ func TestCompareBundleWithHostPaths(t *testing.T) {
 		},
 	}
 
-	result, err := CompareBundleWithOptions(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return nil, NewNotFoundError(apiVersion, kind, namespace, name)
-	}), CompareOptions{HostRoot: hostRoot})
+	result, err := CompareBundleWithOptions(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return nil, NewNotFoundError(apiVersion, kind, namespace, name)
+		}),
+		CompareOptions{HostRoot: hostRoot},
+	)
 	if err != nil {
 		t.Fatalf("CompareBundleWithOptions() error = %v", err)
 	}
@@ -484,8 +557,27 @@ func TestCompareBundleUsesHostScopedInputForHostPathDesiredState(t *testing.T) {
 	bundleRoot := t.TempDir()
 	hostRoot := t.TempDir()
 
-	defaultDesiredPath := filepath.Join(bundleRoot, "components", "runtime", "files", "files", "etc", "demo", "config.yaml")
-	hostDesiredPath := filepath.Join(bundleRoot, "components", "runtime", "host-inputs", "10.0.0.11", "files", "etc", "demo", "config.yaml")
+	defaultDesiredPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"runtime",
+		"files",
+		"files",
+		"etc",
+		"demo",
+		"config.yaml",
+	)
+	hostDesiredPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"runtime",
+		"host-inputs",
+		"10.0.0.11",
+		"files",
+		"etc",
+		"demo",
+		"config.yaml",
+	)
 	livePath := filepath.Join(hostRoot, "etc", "demo", "config.yaml")
 	for _, path := range []string{defaultDesiredPath, hostDesiredPath, livePath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -519,12 +611,17 @@ func TestCompareBundleUsesHostScopedInputForHostPathDesiredState(t *testing.T) {
 		},
 	}
 
-	result, err := CompareBundleWithOptions(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return nil, NewNotFoundError(apiVersion, kind, namespace, name)
-	}), CompareOptions{
-		HostRoot:     hostRoot,
-		HostIdentity: "10.0.0.11:22",
-	})
+	result, err := CompareBundleWithOptions(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return nil, NewNotFoundError(apiVersion, kind, namespace, name)
+		}),
+		CompareOptions{
+			HostRoot:     hostRoot,
+			HostIdentity: "10.0.0.11:22",
+		},
+	)
 	if err != nil {
 		t.Fatalf("CompareBundleWithOptions() error = %v", err)
 	}
@@ -542,9 +639,27 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	bundleRoot := t.TempDir()
 	hostRoot := t.TempDir()
 
-	liveAPIServerPath := filepath.Join(hostRoot, "etc", "kubernetes", "manifests", "kube-apiserver.yaml")
-	liveControllerManagerPath := filepath.Join(hostRoot, "etc", "kubernetes", "manifests", "kube-controller-manager.yaml")
-	liveSchedulerPath := filepath.Join(hostRoot, "etc", "kubernetes", "manifests", "kube-scheduler.yaml")
+	liveAPIServerPath := filepath.Join(
+		hostRoot,
+		"etc",
+		"kubernetes",
+		"manifests",
+		"kube-apiserver.yaml",
+	)
+	liveControllerManagerPath := filepath.Join(
+		hostRoot,
+		"etc",
+		"kubernetes",
+		"manifests",
+		"kube-controller-manager.yaml",
+	)
+	liveSchedulerPath := filepath.Join(
+		hostRoot,
+		"etc",
+		"kubernetes",
+		"manifests",
+		"kube-scheduler.yaml",
+	)
 	for _, path := range []string{liveAPIServerPath, liveControllerManagerPath, liveSchedulerPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
@@ -669,9 +784,14 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 		},
 	}
 
-	result, err := CompareBundleWithOptions(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return nil, NewNotFoundError(apiVersion, kind, namespace, name)
-	}), CompareOptions{HostRoot: hostRoot})
+	result, err := CompareBundleWithOptions(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return nil, NewNotFoundError(apiVersion, kind, namespace, name)
+		}),
+		CompareOptions{HostRoot: hostRoot},
+	)
 	if err != nil {
 		t.Fatalf("CompareBundleWithOptions() error = %v", err)
 	}
@@ -717,6 +837,13 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	if got, want := drifted.Remediation.ChangeOwner, "globalBaseline"; got != want {
 		t.Fatalf("drifted.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, drifted.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "kube-controller-manager",
+		Repairable:      true,
+	})
 	if got, want := drifted.Remediation.NextSteps[0], "Review the selected BOM revision and package baseline that define this generated projection."; got != want {
 		t.Fatalf("drifted.remediation.nextSteps[0] = %q, want %q", got, want)
 	}
@@ -776,6 +903,17 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	if got, want := schedulerDrifted.Remediation.ChangeOwner, "localInput"; got != want {
 		t.Fatalf("schedulerDrifted.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(
+		t,
+		schedulerDrifted.Remediation,
+		generatedRemediationMetadata{
+			ProjectionClass: "generatedHostPath",
+			Generator:       "kubeadm",
+			GeneratedKind:   "Pod",
+			GeneratedName:   "kube-scheduler",
+			Repairable:      true,
+		},
+	)
 	if got, want := schedulerDrifted.Remediation.NextSteps[0], "Update the cluster-local bootstrap input that feeds the rendered kubeadm config."; got != want {
 		t.Fatalf("schedulerDrifted.remediation.nextSteps[0] = %q, want %q", got, want)
 	}
@@ -783,7 +921,11 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 		t.Fatalf("schedulerDrifted.remediation.allowedCommands[0] = %q, want %q", got, want)
 	}
 	if got, want := schedulerDrifted.Remediation.CommandGuidance[3].Availability, "unknown"; got != want {
-		t.Fatalf("schedulerDrifted.remediation.commandGuidance[3].availability = %q, want %q", got, want)
+		t.Fatalf(
+			"schedulerDrifted.remediation.commandGuidance[3].availability = %q, want %q",
+			got,
+			want,
+		)
 	}
 
 	missing := hostPaths["/etc/kubernetes/manifests/etcd.yaml"]
@@ -802,12 +944,21 @@ func TestCompareBundleWithGeneratedHostPaths(t *testing.T) {
 	if got, want := missing.Remediation.ChangeOwner, "globalBaseline"; got != want {
 		t.Fatalf("missing.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, missing.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "etcd",
+		Repairable:      false,
+	})
 	if got, want := missing.Remediation.AllowedCommands[4], "sync package build"; got != want {
 		t.Fatalf("missing.remediation.allowedCommands[4] = %q, want %q", got, want)
 	}
 }
 
-func TestCompareBundleWithGeneratedHostPathSemanticParseErrorUsesManualReviewRemediation(t *testing.T) {
+func TestCompareBundleWithGeneratedHostPathSemanticParseErrorUsesManualReviewRemediation(
+	t *testing.T,
+) {
 	t.Parallel()
 
 	bundleRoot := t.TempDir()
@@ -844,9 +995,14 @@ func TestCompareBundleWithGeneratedHostPathSemanticParseErrorUsesManualReviewRem
 		},
 	}
 
-	result, err := CompareBundleWithOptions(bundle, bundleRoot, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return nil, NewNotFoundError(apiVersion, kind, namespace, name)
-	}), CompareOptions{HostRoot: hostRoot})
+	result, err := CompareBundleWithOptions(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return nil, NewNotFoundError(apiVersion, kind, namespace, name)
+		}),
+		CompareOptions{HostRoot: hostRoot},
+	)
 	if err != nil {
 		t.Fatalf("CompareBundleWithOptions() error = %v", err)
 	}
@@ -866,6 +1022,13 @@ func TestCompareBundleWithGeneratedHostPathSemanticParseErrorUsesManualReviewRem
 	if got, want := status.Remediation.ChangeOwner, "manualReview"; got != want {
 		t.Fatalf("status.remediation.changeOwner = %q, want %q", got, want)
 	}
+	assertGeneratedHostPathRemediation(t, status.Remediation, generatedRemediationMetadata{
+		ProjectionClass: "generatedHostPath",
+		Generator:       "kubeadm",
+		GeneratedKind:   "Pod",
+		GeneratedName:   "kube-apiserver",
+		Repairable:      true,
+	})
 	if got, want := status.Remediation.NextSteps[0], "Inspect the live generated static Pod manifest and identify why Sealos could not classify it semantically."; got != want {
 		t.Fatalf("status.remediation.nextSteps[0] = %q, want %q", got, want)
 	}
@@ -881,10 +1044,14 @@ func TestKubectlResolverTranslatesNotFound(t *testing.T) {
 	t.Parallel()
 
 	resolver := NewKubectlResolver(func(args ...string) ([]byte, error) {
-		return nil, fmt.Errorf("Error from server (NotFound): secrets %q not found", "grafana-admin-credentials")
+		return nil, fmt.Errorf(
+			"Error from server (NotFound): secrets %q not found",
+			"grafana-admin-credentials",
+		)
 	})
 
-	if _, err := resolver.Get("v1", "Secret", "default", "grafana-admin-credentials"); err == nil || !isNotFound(err) {
+	if _, err := resolver.Get("v1", "Secret", "default", "grafana-admin-credentials"); err == nil ||
+		!isNotFound(err) {
 		t.Fatalf("resolver.Get() error = %v, want notFound", err)
 	}
 }
@@ -892,8 +1059,12 @@ func TestKubectlResolverTranslatesNotFound(t *testing.T) {
 func TestNormalizedObjectDigestTreatsStringDataAndServerMetadataAsEqual(t *testing.T) {
 	t.Parallel()
 
-	desired := []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n  namespace: default\nstringData:\n  username: admin\n  password: passw0rd\n")
-	live := []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1","uid":"abc","managedFields":[{}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"}},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="}}`)
+	desired := []byte(
+		"apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin-credentials\n  namespace: default\nstringData:\n  username: admin\n  password: passw0rd\n",
+	)
+	live := []byte(
+		`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"grafana-admin-credentials","namespace":"default","resourceVersion":"1","uid":"abc","managedFields":[{}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"}},"data":{"username":"YWRtaW4=","password":"cGFzc3cwcmQ="}}`,
+	)
 
 	desiredDigest, err := normalizedObjectDigest(desired)
 	if err != nil {
@@ -1230,9 +1401,15 @@ func TestCompareBundleLoadsBundleManifestPaths(t *testing.T) {
 		t.Fatalf("MarshalFile(bundle) error = %v", err)
 	}
 
-	loaded, err := CompareBundle(bundle, root, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return []byte(`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system"}}`), nil
-	}))
+	loaded, err := CompareBundle(
+		bundle,
+		root,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return []byte(
+				`{"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system"}}`,
+			), nil
+		}),
+	)
 	if err != nil {
 		t.Fatalf("CompareBundle() error = %v", err)
 	}
@@ -1245,7 +1422,14 @@ func TestCompareBundleUsesFieldLevelOwnershipAcrossFragments(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	globalPath := filepath.Join(root, "components", "grafana", "files", "manifests", "grafana-settings.yaml")
+	globalPath := filepath.Join(
+		root,
+		"components",
+		"grafana",
+		"files",
+		"manifests",
+		"grafana-settings.yaml",
+	)
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(globalPath) error = %v", err)
 	}
@@ -1304,14 +1488,18 @@ data:
 		},
 	}
 
-	result, err := CompareBundle(bundle, root, resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
-		return []byte(`{
+	result, err := CompareBundle(
+		bundle,
+		root,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return []byte(`{
   "apiVersion":"v1",
   "kind":"ConfigMap",
   "metadata":{"name":"grafana-settings","namespace":"default"},
   "data":{"adminUser":"admin","imageTag":"10.4.0"}
 }`), nil
-	}))
+		}),
+	)
 	if err != nil {
 		t.Fatalf("CompareBundle() error = %v", err)
 	}
@@ -1352,4 +1540,42 @@ type resolverFunc func(apiVersion, kind, namespace, name string) ([]byte, error)
 
 func (f resolverFunc) Get(apiVersion, kind, namespace, name string) ([]byte, error) {
 	return f(apiVersion, kind, namespace, name)
+}
+
+type generatedRemediationMetadata struct {
+	ProjectionClass string
+	Generator       string
+	GeneratedKind   string
+	GeneratedName   string
+	Repairable      bool
+}
+
+func assertGeneratedHostPathRemediation(
+	t *testing.T,
+	remediation *HostPathRemediation,
+	want generatedRemediationMetadata,
+) {
+	t.Helper()
+
+	if remediation == nil {
+		t.Fatal("remediation = nil, want generated host path remediation")
+	}
+	if got := remediation.ProjectionClass; got != want.ProjectionClass {
+		t.Fatalf("remediation.projectionClass = %q, want %q", got, want.ProjectionClass)
+	}
+	if got := remediation.Generator; got != want.Generator {
+		t.Fatalf("remediation.generator = %q, want %q", got, want.Generator)
+	}
+	if got := remediation.GeneratedKind; got != want.GeneratedKind {
+		t.Fatalf("remediation.generatedKind = %q, want %q", got, want.GeneratedKind)
+	}
+	if got := remediation.GeneratedName; got != want.GeneratedName {
+		t.Fatalf("remediation.generatedName = %q, want %q", got, want.GeneratedName)
+	}
+	if remediation.Repairable == nil {
+		t.Fatal("remediation.repairable = nil, want explicit generated repairability")
+	}
+	if got := *remediation.Repairable; got != want.Repairable {
+		t.Fatalf("remediation.repairable = %t, want %t", got, want.Repairable)
+	}
 }

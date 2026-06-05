@@ -11,9 +11,13 @@ WORKDIR="${POC_DIR}/artifacts/oci"
 REGISTRY_PREFIX=""
 PACKAGE_ROOT=""
 BOM_OUT=""
+RELEASE_ROOT=""
 PLATFORM="linux/amd64"
 TIMESTAMP="0"
 DISTRIBUTION="poc-minimal"
+RELEASE_LINE="minimal-single-node"
+RELEASE_CHANNEL="alpha"
+RELEASE_REVISION="rev-poc-001"
 
 CONTAINERD_PACKAGE_NAME=""
 CONTAINERD_PACKAGE_VERSION=""
@@ -29,6 +33,10 @@ CILIUM_PACKAGE_NAME=""
 CILIUM_PACKAGE_VERSION=""
 CILIUM_IMAGE=""
 CILIUM_DIGEST=""
+
+BOM_DIGEST=""
+RELEASE_BOM_PATH=""
+RELEASE_CHANNEL_PATH=""
 
 usage() {
   cat <<'EOF'
@@ -47,9 +55,13 @@ Options:
   --workdir DIR
   --package-root DIR
   --bom-out PATH
+  --release-root DIR
   --platform OS/ARCH
   --timestamp EPOCH
   --distribution NAME
+  --release-line NAME
+  --channel alpha|beta|stable
+  --revision REVISION
   --sealos-bin PATH
 EOF
 }
@@ -73,6 +85,10 @@ parse_args() {
         BOM_OUT="${2:?missing value for --bom-out}"
         shift 2
         ;;
+      --release-root)
+        RELEASE_ROOT="${2:?missing value for --release-root}"
+        shift 2
+        ;;
       --platform)
         PLATFORM="${2:?missing value for --platform}"
         shift 2
@@ -83,6 +99,18 @@ parse_args() {
         ;;
       --distribution)
         DISTRIBUTION="${2:?missing value for --distribution}"
+        shift 2
+        ;;
+      --release-line)
+        RELEASE_LINE="${2:?missing value for --release-line}"
+        shift 2
+        ;;
+      --channel)
+        RELEASE_CHANNEL="${2:?missing value for --channel}"
+        shift 2
+        ;;
+      --revision)
+        RELEASE_REVISION="${2:?missing value for --revision}"
         shift 2
         ;;
       --sealos-bin)
@@ -117,6 +145,10 @@ resolve_paths() {
 
   if [[ -z "${BOM_OUT}" ]]; then
     BOM_OUT="${WORKDIR}/bom.oci.yaml"
+  fi
+
+  if [[ -z "${RELEASE_ROOT}" ]]; then
+    RELEASE_ROOT="${WORKDIR}/release"
   fi
 }
 
@@ -202,23 +234,23 @@ write_bom() {
 apiVersion: distribution.sealos.io/v1alpha1
 kind: BOM
 metadata:
-  name: minimal-single-node
+  name: ${RELEASE_LINE}
   labels:
     distribution.sealos.io/example: "true"
     distribution.sealos.io/profile: poc
 spec:
-  revision: rev-poc-001
-  channel: alpha
-  components:
+  revision: ${RELEASE_REVISION}
+  channel: ${RELEASE_CHANNEL}
+  packages:
     - name: containerd
-      kind: infra
+      category: infra
       version: ${CONTAINERD_PACKAGE_VERSION}
       artifact:
         name: ${CONTAINERD_PACKAGE_NAME}
         image: ${CONTAINERD_IMAGE}
         digest: ${CONTAINERD_DIGEST}
     - name: kubernetes
-      kind: infra
+      category: infra
       version: ${KUBERNETES_PACKAGE_VERSION}
       dependencies:
         - containerd
@@ -227,7 +259,7 @@ spec:
         image: ${KUBERNETES_IMAGE}
         digest: ${KUBERNETES_DIGEST}
     - name: cilium
-      kind: infra
+      category: infra
       version: ${CILIUM_PACKAGE_VERSION}
       dependencies:
         - kubernetes
@@ -238,10 +270,40 @@ spec:
 EOF
 }
 
+write_release_metadata() {
+  RELEASE_BOM_PATH="${RELEASE_ROOT}/releases/${RELEASE_LINE}/${RELEASE_REVISION}/bom.yaml"
+  RELEASE_CHANNEL_PATH="${RELEASE_ROOT}/channels/${RELEASE_LINE}/${RELEASE_CHANNEL}.yaml"
+
+  install -d "$(dirname "${RELEASE_BOM_PATH}")" "$(dirname "${RELEASE_CHANNEL_PATH}")"
+  cp "${BOM_OUT}" "${RELEASE_BOM_PATH}"
+
+  BOM_DIGEST="sha256:$(sha256sum "${RELEASE_BOM_PATH}" | awk '{print $1}')"
+
+  cat > "${RELEASE_CHANNEL_PATH}" <<EOF
+apiVersion: distribution.sealos.io/v1alpha1
+kind: ReleaseChannel
+metadata:
+  name: ${RELEASE_LINE}-${RELEASE_CHANNEL}
+spec:
+  distribution: ${RELEASE_LINE}
+  channel: ${RELEASE_CHANNEL}
+  targetRevision: ${RELEASE_REVISION}
+  bomPath: ../../releases/${RELEASE_LINE}/${RELEASE_REVISION}/bom.yaml
+  bomDigest: ${BOM_DIGEST}
+EOF
+}
+
 print_summary() {
   print_kv workdir "${WORKDIR}"
   print_kv package_root "${PACKAGE_ROOT}"
   print_kv bom_path "${BOM_OUT}"
+  print_kv bom_digest "${BOM_DIGEST}"
+  print_kv release_source "${RELEASE_ROOT}"
+  print_kv release_line "${RELEASE_LINE}"
+  print_kv release_channel "${RELEASE_CHANNEL}"
+  print_kv release_revision "${RELEASE_REVISION}"
+  print_kv release_bom_path "${RELEASE_BOM_PATH}"
+  print_kv release_channel_path "${RELEASE_CHANNEL_PATH}"
   print_kv containerd_reference "${CONTAINERD_IMAGE}@${CONTAINERD_DIGEST}"
   print_kv kubernetes_reference "${KUBERNETES_IMAGE}@${KUBERNETES_DIGEST}"
   print_kv cilium_reference "${CILIUM_IMAGE}@${CILIUM_DIGEST}"
@@ -257,6 +319,7 @@ main() {
   build_and_push_component kubernetes
   build_and_push_component cilium
   write_bom
+  write_release_metadata
   print_summary
 }
 

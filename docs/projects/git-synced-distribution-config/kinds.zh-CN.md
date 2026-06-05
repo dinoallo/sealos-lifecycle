@@ -72,8 +72,8 @@ status: {}
 | [`PackageAcceptanceReport`](./kinds/package-acceptance-report.zh-CN.md) | Evidence document | Package test automation | smoke 或 acceptance artifact | 已实现文件 schema |
 | [`DistributionTarget`](./kinds/distribution-target.zh-CN.md) | Kubernetes CRD | Cluster operator | Kubernetes API，namespaced | 已实现 CRD |
 | [`DistributionRolloutPolicy`](./kinds/distribution-rollout-policy.zh-CN.md) | Kubernetes CRD | Cluster operator | Kubernetes API，namespaced | 已实现 CRD |
-| [`LocalRepo`](./kinds/local-repo.zh-CN.md) | Local source document | Cluster owner | local repo metadata | 示例性质，未实现 |
-| [`LocalRepoRevision`](./kinds/local-repo-revision.zh-CN.md) | Local source document | Cluster owner | local repo revision metadata | 示例性质，未实现 |
+| [`LocalRepo`](./kinds/local-repo.zh-CN.md) | Local source document | Cluster owner | local repo `repo.yaml` | 已实现文件 schema |
+| [`LocalRepoRevision`](./kinds/local-repo-revision.zh-CN.md) | Local source evidence document | Cluster owner | local repo `revisions/current.yaml` | 已实现文件 schema |
 
 ## Source Document Kinds
 
@@ -431,5 +431,4 @@ deploy/distribution-controller/base/crd.yaml
    `PackageAcceptanceReport`。
 4. Kubernetes CRD 继续聚焦 runtime reconciliation：`DistributionTarget` 和
    `DistributionRolloutPolicy`。
-5. `LocalRepo`、`LocalRepoRevision` 和 `AppliedInventory` 先作为未来 schema 工作处理，
-   直到实现依赖它们。
+5. `AppliedInventory` 先作为未来 schema 工作处理，直到实现依赖它。
