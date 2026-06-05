@@ -398,6 +398,9 @@ Current MVP behavior worth remembering:
 - missing local-owned objects or files can be restored by `revert`
 - direct host-path revert can target local or remote hosts, and ambiguous
   multi-component host paths require `--component`
+- data-plane-sensitive objects need the
+  [Data plane protection](./data-plane-protection-runbook.md) gates before
+  mutation
 - generated projections are reported from
   `ComponentPackage.spec.generatedOutputs.hostPaths[]` declarations or known
   kubeadm static Pod discovery; only modeled control-plane host paths whose

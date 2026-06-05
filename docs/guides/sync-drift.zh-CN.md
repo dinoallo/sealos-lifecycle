@@ -395,6 +395,8 @@ sealos sync revert \
 - 缺失的 local-owned object 或 file 可以被 `revert` 恢复
 - direct host-path revert 可以精确选择 local 或 remote host；多 component
   同 path 时需要 `--component`
+- data-plane-sensitive objects 在 mutation 前需要先走
+  [Data plane protection](./data-plane-protection-runbook.md) gate
 - generated projection 会从
   `ComponentPackage.spec.generatedOutputs.hostPaths[]` 声明或已知 kubeadm
   static Pod 发现中被报告；只有 remediation 显示 `repairable=true` 的已建模

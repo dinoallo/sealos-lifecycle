@@ -128,6 +128,9 @@ Secret 字节。
   `--component` 缩小 destructive action 的范围。
 - 不要用 `sync commit` 处理 package-owned global baseline drift；这类变更应该通过
   release path 更新 package 或 BOM。
+- 修改 Secret、PVC、database resources、rollback targets 或 derived-line stateful
+  components 前，先执行
+  [Data plane protection](./data-plane-protection-runbook.md)。
 
 ## 应保留的证据
 

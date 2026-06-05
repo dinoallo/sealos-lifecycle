@@ -134,6 +134,9 @@ The current `sync` summaries should already avoid copying Secret bytes.
   `--component` to narrow destructive actions.
 - Never use `sync commit` for package-owned global baseline drift; update the
   package or BOM through the release path instead.
+- Before mutating Secrets, PVCs, database resources, rollback targets, or
+  derived-line stateful components, follow
+  [Data plane protection](./data-plane-protection-runbook.md).
 
 ## Evidence To Keep
 

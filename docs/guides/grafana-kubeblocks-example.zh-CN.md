@@ -27,6 +27,8 @@ ownership / local binding 模型下，这类场景应该怎么拆：
   [Distribution and config sync](../architecture/distribution-and-config-sync.md)
 - release channel 与派生发行版：
   [Release and promotion](../architecture/release-and-promotion.md)
+- 数据面保护 gate：
+  [Data plane protection](./data-plane-protection-runbook.md)
 
 ## 外部参考
 
@@ -387,5 +389,7 @@ secret-bearing local copy。
 - Secret 字节保留在 local repo 或别的 cluster-local secret 系统里
 - 运行时生成的凭证归入 local runtime state，不要当成可上游化的 package
   material
+- revert、rollback、upgrade 或 derived-line switch 触碰数据库前，先执行
+  [Data plane protection](./data-plane-protection-runbook.md) gate
 
 这是同时保住可复现性和 Secret 边界的最干净做法。
