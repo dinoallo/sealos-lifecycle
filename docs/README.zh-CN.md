@@ -34,6 +34,7 @@
 | [Local repo and secret](./guides/local-repo-and-secret.md) | 描述 cluster-local repo layout 和 secret initialization workflow。中文：[zh-CN](./guides/local-repo-and-secret.zh-CN.md)。 |
 | [Local patch policy authoring](./guides/local-patch-policy-authoring.md) | 描述 local patch policy 的 authorship、review rules 和 validation。中文：[zh-CN](./guides/local-patch-policy-authoring.zh-CN.md)。 |
 | [Sync drift](./guides/sync-drift.md) | 走读当前 `sync diff`、`sync status`、`sync commit` 和 `sync revert` loop。中文：[zh-CN](./guides/sync-drift.zh-CN.md)。 |
+| [Sync operations runbook](./guides/sync-operations-runbook.md) | 把 `sync diff`、`sync status` 和 `operatorAction` 转成告警、dashboard、工单和修复入口字段。中文：[zh-CN](./guides/sync-operations-runbook.zh-CN.md)。 |
 | [Cilium packaging](./guides/cilium-packaging.md) | 展示当前 Cilium package 从 package directory 到 OCI image、BOM 和 render output 的流程。中文：[zh-CN](./guides/cilium-packaging.zh-CN.md)。 |
 | [Grafana with KubeBlocks](./guides/grafana-kubeblocks-example.md) | 展示包含 database 和 Secret boundary 的 stateful application packaging 示例。中文：[zh-CN](./guides/grafana-kubeblocks-example.zh-CN.md)。 |
 | [Derived distribution](./guides/derived-distribution.md) | 说明 cluster 如何通过 derived BOM 和 forked package revisions 偏离 shared baseline。中文：[zh-CN](./guides/derived-distribution.zh-CN.md)。 |
@@ -74,8 +75,9 @@
 3. 阅读 [Distribution and config sync](./architecture/distribution-and-config-sync.md) 理解顶层模型。
 4. 阅读 [Reconcile and ownership](./architecture/reconcile-and-ownership.md)、[Materialization and drift](./architecture/materialization-and-drift.md) 和 [Release and promotion](./architecture/release-and-promotion.md) 理解聚焦子设计。
 5. 使用 [Day 0 install](./guides/day-0-install.md)、[Controller install](./guides/controller-install.md)、[BOM and channel](./guides/bom-and-channel.md)、[Local repo and secret](./guides/local-repo-and-secret.md) 和 [Sync drift](./guides/sync-drift.md) 完成操作流程。
-6. 跟随 drift walkthrough 时使用 [Sync drift minimal example](./examples/sync-drift-minimal/README.md)。
-7. 使用 [Distribution implementation plan](./plans/distribution-implementation-plan.md) 了解 repo-scoped execution sequencing。
+6. 使用 [Sync operations runbook](./guides/sync-operations-runbook.md) 把 drift 输出转成告警、dashboard、工单和修复路径。
+7. 跟随 drift walkthrough 时使用 [Sync drift minimal example](./examples/sync-drift-minimal/README.md)。
+8. 使用 [Distribution implementation plan](./plans/distribution-implementation-plan.md) 了解 repo-scoped execution sequencing。
 
 ## Notes
 

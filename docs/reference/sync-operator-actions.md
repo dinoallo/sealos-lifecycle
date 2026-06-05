@@ -28,6 +28,8 @@ model behind these actions, read
   [Local patch policy authoring](../guides/local-patch-policy-authoring.md)
 - Current operator loop walkthrough:
   [Sync drift](../guides/sync-drift.md)
+- Alert, dashboard, ticket, and repair-entry runbook:
+  [Sync operations runbook](../guides/sync-operations-runbook.md)
 - Example `sync diff` snapshot:
   [docs/examples/sync-drift-minimal/sync-diff.example.yaml](../examples/sync-drift-minimal/sync-diff.example.yaml)
 - Example `sync status` snapshot:

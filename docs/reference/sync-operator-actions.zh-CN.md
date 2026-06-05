@@ -26,6 +26,8 @@ Draft
   [Local patch policy authoring](../guides/local-patch-policy-authoring.md)
 - 当前 operator loop walkthrough：
   [Sync drift](../guides/sync-drift.md)
+- 告警、dashboard、工单和修复入口 runbook：
+  [Sync operations runbook](../guides/sync-operations-runbook.md)
 - 示例 `sync diff` snapshot：
   [docs/examples/sync-drift-minimal/sync-diff.example.yaml](../examples/sync-drift-minimal/sync-diff.example.yaml)
 - 示例 `sync status` snapshot：
