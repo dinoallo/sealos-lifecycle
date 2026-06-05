@@ -132,18 +132,24 @@ jobs:
             --release-source "${release_source}" \
             --release-line "${release_line}" \
             --channel "${release_channel}" >"${WORKDIR}/render.yaml"
+          awk -F': ' '$1 == "bundlePath" { print $2; exit }' "${WORKDIR}/render.yaml" >"${WORKDIR}/bundle.path"
+          awk -F': ' '$1 == "appliedRevisionPath" { print $2; exit }' "${WORKDIR}/render.yaml" >"${WORKDIR}/applied-revision.path"
           cat "${WORKDIR}/render.yaml"
 
       - name: Validate rendered state files
         shell: bash
         run: |
           set -euo pipefail
-          bundle_dir="${WORKDIR}/runtime/${CLUSTER_NAME}/distribution/bundles/current"
-          test -f "${bundle_dir}/bundle.yaml"
-          test -f "${WORKDIR}/runtime/${CLUSTER_NAME}/distribution/applied-revision.yaml"
-          grep -q 'requestedTarget:' "${WORKDIR}/runtime/${CLUSTER_NAME}/distribution/applied-revision.yaml"
-          grep -q 'resolvedTarget:' "${WORKDIR}/runtime/${CLUSTER_NAME}/distribution/applied-revision.yaml"
-          grep -q 'releaseChannelLookup' "${WORKDIR}/runtime/${CLUSTER_NAME}/distribution/applied-revision.yaml"
+          bundle_dir="$(cat "${WORKDIR}/bundle.path")"
+          applied_revision="$(cat "${WORKDIR}/applied-revision.path")"
+          printf 'bundle_dir=%s\n' "${bundle_dir}"
+          printf 'applied_revision=%s\n' "${applied_revision}"
+          sudo test -f "${bundle_dir}/bundle.yaml"
+          sudo test -f "${applied_revision}"
+          sudo sed -n '1,120p' "${applied_revision}"
+          sudo grep -q 'requestedTarget:' "${applied_revision}"
+          sudo grep -q 'resolvedTarget:' "${applied_revision}"
+          sudo grep -q 'kind: releaseChannelLookup' "${applied_revision}"
 
       - name: Stop local package registry
         if: ${{ always() }}
