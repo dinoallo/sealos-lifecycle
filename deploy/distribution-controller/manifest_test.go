@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -248,6 +249,87 @@ func TestDistributionControllerDeploymentContract(t *testing.T) {
 	}
 }
 
+func TestDistributionControllerProductionHostAgentOverlay(t *testing.T) {
+	t.Parallel()
+
+	objects := kustomizeObjects(t, filepath.Join("overlays", "production-host-agent"))
+	var deployment *appsv1.Deployment
+	var role *rbacv1.Role
+	for _, object := range objects {
+		switch typed := object.(type) {
+		case *appsv1.Deployment:
+			if typed.Name == "sealos-distribution-controller" {
+				deployment = typed
+			}
+		case *rbacv1.Role:
+			if typed.Name == "sealos-distribution-controller" {
+				role = typed
+			}
+		}
+	}
+	if deployment == nil {
+		t.Fatal("production-host-agent overlay did not render controller Deployment")
+	}
+	if role == nil {
+		t.Fatal("production-host-agent overlay did not render controller Role")
+	}
+	if got, want := deployment.Labels["distribution.sealos.io/install-profile"], "production-host-agent"; got != want {
+		t.Fatalf("deployment install-profile label = %q, want %q", got, want)
+	}
+	if got, want := deployment.Annotations["distribution.sealos.io/host-tool-contract"], "kubectl,systemctl,tar,sh"; got != want {
+		t.Fatalf("deployment host-tool-contract = %q, want %q", got, want)
+	}
+	if got, want := deployment.Spec.Template.Labels["distribution.sealos.io/install-profile"], "production-host-agent"; got != want {
+		t.Fatalf("pod install-profile label = %q, want %q", got, want)
+	}
+	if got, want := deployment.Spec.Template.Spec.NodeSelector["sealos.io/distribution-controller"], "true"; got != want {
+		t.Fatalf("node selector = %q, want %q", got, want)
+	}
+	if got, want := deployment.Spec.Template.Spec.PriorityClassName, "system-cluster-critical"; got != want {
+		t.Fatalf("priorityClassName = %q, want %q", got, want)
+	}
+	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("init container count = %d, want 1", len(deployment.Spec.Template.Spec.InitContainers))
+	}
+	initContainer := deployment.Spec.Template.Spec.InitContainers[0]
+	if got, want := initContainer.Name, "host-tool-preflight"; got != want {
+		t.Fatalf("init container name = %q, want %q", got, want)
+	}
+	preflightScript := strings.Join(initContainer.Args, "\n")
+	for _, want := range []string{
+		"kubectl systemctl tar sh",
+		"/host/etc/kubernetes/admin.conf",
+		"/var/lib/sealos",
+	} {
+		if !strings.Contains(preflightScript, want) {
+			t.Fatalf("host-tool-preflight missing %q: %s", want, preflightScript)
+		}
+	}
+	if initContainer.SecurityContext == nil ||
+		initContainer.SecurityContext.AllowPrivilegeEscalation == nil ||
+		*initContainer.SecurityContext.AllowPrivilegeEscalation {
+		t.Fatal("host-tool-preflight must disable privilege escalation")
+	}
+	container := deployment.Spec.Template.Spec.Containers[0]
+	if got, want := container.ImagePullPolicy, corev1.PullAlways; got != want {
+		t.Fatalf("controller imagePullPolicy = %q, want %q", got, want)
+	}
+	if !envVarEquals(container.Env, "SEALOS_DISTRIBUTION_CONTROLLER_PROFILE", "production-host-agent") {
+		t.Fatalf("controller profile env missing: %v", container.Env)
+	}
+	if container.Resources.Requests.Cpu().IsZero() || container.Resources.Requests.Memory().IsZero() {
+		t.Fatalf("controller resource requests must be set: %#v", container.Resources)
+	}
+	if container.Resources.Limits.Cpu().IsZero() || container.Resources.Limits.Memory().IsZero() {
+		t.Fatalf("controller resource limits must be set: %#v", container.Resources)
+	}
+	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets", "distributionrolloutpolicies"}, []string{"get", "list", "watch"})
+	assertRule(t, role.Rules, []string{"distribution.sealos.io"}, []string{"distributiontargets/status"}, []string{"get", "patch", "update"})
+	if grantsClusterWideWrites(role.Rules) {
+		t.Fatalf("production overlay RBAC grants unexpected broad writes: %#v", role.Rules)
+	}
+}
+
 func TestDistributionControllerImageDockerfileContract(t *testing.T) {
 	t.Parallel()
 
@@ -368,6 +450,9 @@ func TestDistributionControllerReleaseAndE2EEntrypoints(t *testing.T) {
 		},
 		filepath.Join("..", "..", "scripts", "distribution-controller", "render-release-bundle.sh"): {
 			"kubectl kustomize",
+			"production-host-agent",
+			"--profile",
+			"--manifest-dir",
 			"docker build",
 			"install.yaml",
 			"labring/sealos-agent:dev",
@@ -494,6 +579,13 @@ func loadManifestObjects(t *testing.T, paths ...string) []runtime.Object {
 	return objects
 }
 
+func kustomizeObjects(t *testing.T, relPath string) []runtime.Object {
+	t.Helper()
+
+	data := runCommandOutput(t, "kubectl", "kustomize", relPath)
+	return decodeManifestObjects(t, relPath, data)
+}
+
 func readManifest(t *testing.T, relPath string) []byte {
 	t.Helper()
 
@@ -502,6 +594,44 @@ func readManifest(t *testing.T, relPath string) []byte {
 		t.Fatalf("read %s: %v", relPath, err)
 	}
 	return data
+}
+
+func decodeManifestObjects(t *testing.T, label string, data []byte) []runtime.Object {
+	t.Helper()
+
+	decoder := newManifestDecoder(t)
+	objects := make([]runtime.Object, 0)
+	yamlDecoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+	for {
+		var raw runtime.RawExtension
+		err := yamlDecoder.Decode(&raw)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("split %s: %v", label, err)
+		}
+		if len(bytes.TrimSpace(raw.Raw)) == 0 {
+			continue
+		}
+		object, _, err := decoder.Decode(raw.Raw, nil, nil)
+		if err != nil {
+			t.Fatalf("decode %s: %v", label, err)
+		}
+		objects = append(objects, object)
+	}
+	return objects
+}
+
+func runCommandOutput(t *testing.T, name string, args ...string) []byte {
+	t.Helper()
+
+	command := exec.Command(name, args...)
+	out, err := command.Output()
+	if err != nil {
+		t.Fatalf("%s %v failed: %v", name, args, err)
+	}
+	return out
 }
 
 func newManifestDecoder(t *testing.T) runtime.Decoder {
@@ -576,6 +706,30 @@ func pathEnvIncludesHostBins(env []corev1.EnvVar) bool {
 		}
 		parts := strings.Split(item.Value, ":")
 		return contains(parts, "/host/usr/bin") && contains(parts, "/host/bin")
+	}
+	return false
+}
+
+func envVarEquals(env []corev1.EnvVar, name, value string) bool {
+	for _, item := range env {
+		if item.Name == name && item.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func grantsClusterWideWrites(rules []rbacv1.PolicyRule) bool {
+	for _, rule := range rules {
+		if len(rule.APIGroups) == 1 && rule.APIGroups[0] == "distribution.sealos.io" &&
+			len(rule.Resources) == 1 && rule.Resources[0] == "*" {
+			return true
+		}
+		for _, verb := range rule.Verbs {
+			if verb == "*" || verb == "delete" || verb == "deletecollection" {
+				return true
+			}
+		}
 	}
 	return false
 }

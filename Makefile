@@ -113,6 +113,12 @@ Options:
                    Output directory for render-distribution-controller-bundle.
                    Default is dist/distribution-controller.
 
+  DISTRIBUTION_CONTROLLER_PROFILE
+                   Install profile used by render-distribution-controller-bundle
+                   and verify-distribution-controller-real-cluster.
+                   Supported values: host-agent, production-host-agent.
+                   Default is host-agent.
+
   DISTRIBUTION_CONTROLLER_PUSH_IMAGE
                    Set to 1 with build-distribution-controller-image to push the
                    built image after docker build.
@@ -319,6 +325,7 @@ render-distribution-controller-bundle:
 	fi; \
 	scripts/distribution-controller/render-release-bundle.sh \
 		--image "$(DISTRIBUTION_CONTROLLER_IMAGE)" \
+		$(if $(DISTRIBUTION_CONTROLLER_PROFILE),--profile "$(DISTRIBUTION_CONTROLLER_PROFILE)") \
 		$(if $(DISTRIBUTION_CONTROLLER_BUNDLE_DIR),--output-dir "$(DISTRIBUTION_CONTROLLER_BUNDLE_DIR)")
 
 ## verify-distribution-controller-manifests: Validate controller manifests and controller wiring.
@@ -341,6 +348,7 @@ verify-distribution-controller-real-cluster:
 	fi; \
 	scripts/distribution-controller/real-cluster-smoke.sh \
 		--image "$(DISTRIBUTION_CONTROLLER_IMAGE)" \
+		$(if $(DISTRIBUTION_CONTROLLER_PROFILE),--profile "$(DISTRIBUTION_CONTROLLER_PROFILE)") \
 		--apply \
 		$(DISTRIBUTION_CONTROLLER_SMOKE_ARGS)
 

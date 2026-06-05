@@ -6,8 +6,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 IMAGE="${DISTRIBUTION_CONTROLLER_IMAGE:-}"
 OUTPUT_DIR="${DISTRIBUTION_CONTROLLER_BUNDLE_DIR:-${REPO_ROOT}/dist/distribution-controller}"
-BASE_DIR="${REPO_ROOT}/deploy/distribution-controller/base"
-EXAMPLES_DIR="${REPO_ROOT}/deploy/distribution-controller/examples"
+PROFILE="${DISTRIBUTION_CONTROLLER_PROFILE:-host-agent}"
+MANIFEST_DIR="${DISTRIBUTION_CONTROLLER_MANIFEST_DIR:-${REPO_ROOT}/deploy/distribution-controller}"
 BUILD_IMAGE=0
 PUSH_IMAGE=0
 PLATFORM="${PLATFORM:-linux_$(go env GOARCH)}"
@@ -22,6 +22,9 @@ Renders a distribution controller install bundle under dist/ by default.
 Options:
   --image IMAGE       Controller image to write into install.yaml.
   --output-dir DIR    Bundle output directory. Default: dist/distribution-controller.
+  --profile NAME      Install profile to render. Supported values:
+                       host-agent, production-host-agent. Default: host-agent.
+  --manifest-dir DIR  Manifest directory. Default: deploy/distribution-controller.
   --platform NAME     Build platform used when --build-image is set. Default: linux_$(go env GOARCH).
   --build-image       Build the sealos-agent binary and local controller image before rendering.
   --push-image        Push the built controller image. Requires --build-image.
@@ -52,6 +55,14 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIR="${2:?missing value for --output-dir}"
       shift 2
       ;;
+    --profile)
+      PROFILE="${2:?missing value for --profile}"
+      shift 2
+      ;;
+    --manifest-dir)
+      MANIFEST_DIR="${2:?missing value for --manifest-dir}"
+      shift 2
+      ;;
     --platform)
       PLATFORM="${2:?missing value for --platform}"
       shift 2
@@ -75,8 +86,25 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${IMAGE}" ]] || fail "--image or DISTRIBUTION_CONTROLLER_IMAGE is required"
+BASE_DIR="${MANIFEST_DIR}/base"
+OVERLAYS_DIR="${MANIFEST_DIR}/overlays"
+EXAMPLES_DIR="${MANIFEST_DIR}/examples"
 [[ -d "${BASE_DIR}" ]] || fail "base manifest directory not found: ${BASE_DIR}"
+[[ -d "${EXAMPLES_DIR}" ]] || fail "examples manifest directory not found: ${EXAMPLES_DIR}"
 command -v kubectl >/dev/null 2>&1 || fail "required command not found: kubectl"
+
+case "${PROFILE}" in
+  host-agent)
+    PROFILE_SOURCE="base"
+    ;;
+  production-host-agent)
+    [[ -d "${OVERLAYS_DIR}/production-host-agent" ]] || fail "production-host-agent overlay not found"
+    PROFILE_SOURCE="overlays/production-host-agent"
+    ;;
+  *)
+    fail "unsupported --profile ${PROFILE}; supported values: host-agent, production-host-agent"
+    ;;
+esac
 
 IMAGE_BASENAME="${IMAGE##*/}"
 if [[ "${IMAGE_BASENAME}" != *:* || "${IMAGE}" == *@* ]]; then
@@ -107,19 +135,21 @@ fi
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sealos-controller-bundle.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-mkdir -p "${TMP_DIR}/overlay"
-cp "${BASE_DIR}/namespace.yaml" "${TMP_DIR}/overlay/namespace.yaml"
-cp "${BASE_DIR}/crd.yaml" "${TMP_DIR}/overlay/crd.yaml"
-cp "${BASE_DIR}/rbac.yaml" "${TMP_DIR}/overlay/rbac.yaml"
-cp "${BASE_DIR}/deployment.yaml" "${TMP_DIR}/overlay/deployment.yaml"
-cat > "${TMP_DIR}/overlay/kustomization.yaml" <<EOF
+mkdir -p "${TMP_DIR}/input/base"
+cp "${BASE_DIR}/namespace.yaml" "${TMP_DIR}/input/base/namespace.yaml"
+cp "${BASE_DIR}/crd.yaml" "${TMP_DIR}/input/base/crd.yaml"
+cp "${BASE_DIR}/rbac.yaml" "${TMP_DIR}/input/base/rbac.yaml"
+cp "${BASE_DIR}/deployment.yaml" "${TMP_DIR}/input/base/deployment.yaml"
+cp "${BASE_DIR}/kustomization.yaml" "${TMP_DIR}/input/base/kustomization.yaml"
+if [[ "${PROFILE}" == "production-host-agent" ]]; then
+  mkdir -p "${TMP_DIR}/input/overlays"
+  cp -R "${OVERLAYS_DIR}/production-host-agent" "${TMP_DIR}/input/overlays/production-host-agent"
+fi
+cat > "${TMP_DIR}/input/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - namespace.yaml
-  - crd.yaml
-  - rbac.yaml
-  - deployment.yaml
+  - ${PROFILE_SOURCE}
 images:
   - name: labring/sealos-agent:dev
     newName: ${IMAGE_NAME}
@@ -129,20 +159,49 @@ EOF
 rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}/examples"
 
-log "render install bundle"
-kubectl kustomize "${TMP_DIR}/overlay" > "${OUTPUT_DIR}/install.yaml"
+log "render ${PROFILE} install bundle"
+kubectl kustomize "${TMP_DIR}/input" > "${OUTPUT_DIR}/install.yaml"
 cp "${BASE_DIR}/namespace.yaml" "${OUTPUT_DIR}/namespace.yaml"
 cp "${BASE_DIR}/crd.yaml" "${OUTPUT_DIR}/crd.yaml"
 cp "${BASE_DIR}/rbac.yaml" "${OUTPUT_DIR}/rbac.yaml"
-cp "${BASE_DIR}/deployment.yaml" "${OUTPUT_DIR}/deployment.template.yaml"
+awk '
+  /^---$/ {
+    if (emit) {
+      print doc
+      found = 1
+      exit
+    }
+    doc = ""
+    emit = 0
+    next
+  }
+  {
+    doc = doc $0 ORS
+    if ($0 == "kind: Deployment") {
+      emit = 1
+    }
+  }
+  END {
+    if (!found && emit) {
+      print doc
+    }
+  }
+' "${OUTPUT_DIR}/install.yaml" > "${OUTPUT_DIR}/deployment.template.yaml"
 cp "${EXAMPLES_DIR}"/*.yaml "${OUTPUT_DIR}/examples/"
+if [[ "${PROFILE}" == "production-host-agent" ]]; then
+  mkdir -p "${OUTPUT_DIR}/overlays/production-host-agent"
+  cp "${OVERLAYS_DIR}/production-host-agent"/*.yaml "${OUTPUT_DIR}/overlays/production-host-agent/"
+  cp "${OVERLAYS_DIR}/production-host-agent/README.md" "${OUTPUT_DIR}/overlays/production-host-agent/README.md"
+fi
 
 cat > "${OUTPUT_DIR}/README.md" <<EOF
 # Sealos Distribution Controller Bundle
 
-This bundle was rendered from \`deploy/distribution-controller/base\`.
+This bundle was rendered from \`deploy/distribution-controller\` with the
+selected install profile.
 
 - Controller image: \`${IMAGE}\`
+- Install profile: \`${PROFILE}\`
 - Install manifest: \`install.yaml\`
 - CRDs: \`crd.yaml\`
 - RBAC: \`rbac.yaml\`

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 IMAGE="${DISTRIBUTION_CONTROLLER_IMAGE:-}"
+PROFILE="${DISTRIBUTION_CONTROLLER_PROFILE:-host-agent}"
 MANIFEST_DIR="${DISTRIBUTION_CONTROLLER_MANIFEST_DIR:-${REPO_ROOT}/deploy/distribution-controller}"
 KUBECONFIG_PATH="${KUBECONFIG:-}"
 APPLY=0
@@ -24,6 +25,8 @@ cluster. Without --apply, the script only renders manifests locally.
 
 Options:
   --image IMAGE          Controller image to install.
+  --profile NAME         Install profile to render. Supported values:
+                         host-agent, production-host-agent. Default: host-agent.
   --manifest-dir DIR     Manifest directory. Default: deploy/distribution-controller.
   --kubeconfig PATH      Kubeconfig to use. Defaults to KUBECONFIG/current context.
   --timeout DURATION     Rollout timeout. Default: 120s.
@@ -68,6 +71,7 @@ collect_diagnostics() {
   {
     printf 'exitCode: %s\n' "${exit_code}"
     printf 'image: %s\n' "${IMAGE}"
+    printf 'profile: %s\n' "${PROFILE}"
     printf 'manifestDir: %s\n' "${MANIFEST_DIR}"
     printf 'timeout: %s\n' "${TIMEOUT}"
     printf 'keepResources: %s\n' "${KEEP_RESOURCES}"
@@ -100,6 +104,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --image)
       IMAGE="${2:?missing value for --image}"
+      shift 2
+      ;;
+    --profile)
+      PROFILE="${2:?missing value for --profile}"
       shift 2
       ;;
     --manifest-dir)
@@ -141,17 +149,17 @@ done
 command -v kubectl >/dev/null 2>&1 || fail "required command not found: kubectl"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sealos-controller-smoke.XXXXXX")"
-DEPLOYMENT="${TMP_DIR}/deployment.yaml"
+BUNDLE_DIR="${TMP_DIR}/bundle"
+DEPLOYMENT="${BUNDLE_DIR}/deployment.template.yaml"
 POLICY="${TMP_DIR}/distribution-rollout-policy.yaml"
 TARGET="${TMP_DIR}/distribution-target.yaml"
 
-kubectl -n sealos-system set image \
-  -f "${MANIFEST_DIR}/base/deployment.yaml" \
-  "sealos-agent=${IMAGE}" \
-  --local -o yaml > "${DEPLOYMENT}"
-
-log "render install manifests"
-kubectl kustomize "${MANIFEST_DIR}/base" >/dev/null
+log "render ${PROFILE} install manifests"
+"${REPO_ROOT}/scripts/distribution-controller/render-release-bundle.sh" \
+  --image "${IMAGE}" \
+  --profile "${PROFILE}" \
+  --manifest-dir "${MANIFEST_DIR}" \
+  --output-dir "${BUNDLE_DIR}" >/dev/null
 
 if (( APPLY == 0 )); then
   log "cluster validation skipped because --apply was not set"
@@ -164,11 +172,11 @@ kubectl_cmd version --client=true >/dev/null
 kubectl_cmd cluster-info >/dev/null
 
 log "install controller manifests"
-kubectl_cmd apply -f "${MANIFEST_DIR}/base/namespace.yaml"
-kubectl_cmd apply -f "${MANIFEST_DIR}/base/crd.yaml"
+kubectl_cmd apply -f "${BUNDLE_DIR}/namespace.yaml"
+kubectl_cmd apply -f "${BUNDLE_DIR}/crd.yaml"
 kubectl_cmd wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
 kubectl_cmd wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
-kubectl_cmd apply -f "${MANIFEST_DIR}/base/rbac.yaml"
+kubectl_cmd apply -f "${BUNDLE_DIR}/rbac.yaml"
 kubectl_cmd apply -f "${DEPLOYMENT}"
 kubectl_cmd -n sealos-system rollout status deploy/sealos-distribution-controller --timeout="${TIMEOUT}"
 

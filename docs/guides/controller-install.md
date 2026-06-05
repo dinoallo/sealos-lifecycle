@@ -15,6 +15,13 @@ install:
 - the `sealos-distribution-controller` service account, role, and role binding
 - a `sealos-agent --controller` deployment
 
+There are two install profiles:
+
+| Profile | Path | Intended use |
+| --- | --- | --- |
+| `host-agent` | `deploy/distribution-controller/base` | Default development and compatibility profile. It is the current minimal privileged host-mount agent path. |
+| `production-host-agent` | `deploy/distribution-controller/overlays/production-host-agent` | Production hardening profile for trusted lifecycle control-plane nodes. It keeps the same privileged host-agent execution model, but adds an explicit node label gate, host tool preflight, resource requests and limits, profile labels, and release-bundle rendering support. |
+
 The controller watches `DistributionTarget` objects in `sealos-system`, maps
 each target to one existing agent reconcile pass, and writes an explicit status
 state machine: `status.phase`, `Ready` and `Degraded` conditions, retry count,
@@ -56,6 +63,20 @@ deployment therefore runs privileged and points `--kubeconfig` at
 tolerates the matching `NoSchedule` taints so that the host admin kubeconfig is
 present.
 
+For production installs, use the `production-host-agent` profile and label only
+the trusted lifecycle node that should run the controller:
+
+```bash
+kubectl label node <control-plane-node> sealos.io/distribution-controller=true
+```
+
+The production profile runs a `host-tool-preflight` init container before the
+controller starts. The preflight requires `kubectl`, `systemctl`, `tar`, `sh`,
+`/host/etc/kubernetes/admin.conf`, and `/var/lib/sealos` to be available through
+the image or mounted host paths. Keep those dependencies stable across upgrades
+and treat changes to the host tool list as part of the controller release
+checklist.
+
 ## Install The Controller
 
 For a tagged release, render a release bundle with the published controller
@@ -70,6 +91,16 @@ The rendered bundle is written to `dist/distribution-controller/` by default.
 Install it with:
 
 ```bash
+kubectl apply -f dist/distribution-controller/install.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+For a production install, render the hardening profile explicitly:
+
+```bash
+make render-distribution-controller-bundle \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT \
+  DISTRIBUTION_CONTROLLER_PROFILE=production-host-agent
 kubectl apply -f dist/distribution-controller/install.yaml
 kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
 ```
@@ -145,6 +176,11 @@ make verify-distribution-controller-real-cluster \
   DISTRIBUTION_CONTROLLER_SMOKE_ARGS="--kubeconfig ~/.kube/config --artifact-dir /tmp/controller-smoke"
 ```
 
+To smoke the production profile, add
+`DISTRIBUTION_CONTROLLER_PROFILE=production-host-agent` after the target node
+has the `sealos.io/distribution-controller=true` label and the host tool
+preflight dependencies are present.
+
 When the smoke fails after cluster access begins, the script writes diagnostics
 under the requested artifact directory: controller Deployment and Pod
 descriptions, recent controller logs, CRD state, smoke target/policy YAML, and
@@ -181,6 +217,23 @@ kubectl -n sealos-system set image \
   sealos-agent=example.com/sealos-agent:vNEXT \
   --local -o yaml > /tmp/sealos-distribution-controller-deployment.yaml
 kubectl apply -f /tmp/sealos-distribution-controller-deployment.yaml
+kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
+```
+
+For production profile upgrades, render the new release bundle with the same
+profile and apply the rendered files in the same order. Verify that the
+`sealos.io/distribution-controller=true` node label still points at the intended
+control-plane node before rolling the Deployment:
+
+```bash
+make render-distribution-controller-bundle \
+  DISTRIBUTION_CONTROLLER_IMAGE=ghcr.io/labring/sealos-agent:vNEXT \
+  DISTRIBUTION_CONTROLLER_PROFILE=production-host-agent
+kubectl apply -f dist/distribution-controller/crd.yaml
+kubectl wait --for=condition=Established crd/distributiontargets.distribution.sealos.io --timeout=60s
+kubectl wait --for=condition=Established crd/distributionrolloutpolicies.distribution.sealos.io --timeout=60s
+kubectl apply -f dist/distribution-controller/rbac.yaml
+kubectl apply -f dist/distribution-controller/deployment.template.yaml
 kubectl -n sealos-system rollout status deploy/sealos-distribution-controller --timeout=120s
 ```
 
@@ -273,3 +326,9 @@ updated target or policy. It does not add controller-driven promotion
 automation or durable per-package rollout cursors.
 Local channel files can be advanced separately with `sealos sync promote`; the
 controller still delegates to the existing BOM-driven render/apply agent path.
+
+The controller RBAC intentionally stays namespace-scoped to `sealos-system`: it
+reads `DistributionTarget` and `DistributionRolloutPolicy`, updates
+`DistributionTarget/status`, writes leader-election leases, and emits events.
+Kubernetes object apply privileges come from the kubeconfig selected by the
+target or deployment default, not from the controller service account RBAC.
