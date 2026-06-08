@@ -38,4 +38,4 @@ spec:
       phase: healthcheck
       target: cluster
       path: hooks/healthcheck.sh
-      timeoutSeconds: 180
+      timeoutSeconds: 660

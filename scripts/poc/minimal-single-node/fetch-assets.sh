@@ -109,8 +109,17 @@ require_file() {
 download() {
   local url="$1"
   local out="$2"
+  local tmp="${out}.tmp"
+
+  if [[ -s "${out}" ]]; then
+    log "using cached ${out}"
+    return
+  fi
+
   log "downloading ${url}"
-  curl -fsSL "${url}" -o "${out}"
+  rm -f -- "${tmp}"
+  curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL "${url}" -o "${tmp}"
+  mv "${tmp}" "${out}"
 }
 
 download_kubernetes_binaries() {

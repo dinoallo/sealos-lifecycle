@@ -1239,7 +1239,14 @@ func (e *bundleExecutor) applyManifest(step hydrate.RenderedStep) error {
 }
 
 func (e *bundleExecutor) runLocalHook(component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
-	hookPath, err := e.resolveBundleStepPathForHost(localExecutionHost, step)
+	return e.runLocalHookForHost(localExecutionHost, component, step)
+}
+
+func (e *bundleExecutor) runLocalHookForHost(host string, component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
+	if strings.TrimSpace(host) == "" {
+		host = localExecutionHost
+	}
+	hookPath, err := e.resolveBundleStepPathForHost(host, step)
 	if err != nil {
 		return err
 	}
@@ -1256,12 +1263,12 @@ func (e *bundleExecutor) runLocalHook(component hydrate.RenderedComponent, step 
 		}
 	}
 
-	componentRoot, err := e.resolveComponentRootForHost(localExecutionHost, component)
+	componentRoot, err := e.resolveComponentRootForHost(host, component)
 	if err != nil {
 		return err
 	}
 
-	env := e.hookEnvironment(localExecutionHost, componentRoot, e.bundlePath)
+	env := e.hookEnvironment(host, componentRoot, e.bundlePath)
 	e.logf("running hook %q for component %q", step.Name, component.Name)
 	args := append([]string{hookPath}, step.Args...)
 	return e.runCommand(step.TimeoutSeconds, env, args[0], args[1:]...)
@@ -1269,7 +1276,7 @@ func (e *bundleExecutor) runLocalHook(component hydrate.RenderedComponent, step 
 
 func (e *bundleExecutor) runHookOnHost(host string, component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
 	if isLocalExecutionHost(host) {
-		return e.runLocalHook(component, step)
+		return e.runLocalHookForHost(host, component, step)
 	}
 
 	hookPath, err := e.resolveBundleStepPathForHost(host, step)

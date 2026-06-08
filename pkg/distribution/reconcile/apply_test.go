@@ -1321,6 +1321,73 @@ func TestApplyUsesBundleExecutionTopologySnapshotWithClusterfileRemoteExecutor(t
 	}
 }
 
+func TestRunHookOnLocalExecutionHostPreservesTargetIdentity(t *testing.T) {
+	tmpDir := t.TempDir()
+	bundleDir := filepath.Join(tmpDir, "bundle")
+	logPath := filepath.Join(tmpDir, "hook.env")
+	t.Setenv("TEST_LOG", logPath)
+
+	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"), `#!/bin/sh
+{
+  printf 'TARGET_HOST=%s\n' "$TARGET_HOST"
+  printf 'TARGET_HOST_IP=%s\n' "$TARGET_HOST_IP"
+  printf 'TARGET_IS_FIRST_MASTER=%s\n' "$TARGET_IS_FIRST_MASTER"
+  printf 'TARGET_NODE_ROLES=%s\n' "$TARGET_NODE_ROLES"
+} >"$TEST_LOG"
+`)
+
+	executor := &bundleExecutor{
+		clusterName: "cluster-a",
+		bundlePath:  bundleDir,
+		topology: &clusterExecutionTopology{
+			clusterName: "cluster-a",
+			allNodes:    []string{"127.0.0.1:22", "10.0.0.11:22"},
+			firstMaster: "127.0.0.1:22",
+			hostRoles: map[string][]string{
+				"127.0.0.1:22": {v1beta1.MASTER},
+				"10.0.0.11:22": {v1beta1.NODE},
+			},
+		},
+	}
+	executor.applyDefaults()
+
+	if err := executor.runHookOnHost(
+		"127.0.0.1:22",
+		hydrate.RenderedComponent{
+			Name:        "kubernetes",
+			PackageName: "kubernetes-rootfs",
+			RootPath:    "components/kubernetes/files",
+		},
+		hydrate.RenderedStep{
+			Name:           "bootstrap",
+			Kind:           hydrate.StepHook,
+			BundlePath:     "components/kubernetes/files/hooks/bootstrap.sh",
+			SourcePath:     "hooks/bootstrap.sh",
+			HookPhase:      packageformat.PhaseBootstrap,
+			Target:         packageformat.TargetAllNodes,
+			TimeoutSeconds: 5,
+		},
+	); err != nil {
+		t.Fatalf("runHookOnHost() error = %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(logPath) error = %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"TARGET_HOST=127.0.0.1:22\n",
+		"TARGET_HOST_IP=127.0.0.1\n",
+		"TARGET_IS_FIRST_MASTER=true\n",
+		"TARGET_NODE_ROLES=master\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("hook environment missing %q\ngot:\n%s", want, got)
+		}
+	}
+}
+
 func TestApplyRespectsExecutionTargetsOnMultiNodeCluster(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	constants.DefaultRuntimeRootDir = t.TempDir()
