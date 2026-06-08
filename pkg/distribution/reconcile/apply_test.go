@@ -1327,14 +1327,18 @@ func TestRunHookOnLocalExecutionHostPreservesTargetIdentity(t *testing.T) {
 	logPath := filepath.Join(tmpDir, "hook.env")
 	t.Setenv("TEST_LOG", logPath)
 
-	writeExecutable(t, filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"), `#!/bin/sh
+	writeExecutable(
+		t,
+		filepath.Join(bundleDir, "components", "kubernetes", "files", "hooks", "bootstrap.sh"),
+		`#!/bin/sh
 {
   printf 'TARGET_HOST=%s\n' "$TARGET_HOST"
   printf 'TARGET_HOST_IP=%s\n' "$TARGET_HOST_IP"
   printf 'TARGET_IS_FIRST_MASTER=%s\n' "$TARGET_IS_FIRST_MASTER"
   printf 'TARGET_NODE_ROLES=%s\n' "$TARGET_NODE_ROLES"
 } >"$TEST_LOG"
-`)
+`,
+	)
 
 	executor := &bundleExecutor{
 		clusterName: "cluster-a",

@@ -1242,7 +1242,11 @@ func (e *bundleExecutor) runLocalHook(component hydrate.RenderedComponent, step 
 	return e.runLocalHookForHost(localExecutionHost, component, step)
 }
 
-func (e *bundleExecutor) runLocalHookForHost(host string, component hydrate.RenderedComponent, step hydrate.RenderedStep) error {
+func (e *bundleExecutor) runLocalHookForHost(
+	host string,
+	component hydrate.RenderedComponent,
+	step hydrate.RenderedStep,
+) error {
 	if strings.TrimSpace(host) == "" {
 		host = localExecutionHost
 	}
