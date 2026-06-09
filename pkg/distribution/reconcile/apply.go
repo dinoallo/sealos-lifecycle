@@ -1145,7 +1145,10 @@ func (e *bundleExecutor) ensureLocalKubeconfig() error {
 	if err := os.MkdirAll(filepath.Dir(e.kubeconfigPath), 0o700); err != nil {
 		return err
 	}
-	tmpFile, err := os.CreateTemp(filepath.Dir(e.kubeconfigPath), filepath.Base(e.kubeconfigPath)+".fetch-*")
+	tmpFile, err := os.CreateTemp(
+		filepath.Dir(e.kubeconfigPath),
+		filepath.Base(e.kubeconfigPath)+".fetch-*",
+	)
 	if err != nil {
 		return err
 	}

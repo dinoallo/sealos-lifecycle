@@ -698,7 +698,11 @@ func syncCompareBundle(
 			if !syncTrackedHostPathAppliesToHost(topology, host, status.Tracked) {
 				continue
 			}
-			if syncShouldSuppressMultiNodeGeneratedBootstrapInputHostPath(topology, bundle, status.Tracked) {
+			if syncShouldSuppressMultiNodeGeneratedBootstrapInputHostPath(
+				topology,
+				bundle,
+				status.Tracked,
+			) {
 				continue
 			}
 			hostStatuses = append(hostStatuses, status)

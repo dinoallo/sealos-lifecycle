@@ -553,6 +553,7 @@ func TestRemoteRootfsApplyScriptReconcilesModeWhenContentMatches(t *testing.T) {
 	writeFile(t, filepath.Join(src, rel), "unit\n", 0o644)
 	writeFile(t, filepath.Join(dst, rel), "unit\n", 0o664)
 
+	//nolint:gosec // The script is generated from test-controlled temp paths.
 	cmd := exec.Command("/bin/bash", "-lc", remoteRootfsApplyScript(src, dst))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -663,6 +664,19 @@ exit 0
 		{IPS: []string{"10.0.0.10:22"}, Roles: []string{v1beta1.MASTER}},
 		{IPS: []string{"10.0.0.11:22"}, Roles: []string{v1beta1.NODE}},
 	})
+
+	previousNewRemoteExecutor := newApplyRemoteExecutor
+	t.Cleanup(func() {
+		newApplyRemoteExecutor = previousNewRemoteExecutor
+	})
+	fakeRemote := &fakeApplyRemoteExecutor{
+		fetchContents: map[string][]byte{
+			"10.0.0.10:22:/etc/kubernetes/admin.conf": []byte("apiVersion: v1\nkind: Config\n"),
+		},
+	}
+	newApplyRemoteExecutor = func(*clusterExecutionTopology) (applyRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
 
 	writeExecutable(
 		t,
@@ -2333,7 +2347,10 @@ exit 0
 		t.Fatalf("fetch src = %q, want %q", got, want)
 	}
 	if got := fakeRemote.fetchOps[0].dst; got == kubeconfigPath {
-		t.Fatalf("fetch dst = %q, want temporary path so existing kubeconfig can be replaced atomically", got)
+		t.Fatalf(
+			"fetch dst = %q, want temporary path so existing kubeconfig can be replaced atomically",
+			got,
+		)
 	}
 	if data, err := os.ReadFile(kubeconfigPath); err != nil ||
 		!strings.Contains(string(data), "kind: Config") {

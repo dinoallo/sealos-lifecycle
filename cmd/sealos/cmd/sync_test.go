@@ -4972,7 +4972,15 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 			t.Fatalf("rendered bundle missing %q: %v", rel, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(out.BundlePath, "components", "containerd", "files", "rootfs", "README")); !os.IsNotExist(err) {
+	readmePath := filepath.Join(
+		out.BundlePath,
+		"components",
+		"containerd",
+		"files",
+		"rootfs",
+		"README",
+	)
+	if _, err := os.Stat(readmePath); !os.IsNotExist(err) {
 		t.Fatalf("containerd rootfs README stat error = %v, want not exist", err)
 	}
 
