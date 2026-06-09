@@ -4964,13 +4964,16 @@ func TestSyncRenderCmdWithMinimalSingleNodePOC(t *testing.T) {
 	for _, rel := range []string{
 		"bundle.yaml",
 		"components/containerd/package.yaml",
-		"components/containerd/files/rootfs/README",
+		"components/containerd/files/rootfs/usr/lib/systemd/system/containerd.service",
 		"components/kubernetes/files/manifests/bootstrap/kubelet-bootstrap-rbac.yaml",
 		"components/cilium/files/manifests/cilium.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(out.BundlePath, rel)); err != nil {
 			t.Fatalf("rendered bundle missing %q: %v", rel, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(out.BundlePath, "components", "containerd", "files", "rootfs", "README")); !os.IsNotExist(err) {
+		t.Fatalf("containerd rootfs README stat error = %v, want not exist", err)
 	}
 
 	doc, err := state.LoadAppliedRevision(clusterName)
@@ -10840,6 +10843,196 @@ func TestSyncStatusCmdReportsHostPathConflicts(t *testing.T) {
 	}
 }
 
+func TestSyncStatusSuppressesGeneratedKubeadmBootstrapInputDrift(t *testing.T) {
+	previousRuntimeRoot := constants.DefaultRuntimeRootDir
+	runtimeRoot := previousRuntimeRoot
+	if runtimeRoot == "" {
+		runtimeRoot = constants.GetRuntimeRootDir(constants.AppName)
+	}
+	constants.DefaultRuntimeRootDir = runtimeRoot
+	t.Cleanup(func() {
+		constants.DefaultRuntimeRootDir = previousRuntimeRoot
+	})
+
+	previousOutput := outputSyncKubectl
+	outputSyncKubectl = func(args ...string) ([]byte, error) {
+		t.Fatalf("unexpected kubectl invocation: %s", strings.Join(args, " "))
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		outputSyncKubectl = previousOutput
+	})
+
+	localHostRoot := t.TempDir()
+	remoteHostRoot := t.TempDir()
+	if err := writeSyncRemoteHostFixture(localHostRoot, "/etc/kubernetes/kubeadm.yaml", "kind: InitConfiguration\n", 0o644); err != nil {
+		t.Fatalf("writeSyncRemoteHostFixture(local) error = %v", err)
+	}
+	if err := writeSyncRemoteHostFixture(remoteHostRoot, "/etc/kubernetes/kubeadm.yaml", "kind: JoinConfiguration\n", 0o644); err != nil {
+		t.Fatalf("writeSyncRemoteHostFixture(remote) error = %v", err)
+	}
+
+	previousTopologyLoader := loadSyncExecutionTopology
+	previousRemoteExecutor := newSyncRemoteExecutor
+	fakeRemote := &fakeSyncRemoteExecutor{
+		roots: map[string]string{
+			"10.0.0.11:22": remoteHostRoot,
+		},
+	}
+	loadSyncExecutionTopology = func(string) (*syncExecutionTopology, error) {
+		return &syncExecutionTopology{
+			allNodes:    []string{syncLocalExecutionHost, "10.0.0.11:22"},
+			firstMaster: syncLocalExecutionHost,
+			hostRoles: map[string][]string{
+				syncLocalExecutionHost: {v1beta1.MASTER},
+				"10.0.0.11:22":         {v1beta1.NODE},
+			},
+		}, nil
+	}
+	newSyncRemoteExecutor = func(*syncExecutionTopology) (syncRemoteExecutor, error) {
+		return fakeRemote, nil
+	}
+	t.Cleanup(func() {
+		loadSyncExecutionTopology = previousTopologyLoader
+		newSyncRemoteExecutor = previousRemoteExecutor
+	})
+
+	clusterName := uniqueSyncClusterName(t, "status-generated-kubeadm-input")
+	t.Cleanup(func() {
+		_ = os.RemoveAll(filepath.Join(runtimeRoot, clusterName))
+	})
+	bundleDir := t.TempDir()
+	desiredPath := filepath.Join(
+		bundleDir,
+		"components",
+		"kubernetes",
+		"files",
+		"files",
+		"etc",
+		"kubernetes",
+		"kubeadm.yaml",
+	)
+	if err := os.MkdirAll(filepath.Dir(desiredPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", desiredPath, err)
+	}
+	if err := os.WriteFile(desiredPath, []byte("kind: ClusterConfiguration\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", desiredPath, err)
+	}
+
+	bundle := &hydrate.Bundle{
+		APIVersion: "distribution.sealos.io/v1alpha1",
+		Kind:       "HydratedBundle",
+		Spec: hydrate.BundleSpec{
+			BOMName:  "minimal-single-node",
+			Revision: "rev-poc-001",
+			Channel:  bom.ChannelAlpha,
+			TrackedHostPaths: []hydrate.TrackedHostPath{{
+				HostPath:          "/etc/kubernetes/kubeadm.yaml",
+				BundlePath:        "components/kubernetes/files/files/etc/kubernetes/kubeadm.yaml",
+				Component:         "kubernetes",
+				Source:            hydrate.InventorySourceLocalInput,
+				Ownership:         hydrate.InventoryOwnershipLocal,
+				Type:              hydrate.HostPathRegularFile,
+				ProjectionClass:   hydrate.HostPathProjectionClassDirect,
+				CompareStrategy:   hydrate.HostPathCompareStrategyBytewiseFile,
+				InputName:         "kubeadm-cluster-config",
+				HostInputBindings: map[string]string{},
+			}},
+			Components: []hydrate.RenderedComponent{{
+				Name:        "kubernetes",
+				PackageName: "kubernetes-rootfs",
+				Inputs: []packageformat.Input{{
+					Name: "kubeadm-cluster-config",
+					Type: packageformat.InputConfigFile,
+					Path: "files/etc/kubernetes/kubeadm.yaml",
+				}},
+				InputBindings: map[string]string{
+					"kubeadm-cluster-config": filepath.Join(
+						t.TempDir(),
+						"inputs",
+						"kubernetes",
+						"kubeadm-cluster-config.yaml",
+					),
+				},
+				Steps: []hydrate.RenderedStep{
+					{
+						Name:        "kubeadm-defaults",
+						Kind:        hydrate.StepContent,
+						BundlePath:  "components/kubernetes/files/files/etc/kubernetes/kubeadm.yaml",
+						SourcePath:  "files/etc/kubernetes/kubeadm.yaml",
+						ContentType: packageformat.ContentFile,
+					},
+					{
+						Name:       "bootstrap",
+						Kind:       hydrate.StepHook,
+						SourcePath: "hooks/bootstrap.sh",
+						HookPhase:  packageformat.PhaseBootstrap,
+						Target:     packageformat.TargetAllNodes,
+					},
+				},
+			}},
+		},
+	}
+	if err := yamlutil.MarshalFile(filepath.Join(bundleDir, hydrate.BundleFileName), bundle); err != nil {
+		t.Fatalf("MarshalFile(bundle) error = %v", err)
+	}
+	desiredStateDigest, err := hydrate.DigestBundle(bundleDir)
+	if err != nil {
+		t.Fatalf("DigestBundle() error = %v", err)
+	}
+	if _, err := state.PersistSuccessfulApply(clusterName, state.BOMReference{
+		Name:     bundle.Spec.BOMName,
+		Revision: bundle.Spec.Revision,
+		Channel:  bundle.Spec.Channel,
+	}, desiredStateDigest.String(), "local-rev-1", "patch-rev-1"); err != nil {
+		t.Fatalf("PersistSuccessfulApply() error = %v", err)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	cmd := newSyncCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		"status",
+		"--cluster", clusterName,
+		"--bundle-dir", bundleDir,
+		"--kubeconfig", "/tmp/test-kubeconfig",
+		"--host-root", localHostRoot,
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\noutput=%s", err, buf.String())
+	}
+
+	var out struct {
+		CurrentState          string `yaml:"currentState"`
+		Headline              string `yaml:"headline"`
+		DirtyHostPaths        []any  `yaml:"dirtyHostPaths"`
+		LocalInputHostSplits  []any  `yaml:"localInputHostSplits"`
+		OperatorActionSummary struct {
+			DirectCommitEligible int `yaml:"directCommitEligible"`
+		} `yaml:"operatorActionSummary"`
+	}
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal() error = %v\noutput=%s", err, buf.String())
+	}
+	if got, want := out.CurrentState, "Clean"; got != want {
+		t.Fatalf("currentState = %q, want %q\noutput=%s", got, want, buf.String())
+	}
+	if got := len(out.DirtyHostPaths); got != 0 {
+		t.Fatalf("len(dirtyHostPaths) = %d, want 0\noutput=%s", got, buf.String())
+	}
+	if got := len(out.LocalInputHostSplits); got != 0 {
+		t.Fatalf("len(localInputHostSplits) = %d, want 0\noutput=%s", got, buf.String())
+	}
+	if got := out.OperatorActionSummary.DirectCommitEligible; got != 0 {
+		t.Fatalf("directCommitEligible = %d, want 0\noutput=%s", got, buf.String())
+	}
+	if !strings.Contains(out.Headline, "dirtyHostPaths=0") ||
+		!strings.Contains(out.Headline, "localInputHostSplits=0") {
+		t.Fatalf("headline = %q, want kubeadm local input drift suppressed", out.Headline)
+	}
+}
+
 func TestSyncStatusCmdReportsLocalInputHostSplits(t *testing.T) {
 	previousRuntimeRoot := constants.DefaultRuntimeRootDir
 	runtimeRoot := previousRuntimeRoot
@@ -11101,6 +11294,40 @@ func TestStageSyncRemoteTrackedHostPathIsIdempotentForExistingFile(t *testing.T)
 	}
 	if got, want := string(data), "second"; got != want {
 		t.Fatalf("staged README content = %q, want %q", got, want)
+	}
+}
+
+func TestStageSyncRemoteTrackedHostPathPreservesRemoteFileMode(t *testing.T) {
+	tempRoot := t.TempDir()
+	remoteRoot := t.TempDir()
+	fakeRemote := &fakeSyncRemoteExecutor{
+		roots: map[string]string{
+			"192.168.0.240": remoteRoot,
+		},
+		fetchFileModeOverride: 0o644,
+	}
+	tracked := hydrate.TrackedHostPath{
+		HostPath:   "/usr/bin/kubelet",
+		BundlePath: "components/kubernetes/files/rootfs/usr/bin/kubelet",
+		Component:  "kubernetes",
+		Source:     hydrate.InventorySourcePackageManifest,
+		Ownership:  hydrate.InventoryOwnershipGlobal,
+		Type:       hydrate.HostPathRegularFile,
+	}
+	if err := writeSyncRemoteHostFixture(remoteRoot, tracked.HostPath, "kubelet", 0o755); err != nil {
+		t.Fatalf("writeSyncRemoteHostFixture() error = %v", err)
+	}
+
+	if err := stageSyncRemoteTrackedHostPath(fakeRemote, "192.168.0.240", tempRoot, tracked); err != nil {
+		t.Fatalf("stageSyncRemoteTrackedHostPath() error = %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(tempRoot, "usr", "bin", "kubelet"))
+	if err != nil {
+		t.Fatalf("Stat(staged kubelet) error = %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+		t.Fatalf("staged kubelet mode = %v, want %v", got, want)
 	}
 }
 
@@ -12438,8 +12665,9 @@ func (m *fakeSyncImageMounter) Unmount(string) error {
 }
 
 type fakeSyncRemoteExecutor struct {
-	roots map[string]string
-	cmds  []string
+	roots                 map[string]string
+	fetchFileModeOverride os.FileMode
+	cmds                  []string
 }
 
 func (f *fakeSyncRemoteExecutor) Copy(host, src, dst string) error {
@@ -12495,7 +12723,11 @@ func (f *fakeSyncRemoteExecutor) Fetch(host, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, info.Mode().Perm())
+	mode := info.Mode().Perm()
+	if f.fetchFileModeOverride != 0 {
+		mode = f.fetchFileModeOverride
+	}
+	return os.WriteFile(dst, data, mode)
 }
 
 func (f *fakeSyncRemoteExecutor) CmdAsyncWithContext(
@@ -12540,7 +12772,7 @@ func (f *fakeSyncRemoteExecutor) CmdToString(host, cmd, _ string) (string, error
 			}
 			return "symlink\n" + target, nil
 		case info.Mode().IsRegular():
-			return "file\n", nil
+			return fmt.Sprintf("file\n%o\n", info.Mode().Perm()), nil
 		case info.IsDir():
 			return "dir\n", nil
 		default:

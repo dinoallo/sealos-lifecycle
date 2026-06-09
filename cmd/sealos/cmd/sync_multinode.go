@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/labring/sealos/pkg/clusterfile"
@@ -29,6 +30,7 @@ import (
 	"github.com/labring/sealos/pkg/distribution/compare"
 	"github.com/labring/sealos/pkg/distribution/hydrate"
 	"github.com/labring/sealos/pkg/distribution/localrepo"
+	"github.com/labring/sealos/pkg/distribution/packageformat"
 	sealosexec "github.com/labring/sealos/pkg/exec"
 	"github.com/labring/sealos/pkg/ssh"
 	v1beta1 "github.com/labring/sealos/pkg/types/v1beta1"
@@ -696,6 +698,9 @@ func syncCompareBundle(
 			if !syncTrackedHostPathAppliesToHost(topology, host, status.Tracked) {
 				continue
 			}
+			if syncShouldSuppressMultiNodeGeneratedBootstrapInputHostPath(topology, bundle, status.Tracked) {
+				continue
+			}
 			hostStatuses = append(hostStatuses, status)
 		}
 	}
@@ -775,6 +780,54 @@ func syncTrackedHostPathAppliesToHost(
 	return true
 }
 
+func syncShouldSuppressMultiNodeGeneratedBootstrapInputHostPath(
+	topology *syncExecutionTopology,
+	bundle *hydrate.Bundle,
+	tracked hydrate.TrackedHostPath,
+) bool {
+	if topology == nil || topology.isSingleNode() {
+		return false
+	}
+	if tracked.Source != hydrate.InventorySourceLocalInput ||
+		tracked.ProjectionClass != hydrate.HostPathProjectionClassDirect ||
+		tracked.CompareStrategy != hydrate.HostPathCompareStrategyBytewiseFile {
+		return false
+	}
+	return tracked.Component == "kubernetes" &&
+		tracked.InputName == "kubeadm-cluster-config" &&
+		tracked.HostPath == "/etc/kubernetes/kubeadm.yaml" &&
+		syncBundleGeneratesKubeadmBootstrapConfig(bundle)
+}
+
+func syncBundleGeneratesKubeadmBootstrapConfig(bundle *hydrate.Bundle) bool {
+	if bundle == nil {
+		return false
+	}
+	for _, component := range bundle.Spec.Components {
+		if component.Name != "kubernetes" && component.PackageName != "kubernetes-rootfs" {
+			continue
+		}
+		hasConfig := false
+		hasBootstrapHook := false
+		for _, step := range component.Steps {
+			if step.Kind == hydrate.StepContent &&
+				step.ContentType == packageformat.ContentFile &&
+				step.SourcePath == "files/etc/kubernetes/kubeadm.yaml" {
+				hasConfig = true
+			}
+			if step.Kind == hydrate.StepHook &&
+				step.HookPhase == packageformat.PhaseBootstrap &&
+				step.Target == packageformat.TargetAllNodes {
+				hasBootstrapHook = true
+			}
+		}
+		if hasConfig && hasBootstrapHook {
+			return true
+		}
+	}
+	return false
+}
+
 func stageSyncRemoteHostRoot(
 	remoteExec syncRemoteExecutor,
 	topology *syncExecutionTopology,
@@ -812,11 +865,11 @@ func stageSyncRemoteTrackedHostPath(
 	if err != nil {
 		return err
 	}
-	kind, target, err := inspectSyncRemoteTrackedHostPath(remoteExec, host, tracked.HostPath)
+	remotePath, err := inspectSyncRemoteTrackedHostPath(remoteExec, host, tracked.HostPath)
 	if err != nil {
 		return err
 	}
-	switch kind {
+	switch remotePath.Kind {
 	case "missing":
 		return nil
 	case "file":
@@ -826,7 +879,13 @@ func stageSyncRemoteTrackedHostPath(
 		if err := prepareSyncStagedHostPath(dst, false); err != nil {
 			return err
 		}
-		return remoteExec.Fetch(host, tracked.HostPath, dst)
+		if err := remoteExec.Fetch(host, tracked.HostPath, dst); err != nil {
+			return err
+		}
+		if remotePath.Mode != 0 {
+			return os.Chmod(dst, remotePath.Mode)
+		}
+		return nil
 	case "symlink":
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
@@ -834,7 +893,7 @@ func stageSyncRemoteTrackedHostPath(
 		if err := prepareSyncStagedHostPath(dst, false); err != nil {
 			return err
 		}
-		return os.Symlink(target, dst)
+		return os.Symlink(remotePath.Target, dst)
 	case "dir", "other":
 		if err := prepareSyncStagedHostPath(dst, true); err != nil {
 			return err
@@ -843,7 +902,7 @@ func stageSyncRemoteTrackedHostPath(
 	default:
 		return fmt.Errorf(
 			"unsupported remote host path kind %q for %s on %s",
-			kind,
+			remotePath.Kind,
 			tracked.HostPath,
 			host,
 		)
@@ -870,10 +929,16 @@ func prepareSyncStagedHostPath(path string, wantDir bool) error {
 	return os.Remove(path)
 }
 
+type syncRemoteTrackedHostPathInfo struct {
+	Kind   string
+	Target string
+	Mode   os.FileMode
+}
+
 func inspectSyncRemoteTrackedHostPath(
 	remoteExec syncRemoteExecutor,
 	host, trackedHostPath string,
-) (string, string, error) {
+) (syncRemoteTrackedHostPathInfo, error) {
 	script := strings.Join([]string{
 		"path=" + syncShellQuote(trackedHostPath),
 		`if [ -L "$path" ]; then`,
@@ -881,6 +946,7 @@ func inspectSyncRemoteTrackedHostPath(
 		`  readlink "$path"`,
 		`elif [ -f "$path" ]; then`,
 		`  printf 'file\n'`,
+		`  stat -c '%a' "$path"`,
 		`elif [ -d "$path" ]; then`,
 		`  printf 'dir\n'`,
 		`elif [ -e "$path" ]; then`,
@@ -891,7 +957,7 @@ func inspectSyncRemoteTrackedHostPath(
 	}, "\n")
 	output, err := remoteExec.CmdToString(host, "/bin/bash -lc "+syncShellQuote(script), "\n")
 	if err != nil {
-		return "", "", fmt.Errorf(
+		return syncRemoteTrackedHostPathInfo{}, fmt.Errorf(
 			"inspect remote host path %s on %s: %w",
 			trackedHostPath,
 			host,
@@ -900,17 +966,34 @@ func inspectSyncRemoteTrackedHostPath(
 	}
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-		return "", "", fmt.Errorf(
+		return syncRemoteTrackedHostPathInfo{}, fmt.Errorf(
 			"inspect remote host path %s on %s returned empty result",
 			trackedHostPath,
 			host,
 		)
 	}
-	kind := strings.TrimSpace(lines[0])
-	if kind == "symlink" && len(lines) > 1 {
-		return kind, strings.TrimSpace(lines[1]), nil
+	info := syncRemoteTrackedHostPathInfo{Kind: strings.TrimSpace(lines[0])}
+	switch info.Kind {
+	case "file":
+		if len(lines) > 1 {
+			mode, err := strconv.ParseUint(strings.TrimSpace(lines[1]), 8, 32)
+			if err != nil {
+				return syncRemoteTrackedHostPathInfo{}, fmt.Errorf(
+					"inspect remote host path %s on %s returned invalid file mode %q: %w",
+					trackedHostPath,
+					host,
+					strings.TrimSpace(lines[1]),
+					err,
+				)
+			}
+			info.Mode = os.FileMode(mode)
+		}
+	case "symlink":
+		if len(lines) > 1 {
+			info.Target = strings.TrimSpace(lines[1])
+		}
 	}
-	return kind, "", nil
+	return info, nil
 }
 
 func syncShellQuote(value string) string {

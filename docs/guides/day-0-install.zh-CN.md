@@ -334,6 +334,11 @@ sudo $SEALOS sync status \
   --cluster "$CLUSTER"
 ```
 
+fresh-install 的 status gate 应该返回 `currentState: Clean`。multi-node
+bootstrap 中，`/etc/kubernetes/kubeadm.yaml` 是 kubeadm 生成的 per-host
+bootstrap 文件；成功 apply 后，status summary 不应再把它报告为 local-input
+`dirtyHostPaths` split。
+
 multi-node PoC 使用同一组命令，但 cluster name 需要已经有对应的 Sealos
 `Clusterfile` 和 SSH inventory。`sync render`、`sync plan`、`sync preflight`
 和 `sync apply` 会从 cluster state 里解析 `allNodes`、`firstMaster` 和

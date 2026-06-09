@@ -17,8 +17,10 @@ package reconcile
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -540,6 +542,29 @@ echo "cilium-health" >>"$TEST_LOG"
 		"kubernetes-healthcheck",
 	) {
 		t.Fatalf("kubernetes healthcheck ran before manifest apply\nfull log:\n%s", logText)
+	}
+}
+
+func TestRemoteRootfsApplyScriptReconcilesModeWhenContentMatches(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	rel := filepath.Join("usr", "lib", "systemd", "system", "demo.service")
+	writeFile(t, filepath.Join(src, rel), "unit\n", 0o644)
+	writeFile(t, filepath.Join(dst, rel), "unit\n", 0o664)
+
+	cmd := exec.Command("/bin/bash", "-lc", remoteRootfsApplyScript(src, dst))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("remoteRootfsApplyScript error = %v\noutput=%s", err, output)
+	}
+
+	info, err := os.Stat(filepath.Join(dst, rel))
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", rel, err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o644); got != want {
+		t.Fatalf("%s mode = %v, want %v", rel, got, want)
 	}
 }
 
@@ -2070,6 +2095,7 @@ func TestApplyFetchesKubeconfigFromRemoteFirstMasterForClusterSteps(t *testing.T
 	})
 
 	fakeRemote := &fakeApplyRemoteExecutor{
+		rejectExistingFetchDestination: true,
 		fetchContents: map[string][]byte{
 			"10.0.0.10:22:/etc/kubernetes/admin.conf": []byte("apiVersion: v1\nkind: Config\n"),
 		},
@@ -2282,6 +2308,9 @@ exit 0
 	persistRenderedStateForBundle(t, "cluster-a", bundleDir, bundle)
 
 	kubeconfigPath := filepath.Join(t.TempDir(), "admin.conf")
+	if err := os.WriteFile(kubeconfigPath, []byte("stale single-node kubeconfig\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stale kubeconfig) error = %v", err)
+	}
 	result, err := Apply(ApplyOptions{
 		ClusterName:    "cluster-a",
 		BundlePath:     bundleDir,
@@ -2302,6 +2331,9 @@ exit 0
 	}
 	if got, want := fakeRemote.fetchOps[0].src, "/etc/kubernetes/admin.conf"; got != want {
 		t.Fatalf("fetch src = %q, want %q", got, want)
+	}
+	if got := fakeRemote.fetchOps[0].dst; got == kubeconfigPath {
+		t.Fatalf("fetch dst = %q, want temporary path so existing kubeconfig can be replaced atomically", got)
 	}
 	if data, err := os.ReadFile(kubeconfigPath); err != nil ||
 		!strings.Contains(string(data), "kind: Config") {
@@ -3533,12 +3565,13 @@ func writeClusterInventory(t *testing.T, clusterName string, hosts []v1beta1.Hos
 }
 
 type fakeApplyRemoteExecutor struct {
-	copyOps       []fakeRemoteCopy
-	fetchOps      []fakeRemoteFetch
-	cmdOps        []fakeRemoteCommand
-	outputs       []fakeRemoteCommandOutput
-	errors        []fakeRemoteCommandError
-	fetchContents map[string][]byte
+	copyOps                        []fakeRemoteCopy
+	fetchOps                       []fakeRemoteFetch
+	cmdOps                         []fakeRemoteCommand
+	outputs                        []fakeRemoteCommandOutput
+	errors                         []fakeRemoteCommandError
+	fetchContents                  map[string][]byte
+	rejectExistingFetchDestination bool
 }
 
 type fakeRemoteCopy struct {
@@ -3585,6 +3618,13 @@ func (f *fakeApplyRemoteExecutor) Copy(host, src, dst string) error {
 
 func (f *fakeApplyRemoteExecutor) Fetch(host, src, dst string) error {
 	f.fetchOps = append(f.fetchOps, fakeRemoteFetch{host: host, src: src, dst: dst})
+	if f.rejectExistingFetchDestination {
+		if _, err := os.Stat(dst); err == nil {
+			return fmt.Errorf("local file %s already exists", dst)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

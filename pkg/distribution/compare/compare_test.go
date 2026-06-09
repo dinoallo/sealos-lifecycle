@@ -283,6 +283,88 @@ func TestCompareBundleMarksPolicyEligibleOrphanObjectRemediation(t *testing.T) {
 	}
 }
 
+func TestCompareBundleIgnoresProbeDefaultZeroValues(t *testing.T) {
+	t.Parallel()
+
+	bundleRoot := t.TempDir()
+	manifestPath := filepath.Join(
+		bundleRoot,
+		"components",
+		"cilium",
+		"files",
+		"manifests",
+		"cilium.yaml",
+	)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(manifestPath, []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cilium-operator
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: cilium-operator
+          image: quay.io/cilium/operator-generic:v1.15.0
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9234
+            initialDelaySeconds: 0
+            periodSeconds: 5
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	bundle := &hydrate.Bundle{
+		Spec: hydrate.BundleSpec{
+			TrackedK8sObjects: []hydrate.TrackedK8sObject{{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Namespace:  "kube-system",
+				Name:       "cilium-operator",
+				Path:       "components/cilium/files/manifests/cilium.yaml",
+				Component:  "cilium",
+				Source:     hydrate.InventorySourcePackageManifest,
+				Ownership:  hydrate.InventoryOwnershipGlobal,
+			}},
+		},
+	}
+
+	result, err := CompareBundle(
+		bundle,
+		bundleRoot,
+		resolverFunc(func(apiVersion, kind, namespace, name string) ([]byte, error) {
+			return []byte(`{
+				"apiVersion":"apps/v1",
+				"kind":"Deployment",
+				"metadata":{"name":"cilium-operator","namespace":"kube-system","resourceVersion":"7"},
+				"spec":{"template":{"spec":{"containers":[{
+					"name":"cilium-operator",
+					"image":"quay.io/cilium/operator-generic:v1.15.0",
+					"readinessProbe":{
+						"httpGet":{"path":"/healthz","port":9234},
+						"periodSeconds":5
+					}
+				}]}}}
+			}`), nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("CompareBundle() error = %v", err)
+	}
+	if got, want := result.Summary.Clean, 1; got != want {
+		t.Fatalf("summary.clean = %d, want %d\nresult=%#v", got, want, result)
+	}
+	if got, want := len(result.Objects[0].Mismatches), 0; got != want {
+		t.Fatalf("len(mismatches) = %d, want %d: %#v", got, want, result.Objects[0].Mismatches)
+	}
+}
+
 func TestCompareBundleUsesRenderedLocalPatchPolicy(t *testing.T) {
 	t.Parallel()
 

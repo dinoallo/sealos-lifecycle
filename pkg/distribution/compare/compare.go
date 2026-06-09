@@ -2234,6 +2234,7 @@ func normalizeObject(object map[string]any) {
 	if kind, ok := object["kind"].(string); ok && kind == "Secret" {
 		normalizeSecret(object)
 	}
+	normalizeProbeDefaultZeroValues(object)
 
 	metadata, ok := object["metadata"].(map[string]any)
 	if !ok {
@@ -2263,6 +2264,58 @@ func normalizeObject(object map[string]any) {
 		if len(annotations) == 0 {
 			delete(metadata, "annotations")
 		}
+	}
+}
+
+func normalizeProbeDefaultZeroValues(object any) {
+	switch typed := object.(type) {
+	case map[string]any:
+		if isProbeMap(typed) {
+			removeZeroField(typed, "initialDelaySeconds")
+			removeZeroField(typed, "timeoutSeconds")
+			removeZeroField(typed, "periodSeconds")
+			removeZeroField(typed, "successThreshold")
+			removeZeroField(typed, "failureThreshold")
+			removeZeroField(typed, "terminationGracePeriodSeconds")
+		}
+		for _, value := range typed {
+			normalizeProbeDefaultZeroValues(value)
+		}
+	case []any:
+		for _, value := range typed {
+			normalizeProbeDefaultZeroValues(value)
+		}
+	}
+}
+
+func isProbeMap(value map[string]any) bool {
+	for _, key := range []string{"exec", "httpGet", "grpc", "tcpSocket"} {
+		if _, ok := value[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func removeZeroField(value map[string]any, key string) {
+	if !numericZero(value[key]) {
+		return
+	}
+	delete(value, key)
+}
+
+func numericZero(value any) bool {
+	switch typed := value.(type) {
+	case int:
+		return typed == 0
+	case int32:
+		return typed == 0
+	case int64:
+		return typed == 0
+	case float64:
+		return typed == 0
+	default:
+		return false
 	}
 }
 

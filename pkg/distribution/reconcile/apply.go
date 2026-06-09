@@ -1119,12 +1119,12 @@ func (e *bundleExecutor) ensureLocalKubeconfig() error {
 	if strings.TrimSpace(e.kubeconfigPath) == "" {
 		return fmt.Errorf("kubeconfig path cannot be empty")
 	}
-	if _, err := os.Stat(e.kubeconfigPath); err == nil {
-		return nil
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	if e.topology == nil || e.topology.hasLocalExecutionHost() {
+		if _, err := os.Stat(e.kubeconfigPath); err == nil {
+			return nil
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		return nil
 	}
 	firstMasterHosts, err := e.resolveTargetHosts(packageformat.TargetFirstMaster)
@@ -1132,6 +1132,11 @@ func (e *bundleExecutor) ensureLocalKubeconfig() error {
 		return err
 	}
 	if len(firstMasterHosts) != 1 || isLocalExecutionHost(firstMasterHosts[0]) {
+		if _, err := os.Stat(e.kubeconfigPath); err == nil {
+			return nil
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		return nil
 	}
 	if e.remoteExec == nil {
@@ -1140,9 +1145,31 @@ func (e *bundleExecutor) ensureLocalKubeconfig() error {
 	if err := os.MkdirAll(filepath.Dir(e.kubeconfigPath), 0o700); err != nil {
 		return err
 	}
+	tmpFile, err := os.CreateTemp(filepath.Dir(e.kubeconfigPath), filepath.Base(e.kubeconfigPath)+".fetch-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
 	e.logf("fetching kubeconfig from first master %q to %q", firstMasterHosts[0], e.kubeconfigPath)
-	if err := e.remoteExec.Fetch(firstMasterHosts[0], "/etc/kubernetes/admin.conf", e.kubeconfigPath); err != nil {
+	if err := e.remoteExec.Fetch(firstMasterHosts[0], "/etc/kubernetes/admin.conf", tmpPath); err != nil {
 		return fmt.Errorf("fetch kubeconfig from first master %q: %w", firstMasterHosts[0], err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("secure fetched kubeconfig %q: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, e.kubeconfigPath); err != nil {
+		return fmt.Errorf("install fetched kubeconfig %q: %w", e.kubeconfigPath, err)
 	}
 	return nil
 }
@@ -1729,12 +1756,16 @@ func (e *bundleExecutor) applyRemoteRootfs(host string, step hydrate.RenderedSte
 	if err != nil {
 		return err
 	}
-	script := fmt.Sprintf(
-		"src=%s\ndst=%s\nmkdir -p \"$dst\"\ncd \"$src\"\nfind . -mindepth 1 | while IFS= read -r rel; do\n  rel=${rel#./}\n  from=\"$src/$rel\"\n  to=\"$dst/$rel\"\n  if [ -d \"$from\" ] && [ ! -L \"$from\" ]; then\n    mkdir -p \"$to\"\n    continue\n  fi\n  mkdir -p \"$(dirname \"$to\")\"\n  if [ -L \"$from\" ]; then\n    link_target=\"$(readlink \"$from\")\"\n    if [ -L \"$to\" ] && [ \"$(readlink \"$to\")\" = \"$link_target\" ]; then\n      continue\n    fi\n    rm -rf \"$to\"\n    ln -s \"$link_target\" \"$to\"\n    continue\n  fi\n  if [ -f \"$from\" ]; then\n    if [ -f \"$to\" ] && cmp -s \"$from\" \"$to\"; then\n      continue\n    fi\n    cp -a \"$from\" \"$to\"\n    continue\n  fi\n  echo \"unsupported rootfs entry type: $from\" >&2\n  exit 1\ndone\n",
-		shellQuote(src),
-		shellQuote(e.hostRoot),
-	)
+	script := remoteRootfsApplyScript(src, e.hostRoot)
 	return e.runShellOnHost(host, step.TimeoutSeconds, nil, script)
+}
+
+func remoteRootfsApplyScript(src, dst string) string {
+	return fmt.Sprintf(
+		"src=%s\ndst=%s\nmkdir -p \"$dst\"\ncd \"$src\"\nfind . -mindepth 1 | while IFS= read -r rel; do\n  rel=${rel#./}\n  from=\"$src/$rel\"\n  to=\"$dst/$rel\"\n  if [ -d \"$from\" ] && [ ! -L \"$from\" ]; then\n    mkdir -p \"$to\"\n    chmod --reference=\"$from\" \"$to\"\n    continue\n  fi\n  mkdir -p \"$(dirname \"$to\")\"\n  if [ -L \"$from\" ]; then\n    link_target=\"$(readlink \"$from\")\"\n    if [ -L \"$to\" ] && [ \"$(readlink \"$to\")\" = \"$link_target\" ]; then\n      continue\n    fi\n    rm -rf \"$to\"\n    ln -s \"$link_target\" \"$to\"\n    continue\n  fi\n  if [ -f \"$from\" ]; then\n    if [ -f \"$to\" ] && cmp -s \"$from\" \"$to\"; then\n      chmod --reference=\"$from\" \"$to\"\n      continue\n    fi\n    cp -a \"$from\" \"$to\"\n    continue\n  fi\n  echo \"unsupported rootfs entry type: $from\" >&2\n  exit 1\ndone\n",
+		shellQuote(src),
+		shellQuote(dst),
+	)
 }
 
 func (e *bundleExecutor) applyRemoteFile(host string, step hydrate.RenderedStep) error {
