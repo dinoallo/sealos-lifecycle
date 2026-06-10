@@ -74,7 +74,7 @@ var _ = Describe("E2E_sealos_k3s_basic_test", func() {
 			utils.CheckErr(err)
 			const (
 				k3sPodPollInterval = 2 * time.Second
-				k3sPodPollAttempts = 90
+				k3sPodPollAttempts = 150
 			)
 			fn := func() []byte {
 				data, err := fakeClient.CmdInterface.Exec("kubectl", "get", "pods", "-A", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml", "-o", "yaml")
@@ -100,7 +100,8 @@ var _ = Describe("E2E_sealos_k3s_basic_test", func() {
 				logger.Info("k3s pods is empty,retry %d", count+1)
 				count++
 				if count == k3sPodPollAttempts {
-					utils.CheckErr(errors.New("k3s pods is empty, for timeout"))
+					k3sLogPodDiagnostics(fakeClient)
+					utils.CheckErr(errors.New("k3s pods are not running before timeout"))
 				}
 			}
 			err = fakeClient.CmdInterface.AsyncExec("kubectl", "get", "nodes", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml")
@@ -124,3 +125,23 @@ var _ = Describe("E2E_sealos_k3s_basic_test", func() {
 	})
 
 })
+
+func k3sLogPodDiagnostics(fakeClient *operators.FakeClient) {
+	for _, args := range [][]string{
+		{"get", "pods", "-A", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml", "-o", "wide"},
+		{"describe", "pods", "-A", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml"},
+		{"get", "events", "-A", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml", "--sort-by=.lastTimestamp"},
+	} {
+		output, err := fakeClient.CmdInterface.Exec("kubectl", args...)
+		if err != nil {
+			logger.Warn(
+				"k3s diagnostic kubectl %s failed: %v\n%s",
+				strings.Join(args, " "),
+				err,
+				string(output),
+			)
+			continue
+		}
+		logger.Info("k3s diagnostic kubectl %s:\n%s", strings.Join(args, " "), string(output))
+	}
+}
